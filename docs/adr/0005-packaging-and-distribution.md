@@ -37,6 +37,19 @@ poor permission UX. Rejected for macOS (fine for Linuxbrew).
 **Cons:** the sandbox blocks window/pointer/idle access and process-tree
 walking. Not worth it.
 
+## Open-source constraints
+
+The project is non-commercial, so signing costs need an owner:
+- **Windows:** SignPath Foundation offers free Authenticode signing for OSS
+  projects. Apply once the repo has a release history.
+- **macOS:** notarization needs an Apple Developer account ($99/yr). Without
+  it, ship unsigned and document `xattr -d com.apple.quarantine`. Expect
+  Homebrew to refuse or disable casks that fail Gatekeeper checks, so plan
+  for a funded account (GitHub Sponsors / Open Collective).
+- **Optional Laya sidecar (ADR-0006):** ONNX Runtime shared libraries per
+  OS ship in the sidecar package. Model weights are downloaded at runtime,
+  pinned by SHA-256, and never put in the package.
+
 ## Consequences
 
 - Easier: one pipeline, reproducible releases, simple user install commands.

@@ -6,7 +6,8 @@
 [0002](adr/0002-attention-model-over-active-window.md) ·
 [0003](adr/0003-instrumentation-via-hooks.md) ·
 [0004](adr/0004-modelling-strategy.md) ·
-[0005](adr/0005-packaging-and-distribution.md)
+[0005](adr/0005-packaging-and-distribution.md) ·
+[0006](adr/0006-decision-model-for-classification.md)
 
 ---
 
@@ -19,9 +20,15 @@ they use), learns their personal baseline, and produces:
 2. a **trajectory**: if current trends continue, roughly how many weeks until
    they cross their personal burnout-risk threshold.
 
-The first target user is a software developer. Developers spend a lot of time
-in terminals and, more and more, working alongside AI coding agents such as
-Claude Code. Time spent on app usage alone misses most of what matters there.
+**Audience:** developers first, then students, researchers and project
+managers. Developers spend a lot of time in terminals and, more and more,
+working alongside AI coding agents such as Claude Code; time spent on app
+usage alone misses most of what matters there. The other groups live mostly
+in the browser, documents and meetings. So collectors are pluggable, and
+"what is this activity?" has to be answered per role (see §4.6).
+
+**Project model:** fully open source and non-commercial. There is **no
+server**: every component runs on the user's machine.
 
 > **This is not a diagnostic tool.** It gives behavioural risk signals and must say
 > so in the product. Burnout is a clinical/occupational construct (WHO ICD-11
@@ -43,7 +50,9 @@ Claude Code. Time spent on app usage alone misses most of what matters there.
 | F6 | Show today/week/trend in a local dashboard, a tray icon and a CLI (`burnout status`) | 1 |
 | F7 | Short periodic self-check-ins (labels for the model) | 1 |
 | F8 | Forecast time-to-threshold | 2 |
-| F9 | Browser extension: per-tab domain + visibility, via native messaging to the agent | 3 |
+| F9 | Browser extension: per-tab domain + visibility, via native messaging to the agent | 2 |
+| F11 | Role profiles (developer / student / researcher / PM) and role-aware activity classification | 1 (rules), 2 (Laya) |
+| F12 | Calendar free/busy blocks via ICS | 1 |
 | F10 | Optional, opt-in, end-to-end-encrypted multi-device sync | 4 |
 
 ### 2.2 Non-functional
@@ -67,9 +76,13 @@ Claude Code. Time spent on app usage alone misses most of what matters there.
   (see §6 and ADR-0004).
 - On macOS and Wayland, OS permission models restrict what we can see. The
   design treats every signal as optional and degrades gracefully.
-- "jev" from the original brief is assumed to mean **JAX** (or a Python ML
-  stack in general). See ADR-0004: whatever is used for research, **inference
-  ships in pure Go**.
+- "jev" in the brief is **Jev**, TypeSafe AI's closed, cloud-hosted
+  "System One" decision model. Its open-weight counterpart is **Laya** (Convai
+  Innovations, Apache-2.0). Both answer typed questions (choice / score /
+  yes-no) about a text "state". Neither forecasts time series. Our decision:
+  the burnout score stays a pure-Go statistical model (ADR-0004), and Laya runs
+  **locally and optionally** as an activity classifier (ADR-0006). Jev is not
+  used, because it would send activity data to a third-party cloud.
 
 ---
 
@@ -303,7 +316,7 @@ a local OTLP endpoint in the agent as a cross-check.
 `Translate(raw) []Event`) lets us add Codex CLI, Aider, Cursor and others
 later without changing the sessionizer.
 
-### 4.4 Browser (Phase 3)
+### 4.4 Browser (Phase 2)
 
 A WebExtension (Chrome/Edge/Firefox) reports per-tab **domain** (not full
 URL by default), `document.visibilityState`, audible state and window ID to
@@ -325,6 +338,55 @@ These run weekly, plus an optional daily one-tap mood prompt, from the tray:
 
 Check-ins are the ground truth that eventually turns the heuristic score
 into a learned model (§6). The UX must keep them very light: about 30 s a week.
+
+### 4.6 Activity classification (role-aware)
+
+A static app→category map works for developers ("iTerm = terminal"). It
+fails for everyone who spends the day in a browser. "Chrome" can be lecture
+notes, Jira, a literature search or YouTube. The categories also depend on the
+role: for a student, Overleaf is *coursework*; for a PM, Figma is *review*.
+
+Onboarding asks for a **role profile** (developer / student / researcher /
+PM / custom). Each profile ships a category taxonomy and default feature
+weights. Classification is a cascade, cheapest step first:
+
+```
+activity (app id, domain, window title*, argv0)
+   │
+   ├─► 1. bundled rules (app ids, domains, commands)     ~80% of time, µs
+   ├─► 2. user overrides ("always count notion.so as planning")
+   ├─► 3. cache (hash → category)
+   ├─► 4. Laya, local, optional (ADR-0006)              unique items only, batched
+   │       state:    "app=Chrome domain=overleaf.com title=<redacted-ish>"
+   │       question: Choice[coursework, research, comms, admin, entertainment, …]
+   │       → category + probability; < 0.6 → "uncategorized"
+   └─► 5. "uncategorized" + ask the user in the weekly review
+```
+
+\* Window titles are classified **in memory** and then thrown away. We store
+only the category and a hash. With a local model, title classification can
+be enabled without ever persisting titles, which is a privacy improvement over
+the status quo.
+
+Laya can also score free-text check-in notes (optional) against fixed
+questions such as "exhaustion: none/some/high". The text stays on the device
+and is never stored after scoring.
+
+### 4.7 Calendar busy blocks (Phase 1, lite)
+
+Device signals miss in-person meetings and undercount call-heavy days, which
+matter a lot for PMs and researchers. We read **only free/busy intervals**:
+start, end and busy status. No titles, attendees or locations. Sources:
+
+- **Phase 1:** a private ICS URL or `.ics` file. Google, Outlook and iCloud
+  all provide one. This is pure Go and needs no OAuth app. That matters for an
+  open-source project without a server, which can't keep an OAuth client
+  secret.
+- **Phase 2:** the OS calendar (macOS EventKit; Windows via Outlook/Graph only
+  if requested).
+
+Features: meeting hours, back-to-back chains, fragmentation of the
+remaining free time, after-hours meetings.
 
 ---
 
@@ -440,18 +502,27 @@ When a user has about 8 or more weekly check-ins:
 
 - **Per-user model:** ordinal or Bayesian logistic regression of CBI band on
   lagged weekly features. Strong priors keep it stable with few points.
-- **Population priors (opt-in only):** if users choose to donate anonymised
-  weekly feature vectors and check-in scores, train a hierarchical model
-  offline. Ship only the priors and coefficients with app updates; no raw data
-  leaves the device.
+- **Population priors (opt-in only):** there is no server, so "donation"
+  means the user runs `burnout export --research`. That writes an anonymised
+  file of weekly feature vectors and check-in scores, which they can choose to
+  contribute to a public research dataset (for example a PR to a data repo or
+  a university study). Priors trained offline on it ship as coefficients in
+  releases.
 - **Survival framing:** time-to-"high-burnout band" as a discrete-time hazard
   model. This needs cohort data, so it is Phase 4 research.
 
-**Stack:** research and training in Python (JAX / NumPy / scikit-learn /
-PyMC) on donated or synthetic data. Export coefficients as JSON. **Inference
-runs in pure Go** (gonum), with no Python or ONNX runtime in the shipped
-binary. If we later need tree models, `leaves` (pure-Go LightGBM/XGBoost
-inference) is the escape hatch. See ADR-0004.
+**Stack:** research and training in Python (NumPy / scikit-learn / PyMC) on
+donated or synthetic data. Export coefficients as JSON. **Inference runs in
+pure Go** (gonum), with no Python runtime in the shipped binary. If we later
+need tree models, `leaves` (pure-Go LightGBM/XGBoost inference) is the escape
+hatch. See ADR-0004.
+
+**Where Jev/Laya fit:** they are *decision models over text*, not
+time-series models. Asking Laya "given these 30 days of features, what is
+the burnout risk?" would give an uncalibrated, unexplainable number. It
+would ignore the user's personal baseline and repeat statistics we already
+compute exactly. So they classify inputs (§4.6), and the statistics produce
+the score. See ADR-0006.
 
 ---
 
@@ -534,7 +605,7 @@ the product.
   KWin script. Flatpak sandboxing would block most collectors, so skip it.
 - **Windows:** winget + Scoop, MSI via WiX, and Authenticode signing (to
   avoid SmartScreen warnings).
-- **Browser (P3):** Chrome Web Store, Firefox AMO, Edge Add-ons. The installer
+- **Browser (P2):** Chrome Web Store, Firefox AMO, Edge Add-ons. The installer
   registers the native messaging host manifest.
 
 ---
@@ -544,6 +615,7 @@ the product.
 ```
 burnout-tracker/
 ├── cmd/burnout/                 # single binary: daemon, emit, hook, status, doctor, install-hooks
+├── cmd/burnout-classify/        # optional Laya sidecar (ONNX Runtime)
 ├── internal/
 │   ├── collector/               # interface + per-OS impls (build tags)
 │   │   ├── darwin/  windows/  x11/  wayland/{gnome,kde,wlroots}/
@@ -555,6 +627,8 @@ burnout-tracker/
 │   ├── attention/               # attention engine (pure, heavily unit-tested)
 │   ├── store/                   # sqlite, migrations, retention
 │   ├── features/                # daily feature extraction (versioned)
+│   ├── classify/                # rules → overrides → cache → Laya sidecar cascade
+│   ├── calendar/                # ICS free/busy import
 │   ├── score/                   # baseline, strain, forecast, model inference
 │   ├── api/                     # local HTTP/datagram server
 │   └── ui/                      # tray + embedded dashboard assets
@@ -577,11 +651,11 @@ them in tests, so tuning doesn't depend on any particular OS.
 
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
-| **0: Spike (2–3 wks)** | macOS + Windows focus/idle/pointer collectors, zsh hook, Claude Code hooks, SQLite, `burnout status` | One developer's full day captured correctly on a 2-monitor setup; manual timeline matches reality within 10% |
-| **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, daily features, heuristic strain, dashboard, weekly check-in, Homebrew/winget/deb | 10–20 alpha users run it for 4 weeks; < 1% CPU; no shell regressions |
-| **2: Personalised** | Trend forecast, per-user learned model from check-ins, KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
-| **3: Browser** | Extension + native messaging, tab-level attention | — |
-| **4: Research** | Opt-in donation, population priors, survival model; optional E2E sync | Ethics/privacy review done before any data collection |
+| **0: Spike (2–3 wks)** | macOS + Windows focus/idle/pointer collectors, zsh hook, Claude Code hooks, SQLite, `burnout status`. **Laya spike** in parallel: CPU latency, RAM and accuracy on 500 hand-labelled titles/domains vs. rules-only | One developer's full day captured correctly on a 2-monitor setup; manual timeline matches reality within 10%. Go/no-go on Laya |
+| **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, role profiles + rules classifier, ICS busy blocks, daily features, heuristic strain, dashboard, weekly check-in, Homebrew/winget/deb | 10–20 alpha users (mixed roles) run it for 4 weeks; < 1% CPU; no shell regressions |
+| **2: Personalised + browser** | Trend forecast, per-user learned model from check-ins, optional Laya classifier, browser extension (moved up because non-dev roles live in the browser), KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
+| **3: Integrations** | More agent adapters (Codex, Aider, Cursor), OS calendars, editor plugins | — |
+| **4: Research** | `export --research`, population priors, survival model; optional peer-to-peer E2E sync | Ethics/privacy review done before any dataset is published |
 
 ---
 
@@ -598,15 +672,21 @@ them in tests, so tuning doesn't depend on any particular OS.
 
 ---
 
-## 14. Open questions
+## 14. Resolved questions
 
-1. **"jev":** confirm what was meant (JAX? a specific library?). The design
-   assumes Python research → pure-Go inference either way.
-2. **Audience:** developers only at first, or knowledge workers generally?
-   This changes how much effort goes into terminal/agent features versus
-   comms/meeting features.
-3. **Business model:** open-source core plus a paid tier? It affects
-   whether sync and population models are ever server-side.
-4. **Calendar integration:** meetings are a big load factor. Reading
-   calendar *metadata* (busy blocks only) via local CalDAV/ICS or the OS
-   calendar is cheap and high-value. Should it go in Phase 1?
+1. **"jev":** TypeSafe's Jev (closed, cloud). The design uses its
+   open-weight counterpart Laya, optionally and locally, for classification
+   only (ADR-0006).
+2. **Audience:** developers first, then students, researchers and PMs →
+   role profiles, a classification cascade, and the browser extension moved
+   up to Phase 2.
+3. **Business model:** none; open source → no server, research export
+   instead of telemetry, free signing options (ADR-0005).
+4. **Calendar:** free/busy only, via ICS in Phase 1 (§4.7).
+
+## 15. Open questions
+
+1. **Licence:** Apache-2.0 (matches Laya, permissive) is the suggestion. The
+   GNOME Shell extension has to be GPL-2.0-or-later regardless.
+2. **Apple signing:** someone needs an Apple Developer account
+   ($99/yr) for notarization, or macOS ships via a documented unsigned path.

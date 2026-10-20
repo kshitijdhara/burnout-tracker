@@ -6,8 +6,9 @@
 
 ## Context
 
-The brief asks for a predictive model ("jev", assumed to mean JAX or a Python
-ML stack). Two problems:
+The brief proposed Jev (TypeSafe AI's System One decision model) for
+predictive modelling. ADR-0006 covers why Jev/Laya are used for
+classification, not scoring. Scoring has two problems of its own:
 
 1. **No labels on day one.** Burnout isn't observable from device usage;
    we need ground truth (self-report) before any supervised model is meaningful.
@@ -25,7 +26,7 @@ ML stack). Two problems:
   features, and a trend forecast for time-to-threshold with uncertainty bands.
 - **Phase 4:** population priors and a hazard model trained offline on
   opt-in donated aggregates.
-- **Stack:** research and training in Python (JAX/NumPy/PyMC/scikit-learn).
+- **Stack:** research and training in Python (NumPy/PyMC/scikit-learn).
   Ship coefficients as JSON; **inference in pure Go** (gonum). `leaves`
   (pure-Go GBDT inference) is the escape hatch if tree models win.
 
@@ -47,6 +48,9 @@ ML stack). Two problems:
 
 ### Option C: Bundle Python/JAX
 Rejected: hundreds of MB, fragile installs, and much larger attack surface.
+
+### Option E: Ask a decision model (Jev/Laya) for the score
+Rejected: see ADR-0006. These models decide over text, not time series.
 
 ### Option D: Supervised model from day one
 Rejected: no labels, so any "prediction" would be made-up thresholds

@@ -16,4 +16,5 @@ Design phase. Start here:
   [0002 attention model](docs/adr/0002-attention-model-over-active-window.md) ·
   [0003 hooks instrumentation](docs/adr/0003-instrumentation-via-hooks.md) ·
   [0004 modelling strategy](docs/adr/0004-modelling-strategy.md) ·
-  [0005 packaging](docs/adr/0005-packaging-and-distribution.md)
+  [0005 packaging](docs/adr/0005-packaging-and-distribution.md) ·
+  [0006 Laya/Jev for classification](docs/adr/0006-decision-model-for-classification.md)
