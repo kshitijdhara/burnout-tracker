@@ -18,3 +18,4 @@ Design phase. Start here:
   [0004 modelling strategy](docs/adr/0004-modelling-strategy.md) ·
   [0005 packaging via GitHub Releases](docs/adr/0005-packaging-and-distribution.md) ·
   [0006 Laya/Jev for classification](docs/adr/0006-decision-model-for-classification.md)
+- [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md): open findings to resolve before Phase 0
