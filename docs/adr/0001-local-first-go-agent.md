@@ -7,7 +7,7 @@
 ## Context
 
 The app runs all day on users' machines, collects sensitive behavioural data
-and must ship to macOS, Windows and Linux through package managers. The
+and must ship to macOS, Windows and Linux as packages served from GitHub Releases. The
 constraints are a small team, a strict resource budget (< 1% CPU, < 60 MB RAM)
 and a trust-first product.
 

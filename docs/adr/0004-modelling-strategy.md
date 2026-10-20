@@ -13,7 +13,7 @@ classification, not scoring. Scoring has two problems of its own:
 1. **No labels on day one.** Burnout isn't observable from device usage;
    we need ground truth (self-report) before any supervised model is meaningful.
 2. **Runtime.** The model has to run on-device inside a Go agent shipped via
-   package managers.
+   GitHub Releases.
 
 ## Decision
 

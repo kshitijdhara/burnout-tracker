@@ -37,7 +37,8 @@ Two separate problems could use such a model:
   used to produce the burnout score.
 - **Laya is an optional, local classifier**, step 4 of the classification
   cascade (rules → user overrides → cache → Laya → ask the user). It is
-  downloaded on demand (`burnout model pull laya`), never bundled, and runs in
+  downloaded on demand (`burnout model pull laya`, from a `models-*` release in
+  this repo), never bundled, and runs in
   a **sidecar process** (`burnout-classify`) with ONNX Runtime. That keeps the
   main agent pure Go, small and crash-isolated.
 - **Jev is not used.** The `Classifier` interface would technically allow a
@@ -85,7 +86,7 @@ The value of a System One model here is turning unstructured context into
 typed answers, and classification is where we have that problem. Scoring is
 already structured numeric data, where per-user statistics are more accurate,
 calibrated and explainable. Running Laya out of process avoids cgo/ONNX in
-the main binary and keeps the Homebrew/winget package small. Users who never
+the main binary and keeps the release packages small. Users who never
 enable it pay nothing.
 
 ## Consequences

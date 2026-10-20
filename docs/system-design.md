@@ -66,7 +66,7 @@ server**: every component runs on the user's machine.
 | Disk | < 200 MB/year (raw events expire, aggregates are kept) |
 | Robustness | Agent crash must never break the user's shell or Claude Code. Hooks fail open and silently |
 | Platforms | macOS (Apple Silicon + Intel), Windows 10/11, Linux (X11, GNOME/KDE/wlroots Wayland) |
-| Install | `brew install`, `winget`/`scoop`, `.deb`/`.rpm`/AUR. Single binary plus platform glue |
+| Install | From GitHub Releases: `.dmg`, `.msi`, `.deb`/`.rpm`, tarballs, or the verified `install.sh`/`install.ps1`. Single binary plus platform glue |
 
 ### 2.3 Constraints and assumptions
 
@@ -588,25 +588,45 @@ the product.
    Write this down publicly.
 4. **Encrypted at rest**, and export/forget are always available.
 5. **Open source the agent.** People should be able to verify what is
-   collected, which also helps distribution through Homebrew and AUR.
+   collected. Binaries ship next to the source with signed provenance.
 
 ---
 
 ## 10. Packaging and distribution (summary; see ADR-0005)
 
-- **GoReleaser** builds and publishes everything from tags.
-- **macOS:** a signed and notarized `.app` bundle shipped through a
-  **Homebrew cask**. TCC permissions (Accessibility, Screen Recording, Input
-  Monitoring) attach to a signed bundle ID. A bare formula binary would get its
-  permissions attributed to the user's terminal. Build on macOS CI runners
-  because cgo cross-compiles poorly.
-- **Linux:** Homebrew formula (Linuxbrew), `.deb`/`.rpm` via nfpm, AUR, and
-  tarballs. Also ship the GNOME Shell extension (extensions.gnome.org) and a
-  KWin script. Flatpak sandboxing would block most collectors, so skip it.
-- **Windows:** winget + Scoop, MSI via WiX, and Authenticode signing (to
-  avoid SmartScreen warnings).
-- **Browser (P2):** Chrome Web Store, Firefox AMO, Edge Add-ons. The installer
-  registers the native messaging host manifest.
+Everything is built and served **from this GitHub repository's Releases**.
+There are no Homebrew, winget, Scoop, apt/rpm or AUR listings.
+
+- **GoReleaser** in GitHub Actions builds every artifact on `v*` tags:
+  - macOS: a `.dmg` with a signed, notarized universal `.app`
+  - Linux: `.deb`, `.rpm` and `.tar.gz`
+  - Windows: `.msi` and `.zip`
+  - the optional `burnout-classify` sidecar
+- **Supply chain:** each release carries `checksums.txt` signed with cosign
+  (keyless), GitHub build-provenance attestations and an SBOM.
+- **Install:** `install.sh` / `install.ps1` from the repo (download, verify,
+  install, `burnout service install`), or a manual download from Releases.
+- **The app takes over package-manager jobs:** `burnout service`,
+  `burnout update` (manual or opt-in weekly, signature-verified, atomic
+  swap) and `burnout uninstall [--purge]`.
+- **macOS:** TCC permissions attach to a signed bundle ID. Without
+  notarization, Gatekeeper blocks the download and permissions reset on every
+  update, so a Developer ID is still strongly recommended. Build on macOS CI
+  runners, because cgo cross-compiles poorly.
+- **Linux:** the packages install the systemd user unit, the GNOME Shell
+  extension and the KWin script. Flatpak sandboxing would block most
+  collectors, so skip it.
+- **Windows:** Authenticode via SignPath's free OSS programme, to avoid
+  SmartScreen warnings.
+- **Laya weights** are mirrored on a `models-*` release here (Apache-2.0,
+  NOTICE included) and pulled by SHA-256.
+- **Browser extension (P2), the one exception:** Chrome and Edge won't
+  install extensions from outside their stores, except in developer mode
+  ("Load unpacked") or via enterprise policy. Firefox accepts a
+  self-hosted `.xpi` only if Mozilla signs it as an *unlisted* add-on. Plan:
+  publish signed `.xpi` + unpacked `.zip` on Releases, and decide on store
+  listings when Phase 2 starts. The native messaging host manifest is
+  registered by `burnout install-browser`.
 
 ---
 
@@ -637,7 +657,8 @@ burnout-tracker/
 │   ├── kwin/
 │   └── browser/                 # Phase 3
 ├── research/                    # Python/JAX notebooks, synthetic data, model export
-├── packaging/                   # goreleaser, cask, nfpm, wix, launchd/systemd units
+├── packaging/                   # goreleaser, nfpm, wix, launchd/systemd units
+├── install.sh / install.ps1     # verified installers pulling from GitHub Releases
 └── docs/                        # this document + ADRs
 ```
 
@@ -652,7 +673,7 @@ them in tests, so tuning doesn't depend on any particular OS.
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
 | **0: Spike (2–3 wks)** | macOS + Windows focus/idle/pointer collectors, zsh hook, Claude Code hooks, SQLite, `burnout status`. **Laya spike** in parallel: CPU latency, RAM and accuracy on 500 hand-labelled titles/domains vs. rules-only | One developer's full day captured correctly on a 2-monitor setup; manual timeline matches reality within 10%. Go/no-go on Laya |
-| **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, role profiles + rules classifier, ICS busy blocks, daily features, heuristic strain, dashboard, weekly check-in, Homebrew/winget/deb | 10–20 alpha users (mixed roles) run it for 4 weeks; < 1% CPU; no shell regressions |
+| **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, role profiles + rules classifier, ICS busy blocks, daily features, heuristic strain, dashboard, weekly check-in, GitHub Releases pipeline + install scripts + `burnout update` | 10–20 alpha users (mixed roles) run it for 4 weeks; < 1% CPU; no shell regressions |
 | **2: Personalised + browser** | Trend forecast, per-user learned model from check-ins, optional Laya classifier, browser extension (moved up because non-dev roles live in the browser), KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
 | **3: Integrations** | More agent adapters (Codex, Aider, Cursor), OS calendars, editor plugins | — |
 | **4: Research** | `export --research`, population priors, survival model; optional peer-to-peer E2E sync | Ethics/privacy review done before any dataset is published |
