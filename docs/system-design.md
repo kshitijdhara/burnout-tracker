@@ -594,11 +594,14 @@ the product.
 
 ## 10. Packaging and distribution (summary; see ADR-0005)
 
-Everything is built and served **from this GitHub repository's Releases**.
-There are no Homebrew, winget, Scoop, apt/rpm or AUR listings.
+Everything is built and served **from this GitHub repository's Releases**,
+and everything is **free**: no paid accounts, certificates or hosting. Users
+download the package, along with anything it needs at runtime, and run it on
+their own device. There are no Homebrew, winget, Scoop, apt/rpm or AUR
+listings.
 
 - **GoReleaser** in GitHub Actions builds every artifact on `v*` tags:
-  - macOS: a `.dmg` with a signed, notarized universal `.app`
+  - macOS: a `.dmg` with an ad-hoc-signed universal `.app`
   - Linux: `.deb`, `.rpm` and `.tar.gz`
   - Windows: `.msi` and `.zip`
   - the optional `burnout-classify` sidecar
@@ -609,15 +612,24 @@ There are no Homebrew, winget, Scoop, apt/rpm or AUR listings.
 - **The app takes over package-manager jobs:** `burnout service`,
   `burnout update` (manual or opt-in weekly, signature-verified, atomic
   swap) and `burnout uninstall [--purge]`.
-- **macOS:** TCC permissions attach to a signed bundle ID. Without
-  notarization, Gatekeeper blocks the download and permissions reset on every
-  update, so a Developer ID is still strongly recommended. Build on macOS CI
-  runners, because cgo cross-compiles poorly.
+- **No extra requirements:** a single static binary. The Linux desktop
+  bridges, the Laya sidecar (ONNX Runtime bundled) and the model weights are
+  all release assets here. Building from source needs only Go.
+- **macOS, without a paid Apple account:**
+  - No notarization. `install.sh` uses `curl`, which doesn't set the
+    quarantine flag; `.dmg` users click "Open Anyway" once.
+  - `burnout setup-signing` creates a self-signed code-signing cert in the
+    user's own keychain and re-signs the app on install and every update. The
+    signing identity stays stable, so Accessibility and Screen Recording
+    permissions survive updates (yabai uses the same approach).
+  - Build on macOS CI runners (free for public repos), because cgo
+    cross-compiles poorly.
 - **Linux:** the packages install the systemd user unit, the GNOME Shell
   extension and the KWin script. Flatpak sandboxing would block most
   collectors, so skip it.
-- **Windows:** Authenticode via SignPath's free OSS programme, to avoid
-  SmartScreen warnings.
+- **Windows:** unsigned by default, with the SmartScreen "Run anyway" step
+  documented. Apply to SignPath Foundation's free OSS signing to remove the
+  warning.
 - **Laya weights** are mirrored on a `models-*` release here (Apache-2.0,
   NOTICE included) and pulled by SHA-256.
 - **Browser extension (P2), the one exception:** Chrome and Edge won't
@@ -709,5 +721,6 @@ them in tests, so tuning doesn't depend on any particular OS.
 
 1. **Licence:** Apache-2.0 (matches Laya, permissive) is the suggestion. The
    GNOME Shell extension has to be GPL-2.0-or-later regardless.
-2. **Apple signing:** someone needs an Apple Developer account
-   ($99/yr) for notarization, or macOS ships via a documented unsigned path.
+2. **Browser stores (Phase 2):** the Chrome Web Store charges a one-time
+   $5 developer fee; Firefox and Edge are free. Is $5 acceptable, or should
+   Chrome users load the extension unpacked from Releases?
