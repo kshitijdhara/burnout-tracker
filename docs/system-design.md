@@ -1,38 +1,49 @@
 # Burnout Tracker — System Design
 
-**Status:** Draft v0.1
+**Status:** Draft v0.2 (incorporates the [2026-10-20 design review](reviews/2026-10-20-design-review.md))
 **Date:** 2026-10-20
-**Related ADRs:** [0001](adr/0001-local-first-go-agent.md) ·
+**Related:** [Privacy & Security](privacy-and-security.md) (source of truth for what is collected) ·
+ADRs [0001](adr/0001-local-first-go-agent.md) ·
 [0002](adr/0002-attention-model-over-active-window.md) ·
 [0003](adr/0003-instrumentation-via-hooks.md) ·
 [0004](adr/0004-modelling-strategy.md) ·
 [0005](adr/0005-packaging-and-distribution.md) ·
-[0006](adr/0006-decision-model-for-classification.md)
+[0006](adr/0006-decision-model-for-classification.md) ·
+[0007](adr/0007-data-protection-at-rest.md)
 
 ---
 
 ## 1. Problem statement
 
 Build a desktop app that watches *how* a person works (not just *which apps*
-they use), learns their personal baseline, and produces:
+they use), learns their personal baseline, and helps them act on early
+warning signs:
 
-1. a **strain score**: how far today and this week deviate from their healthy baseline, and
+1. a **strain score**: how far today and this week deviate from a healthy
+   baseline (their own, plus absolute limits);
 2. a **trajectory**: if current trends continue, roughly how many weeks until
-   they cross their personal burnout-risk threshold.
+   they reach their high-strain zone;
+3. a **weekly review**: the main drivers and 1–2 concrete changes to try.
 
 **Audience:** developers first, then students, researchers and project
 managers. Developers spend a lot of time in terminals and, more and more,
-working alongside AI coding agents such as Claude Code; time spent on app
-usage alone misses most of what matters there. The other groups live mostly
-in the browser, documents and meetings. So collectors are pluggable, and
-"what is this activity?" has to be answered per role (see §4.6).
+alongside AI coding agents such as Claude Code. Usage time alone misses most
+of what matters there. The other groups live mostly in the browser,
+documents and meetings. So collectors are pluggable, and "what is this
+activity?" is answered per role (§4.6).
 
-**Project model:** fully open source and non-commercial. There is **no
-server**: every component runs on the user's machine.
+**Project model:** fully open source and non-commercial. **No server.** Every
+component runs on the user's machine, and every artifact is free to build
+and download.
 
-> **This is not a diagnostic tool.** It gives behavioural risk signals and must say
-> so in the product. Burnout is a clinical/occupational construct (WHO ICD-11
-> QD85). We estimate *risk indicators*, not diagnoses.
+**Positioning:** a wellness and self-reflection tool, *not* a diagnostic or
+medical device. Product copy says "spot early warning signs in your work
+patterns", never "predict burnout". Burnout is an occupational phenomenon
+in WHO ICD-11 (QD85), not a disease. We report behavioural risk indicators,
+not diagnoses.
+
+**Design principle:** the tool must not become another stressor. That means
+no streaks, no guilt-driven copy, and no red badges at 11 p.m.
 
 ---
 
@@ -42,689 +53,973 @@ server**: every component runs on the user's machine.
 
 | # | Requirement | Phase |
 |---|-------------|-------|
-| F1 | Track app/window usage with **attention** (not just focus), and handle multi-monitor setups correctly | 1 |
-| F2 | Detect idle vs. present, including passive presence (reading, watching video) | 1 |
-| F3 | Capture terminal activity: which command, how long it ran, exit code, project (hashed) | 1 |
-| F4 | Capture AI-agent sessions (Claude Code first): agent-working time vs. human time, split into reading / composing / approving / elsewhere / away | 1 |
-| F5 | Compute daily features and a strain score against a personal baseline | 1 |
+| F1 | Track window usage by **attention** (not just focus), correct on multi-monitor setups | 1 |
+| F2 | Detect presence vs. away, including passive presence (reading, video, calls) | 1 |
+| F3 | Capture terminal activity: command name, allowlisted subcommand, duration, exit code, project (HMAC) | 1 |
+| F4 | Capture AI-agent sessions (Claude Code first) as one human timeline plus N agent timelines (§4.3) | 1 |
+| F5 | Compute daily features and a strain score from personal baselines plus absolute limits | 1 |
 | F6 | Show today/week/trend in a local dashboard, a tray icon and a CLI (`burnout status`) | 1 |
-| F7 | Short periodic self-check-ins (labels for the model) | 1 |
-| F8 | Forecast time-to-threshold | 2 |
-| F9 | Browser extension: per-tab domain + visibility, via native messaging to the agent | Deferred |
-| F11 | Role profiles (developer / student / researcher / PM) and role-aware activity classification | 1 (rules), 2 (Laya) |
-| F12 | Calendar free/busy blocks via ICS | 1 |
+| F7 | Short check-ins: weekly CBI, optional daily micro check-in (labels for the model) | 1 |
+| F8 | Forecast time-to-threshold, shown only when the trend is statistically meaningful | 2 |
+| F9 | Browser extension (per-tab domain + visibility) | Deferred |
 | F10 | Optional, opt-in, end-to-end-encrypted multi-device sync | 4 |
+| F11 | Role profiles (developer / student / researcher / PM / custom) and role-aware classification | 1 (rules), 2 (Laya) |
+| F12 | Calendar free/busy blocks via ICS | 1 |
+| F13 | Privacy controls: pause, private hours, exclusions, sensitive-apps denylist, delete recent, aggregate-only mode | 1 |
+| F14 | Context annotations: on-call, exam week, release, vacation, sick | 1 |
+| F15 | Weekly review loop: drivers, suggestions, user-set boundaries, adherence | 1 |
+| F16 | Safety: supportive copy and regional resources when check-ins are in the high band | 1 |
+| F17 | Encrypted backup/restore (`burnout backup`/`restore`, data key wrapped with a user passphrase), and import of daily features from another machine | 2 |
+| F18 | `burnout doctor` (health, permissions, SLIs) and `doctor --bundle` (redacted diagnostics) | 1 |
 
 ### 2.2 Non-functional
 
 | Concern | Target |
 |---------|--------|
-| Privacy | Local-first. No network calls by default. Command args and window titles are **redacted by default** |
-| CPU | < 1% average on a laptop; event-driven where the OS allows it, 1 Hz sampling otherwise |
-| Memory | < 60 MB RSS for the agent |
-| Shell overhead | < 5 ms added per prompt (p99) |
-| Disk | < 200 MB/year (raw events expire, aggregates are kept) |
-| Robustness | Agent crash must never break the user's shell or Claude Code. Hooks fail open and silently |
-| Platforms | macOS (Apple Silicon + Intel), Windows 10/11, Linux (X11, GNOME/KDE/wlroots Wayland) |
-| Install | From GitHub Releases: `.dmg`, `.msi`, `.deb`/`.rpm`, tarballs, or the verified `install.sh`/`install.ps1`. Single binary plus platform glue |
+| Privacy | Local-first; exactly three outbound calls, all opt-in (§12). Titles never persisted; argv beyond argv0/subcommand never collected. See [Privacy & Security](privacy-and-security.md) |
+| CPU (agent) | < 1% average on a laptop |
+| Energy | ≤ 2 wakeups/s average; sampling pauses when locked/idle and slows on battery |
+| Memory (agent) | < 60 MB RSS (`GOMEMLIMIT` set) |
+| Memory (Laya sidecar) | ≤ 1.5 GB transient, on demand only, exits after 60 s idle (ADR-0006) |
+| Shell overhead | < 5 ms added per prompt (p99), per supported shell |
+| Claude Code hook overhead | < 10 ms per invocation (p99); tool hooks async where supported |
+| Dashboard | 90-day view query < 100 ms |
+| Disk | < 200 MB/year at default retention |
+| Data quality | SLOs in §11.1 (coverage ≥ 98%, hook delivery ≥ 99.9%) |
+| Robustness | Agent failure never breaks the user's shell or Claude Code; hooks fail open and silently |
+| Platforms | macOS (last 3 versions, Apple Silicon + Intel); Windows 11 (10 best-effort, out of support since Oct 2025); Linux: Ubuntu LTS GNOME and Fedora KDE supported, Arch + Sway best-effort |
+| Install | GitHub Releases only: `.dmg`, `.msi`, `.deb`/`.rpm`, tarballs, or `install.sh`/`install.ps1` with pinned-key verification. Free, no external requirements |
+| Accessibility | Dashboard meets WCAG 2.2 AA; presence detection works for keyboard-only, voice-control and screen-reader users |
 
 ### 2.3 Constraints and assumptions
 
-- Small team. Go is the main language (fits single static binaries, cross-platform
-  builds, low resource use).
-- No labelled burnout data exists on day one. The model must work **cold**
-  (see §6 and ADR-0004).
-- On macOS and Wayland, OS permission models restrict what we can see. The
-  design treats every signal as optional and degrades gracefully.
+- Small team. Go is the main language: single static binaries,
+  cross-platform builds, low resource use.
+- No labelled burnout data exists on day one, so the model must work cold
+  (§7, ADR-0004).
+- On macOS and Wayland the OS permission models restrict what we can see.
+  Every signal is optional and degrades gracefully. **Zero-permission mode**
+  (app focus, idle, pointer, hooks) is a supported configuration, not an
+  error state.
 - "jev" in the brief is **Jev**, TypeSafe AI's closed, cloud-hosted
-  "System One" decision model. Its open-weight counterpart is **Laya** (Convai
-  Innovations, Apache-2.0). Both answer typed questions (choice / score /
-  yes-no) about a text "state". Neither forecasts time series. Our decision:
-  the burnout score stays a pure-Go statistical model (ADR-0004), and Laya runs
-  **locally and optionally** as an activity classifier (ADR-0006). Jev is not
-  used, because it would send activity data to a third-party cloud.
+  "System One" decision model. Its open-weight counterpart is **Laya**
+  (Convai Innovations, Apache-2.0). Both answer typed questions about a text
+  state; neither forecasts time series. The score is a pure-Go statistical
+  model (ADR-0004). Laya runs **locally and optionally** as an activity
+  classifier (ADR-0006). Jev is not used, because it would send activity data
+  to a third-party cloud.
+- **Out of scope** (stated so nobody assumes otherwise):
+  - remote shells over SSH;
+  - Claude Code running remotely, in devcontainers or on the web;
+  - WSL (bridge in Phase 3);
+  - malware running as the same user.
 
 ---
 
-## 3. High-level architecture
+## 3. Architecture
+
+### 3.1 Components
+
+The system is one main binary plus small, independently versioned
+components. A **compatibility matrix** in `docs/compat.md` lists which
+versions work together. The daemon accepts contract version N-1 from every
+component.
+
+| Component | Language | Role |
+|-----------|----------|------|
+| `burnout` | Go | Daemon (`burnout daemon`), hot-path ingest (`emit`, `hook`), CLI, dashboard server |
+| Shell hook scripts | zsh/bash/fish/PowerShell | Emit command events; embedded in `burnout`, installed by `install-hooks` |
+| `burnout-classify` | Go + ONNX Runtime | Optional Laya sidecar, sandboxed, on demand (ADR-0006) |
+| GNOME Shell extension | JS (GPL-2.0+) | Wayland window/pointer bridge over a private connection (§12) |
+| KWin script | JS | Same, for KDE |
 
 ```
 ┌──────────────────────────── user's machine ─────────────────────────────┐
-│                                                                          │
-│  OS / desktop                Integrations (push)          Browser (later)│
-│  ┌──────────────┐   ┌──────────────────────────────┐   ┌──────────────┐  │
-│  │ focus events │   │ shell hooks (zsh/bash/fish/  │   │ extension    │  │
-│  │ window list  │   │   pwsh) → `burnout emit`     │   │ tab domain + │  │
-│  │ pointer pos  │   │ Claude Code hooks →          │   │ visibility   │  │
-│  │ idle/input   │   │   `burnout hook claude`      │   └──────┬───────┘  │
-│  │ media/screen │   │ (later: Codex, Aider, IDEs)  │          │ native   │
-│  └──────┬───────┘   └──────────────┬───────────────┘          │ messaging│
-│         │ pull/subscribe            │ unix socket / named pipe │          │
-│  ┌──────▼───────────────────────────▼──────────────────────────▼───────┐  │
-│  │                         burnoutd  (Go, user-level)                  │  │
-│  │                                                                     │  │
-│  │  collectors ──► event bus ──► sessionizer ──► attention engine      │  │
-│  │  (per-OS)       (channels)    (intervals)     (who has my eyes?)    │  │
-│  │                                   │                  │              │  │
-│  │                                   ▼                  ▼              │  │
-│  │                         ┌──────────────────────────────┐            │  │
-│  │                         │  store: SQLite (WAL)         │            │  │
-│  │                         │  raw_events (TTL 30d)        │            │  │
-│  │                         │  intervals  (TTL 180d)       │            │  │
-│  │                         │  daily_features (forever)    │            │  │
-│  │                         │  checkins, scores            │            │  │
-│  │                         └──────────────┬───────────────┘            │  │
-│  │                                        ▼                            │  │
-│  │                 feature pipeline (hourly + end-of-day)              │  │
-│  │                                        ▼                            │  │
-│  │                 scorer (pure Go: baseline z-scores → model)         │  │
-│  │                                        ▼                            │  │
-│  │                 local API (HTTP+JSON on unix socket / named pipe)   │  │
-│  └───────────────┬───────────────────────┬─────────────────────┬───────┘  │
-│                  ▼                       ▼                     ▼          │
-│            tray / menubar        dashboard (localhost,     `burnout` CLI  │
-│            (status + nudges)     embedded web UI)          status/export  │
+│  OS / desktop              Integrations (push)                           │
+│  ┌──────────────┐   ┌──────────────────────────────┐                     │
+│  │ focus events │   │ shell hooks → `burnout emit` │                     │
+│  │ window geom. │   │ Claude Code hooks →          │                     │
+│  │ pointer/idle │   │   `burnout hook claude`      │                     │
+│  │ input counts │   └──────────────┬───────────────┘                     │
+│  │ media/call   │                  │ v-tagged datagrams, ≤ 4 KiB         │
+│  └──────┬───────┘                  │ socket (0700 dir, peer-cred) / pipe │
+│  ┌──────▼──────────────────────────▼────────────────────────────────┐    │
+│  │ burnout daemon                                                   │    │
+│  │  adapters: collectors · ingest · store(sqlite) · keystore · api  │    │
+│  │  ─────────────────────── ports ───────────────────────────────── │    │
+│  │  domain:  sessionize → attention → timeline → classify(rules)    │    │
+│  │           → rollups → features → score → review                  │    │
+│  └──────┬───────────────┬──────────────────┬────────────────────────┘    │
+│         ▼               ▼                  ▼                             │
+│   SQLite (WAL,     burnout-classify   tray · dashboard (127.0.0.1,       │
+│   column-encrypted  (optional,        cookie auth) · CLI                 │
+│   ADR-0007)          sandboxed)                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**One binary, several modes:** `burnout daemon`, `burnout emit …`,
-`burnout hook claude`, `burnout status`, `burnout install-hooks`, and so on. The
-hot-path subcommands (`emit`, `hook`) never open the database. They write one
-datagram to the agent's socket and exit. If the agent is down, they drop the
-event silently.
+### 3.2 Dependency rule (ports and adapters)
+
+```
+domain   (attention, sessionize, timeline, classify/rules, features, score, review)
+   ▲     imports only the standard library and internal/domain/types
+ports    (EventSource, Store, Classifier, Clock, KeyStore, Notifier): interfaces owned by the domain
+   ▲
+adapters (collector/*, ingest, store/sqlite, keystore/*, classify/laya, api, ui, integrations/*)
+   ▲
+cmd/     (wiring only: config → adapters → domain)
+```
+
+- The rule is enforced in CI (`go-arch-lint` or a `depguard` config). An
+  adapter import from a domain package fails the build.
+- `Clock` is injected; `time.Now()` is banned in domain packages (lint rule).
+- Domain packages are **pure and single-threaded**: no goroutines, no I/O.
+  Concurrency lives in adapters. That makes the replay tests (§14)
+  deterministic.
+- Interfaces are declared by the consumer. Packages are small, and names
+  follow Go conventions (`attention.Engine`, not `AttentionEngineImpl`).
+
+### 3.3 Contracts
+
+Every cross-process message is versioned:
+- hook datagrams;
+- the GNOME/KWin bridge protocol;
+- the sidecar's stdin/stdout protocol;
+- the export format.
+
+The rules:
+- Every message carries `"v": <int>`, with a JSON Schema in `schemas/`.
+- The daemon accepts versions N and N-1. Unknown fields are ignored.
+  Malformed or oversized messages are dropped and **counted**, and the count
+  shows up in `doctor`.
+- Contract tests replay recorded payloads per supported version, including
+  real Claude Code hook payloads per Claude Code version.
+
+### 3.4 Configuration
+
+- There is one TOML file at `<config dir>/burnout/config.toml`. Its schema,
+  defaults and validation live in code.
+- `burnout config get|set|validate` manages it, and it reloads when changed.
+- **Secrets never go in the config file.** The ICS URL, HMAC key and data key
+  live in the OS keystore (ADR-0007). `burnout keys rotate` rotates them;
+  rotating the HMAC key starts new identities (Privacy & Security §4.5).
+- Every privacy opt-in is a config key, and `burnout doctor` and the
+  dashboard's Privacy page list them all with their current values.
+
+### 3.5 Feature registry
+
+Each daily feature is a declared unit with these fields:
+- `name`, `version`, `unit`;
+- `direction` (whether higher is worse);
+- `group` (load / fragmentation / recovery / friction / agent);
+- per-role weights;
+- a doc string;
+- a pure compute function.
+
+The dashboard explanations, the schema version and the docs are generated
+from the registry, so they can't drift apart.
 
 ---
 
-## 4. Data collection in depth
+## 4. Data collection
 
-### 4.1 The attention engine (multi-monitor)
+What each signal stores and keeps is defined once, in the
+[data inventory](privacy-and-security.md). This section explains how
+signals are gathered.
 
-The usual approach ("time = time the window had keyboard focus") breaks in
-three common cases:
+### 4.1 Attention engine (multi-monitor)
 
-- **Docs on monitor 2, editor on monitor 1.** The user reads monitor 2 but
-  types on monitor 1. Focus-time gives the docs 0%.
-- **Claude Code output in a terminal on monitor 2** while the user's last click
-  was in the browser.
-- **Video or call on one screen**, no input at all. Naive idle detection says
-  "away".
+Focus-time breaks in three cases:
+- docs on monitor 2 while typing on monitor 1;
+- Claude Code output on a second screen;
+- video or calls with no input at all.
 
-So we model **attention as a probability distribution over visible windows**,
-updated every tick (1 s). See ADR-0002.
+So we model **attention as a distribution over visible windows** (ADR-0002).
 
-**Signals per tick, by strength:**
+**Signals and cadence.** Event-driven wherever the OS allows it:
 
-| Signal | What it tells us | Source |
-|--------|------------------|--------|
-| Keyboard input → focused window | Strong engagement with focused window | OS input-activity counters (counts only, **never key values**) |
-| Scroll / click → window under pointer | Strong engagement with *that* window, even if unfocused (scroll goes to the hovered window on macOS/Windows) | pointer position + window-at-point |
-| Pointer resting over a window | Medium signal (people park the cursor near what they read) | pointer position |
-| Window visible and unoccluded on an active monitor | Weak prior | window list + bounds + z-order + cloaked/minimized state |
-| Media playing / in a call | Presence without input | macOS NowPlaying, Windows SMTC, MPRIS on Linux; mic/camera in use |
-| Screen locked / display asleep | Hard zero | session lock events |
+| Signal | Cadence | Notes |
+|--------|---------|-------|
+| Focus change | event | |
+| Window geometry/visibility | event (AXObserver / `EVENT_OBJECT_LOCATIONCHANGE`, filtered and debounced 250 ms) + 5 s reconcile | |
+| Pointer position + window-at-point | 1 Hz | never persisted |
+| Idle / lock | 5 s + lock events | |
+| Input counts (keys, scroll, clicks) | per tick, counter only; **opt-in**, never persisted | macOS listen-only `CGEventTap` whose callback only increments a counter; Windows **Raw Input** (`RIDEV_INPUTSINK`) on a locked OS thread; key codes are never read. Without the opt-in, idle-time deltas stand in |
+| Media / call | event | video in a visible window, or mic in use |
 
-**Model (v1, deterministic, explainable):**
+Everything pauses when the screen is locked or the user is idle, and runs at
+half rate on battery. On macOS the sampling thread opts out of App Nap
+(`NSProcessInfo.beginActivity`) so ticks don't drift.
+
+**Model (v1, deterministic, explainable).** Each tick (1 s):
 
 ```
-for each visible window w at tick t:
-  score(w) = prior_visible(w)                      # area-weighted, small
-           + K_key   * keystrokes_last_5s  * [w is focused]
-           + K_scroll* scroll_last_5s      * [w under pointer]
-           + K_hover * hover_dwell(w)                 # decays
-           + K_media * [w is playing media/call]
-           + K_recent* exp(-Δt_since_last_interaction(w) / τ)
+for each visible window w:
+  s(w) = a_vis   * visible_area_share(w)
+       + a_key   * sat(keys_5s)   * [w focused]          # sat(x) = 1 - exp(-x/k), in [0,1]
+       + a_scroll* sat(scroll_5s) * [w under pointer]
+       + a_hover * sat(hover_dwell(w))
+       + a_video * [w shows video] + a_call * [call active in w]
+       + a_rec   * exp(-Δt_last_interaction(w) / τ)
 
-attention(w) = softmax(score) * presence(t)
+if max_w s(w) < θ_unattributed:  attention = {unattributed: presence}
+else:                            attention(w) = softmax(s / T)(w) * presence
 
-presence(t) ∈ [0,1]:
-  1.0 while input within last 30 s
-  then decays over an *app-aware* grace window:
-     terminal with fresh agent output: 3 min   (reading)
-     document/PDF/browser:             2 min
-     media/call active:                stays 1.0
-     default:                          60 s
-  0 when locked / asleep
+presence ∈ [0,1]:
+  1.0 while input within the last 30 s, or a call is active, or video plays in a visible window
+  then decays over an app-aware grace window:
+     terminal with fresh agent output (Stop < 3 min ago): 3 min
+     documents/PDF/browser:                               2 min
+     default:                                             60 s
+  audio-only media does NOT hold presence
+  0 when locked / asleep / paused
 ```
 
-For each window we store three numbers: `focused_s`, `visible_s`, and
-`attended_s` (the sum of attention). Reports use `attended_s`. The other two
-are kept for debugging and for tuning the K weights later from check-in data.
+- The weights `a_*`, the temperature `T`, and the constants `τ`, `θ` and `k`
+  are config with documented defaults. They will be fitted from opt-in
+  spot-labels in Phase 2.
+- An **input profile** (default / keyboard-only / voice control / screen
+  reader) changes the grace windows and signal weights, so assistive-tech
+  users aren't marked away.
+- **Invariants** (property-tested): Σ attention ≤ presence ≤ 1;
+  attention ≥ 0.
+- **Persistence:** **per-minute rollups per window**, holding `attended_s`,
+  `focused_s` and `visible_s`. Ticks are never written. Classification
+  (§4.6) runs *before* persistence, so nothing un-redacted reaches disk.
+- **What each environment yields:**
 
-**Monitor-aware extras:** we keep a monitor topology snapshot (count,
-resolution, primary) so we can tell "a second monitor appeared" (desk setup)
-from "laptop only" (couch, travel). That is itself a useful context feature.
+  | Environment | What we see |
+  |-------------|-------------|
+  | macOS Spaces / full-screen | Only the current Space |
+  | Windows virtual desktops | Cloaked windows excluded |
+  | Clamshell mode | External monitors only |
+  | RDP/Citrix/VM | One window, classified as `remote-desktop` |
+
+  `doctor` reports these.
+- **Monitor topology** snapshots (count, resolution, primary) are kept as a
+  context feature.
 
 **Per-OS sources:**
 
 | | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
-| Focus change | `NSWorkspace` notifications + AX focused window | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` PropertyNotify | compositor-specific (below) |
-| Visible windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording permission) | `EnumWindows` + `DwmGetWindowAttribute(DWMWA_CLOAKED)` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` + geometry | GNOME: Shell extension over D-Bus; KDE: KWin script; Sway/Hyprland: IPC socket |
-| Pointer position | `NSEvent.mouseLocation` (no permission) | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` | GNOME/KDE extension; wlroots: limited |
-| Idle | `CGEventSourceSecondsSinceLastEventType` (no permission) | `GetLastInputInfo` | XScreenSaver ext | `ext-idle-notify-v1` / `org.gnome.Mutter.IdleMonitor` |
-| Input *counts* | `CGEventTap` listen-only (Input Monitoring permission, **optional**) | `SetWindowsHookEx` LL hooks (counts only) | XInput2 raw events | not generally available; fall back to idle deltas |
+| Focus | `NSWorkspace` + AX | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` | bridge |
+| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` | GNOME extension / KWin script; Sway/Hyprland IPC |
+| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` | bridge; wlroots limited |
+| Idle | `CGEventSourceSecondsSinceLastEventType` | `GetLastInputInfo` | XScreenSaver | `ext-idle-notify-v1` / Mutter IdleMonitor |
+| Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw | not available → idle deltas |
 
-Wayland gives no global window information by design. Plan on shipping a
-small GNOME Shell extension and a KWin script that the agent talks to over
-D-Bus (ActivityWatch's `awatcher` uses the same approach). Without them,
-Linux Wayland falls back to app-level focus only, and the dashboard says so.
+The Wayland bridges talk to the daemon over a **private peer-to-peer
+connection** with a token handshake, never as a public session-bus service
+(§12). Without a bridge, Wayland falls back to app-level focus, and the
+dashboard says so.
 
 ### 4.2 Terminal instrumentation
 
-We use **shell hooks**, not process scanning or keylogging (ADR-0003).
+Shell hooks, not process scanning or keylogging (ADR-0003).
+`burnout install-hooks` adds a **marked block** (`# >>> burnout >>>` …
+`# <<< burnout <<<`) to `.zshrc`, `.bashrc`, `config.fish` and the
+PowerShell `$PROFILE`. The rules for that block:
+- the original file is backed up first;
+- the write is atomic and idempotent;
+- `uninstall-hooks` restores the file exactly;
+- other preexec users (starship, atuin, iTerm2 shell integration) keep
+  working.
 
-`burnout install-hooks` adds a single line to `.zshrc`, `.bashrc`,
-`config.fish` and the PowerShell `$PROFILE`:
+| Shell | Mechanism |
+|-------|-----------|
+| zsh | `add-zsh-hook preexec/precmd` |
+| bash (3.2+) | vendored `bash-preexec` |
+| fish | `fish_preexec` / `fish_postexec` |
+| PowerShell 7 | `prompt` wrapper + PSReadLine; writes to the pipe **in-process** (`NamedPipeClientStream`), never spawns |
 
-- zsh: `preexec` / `precmd` via `add-zsh-hook`
-- bash: `bash-preexec` (vendored) or `PROMPT_COMMAND` + `DEBUG` trap
-- fish: `fish_preexec` / `fish_postexec` events
-- PowerShell: wrap `prompt` + PSReadLine `AddToHistoryHandler`
+**Hook rules:**
+1. **Interactive shells only** (`[[ $- == *i* ]]` or the equivalent).
+   Scripts are never instrumented.
+2. **The full command line never leaves the shell.** The hook function
+   resolves aliases, extracts `argv0` and, for allowlisted tools only, the
+   subcommand. It passes those to the emitter via environment variables and
+   stdin. **Nothing sensitive goes in argv**, so nothing leaks through
+   `ps`/`/proc` or process auditing. A CI test checks `ps` during hooked
+   commands.
+3. On zsh/bash/fish the emitter runs in the background (`&!` / `disown`)
+   with a 50 ms socket timeout, and always exits 0.
 
-Each command produces one event:
+**Event (after hook-side extraction):**
 
 ```json
-{
-  "kind": "shell.cmd",
-  "ts_start": "...", "ts_end": "...",
-  "exit": 1,
-  "argv0": "kubectl",               // first word only, after alias resolution
-  "category": "infra",              // classified on the agent side
-  "subcmd": "logs",                 // allowlisted tools only (git, kubectl, docker, npm, go, cargo, terraform…)
-  "cwd_hash": "hmac(project_root)", // stable per project, not reversible
-  "tty": "/dev/ttys004",
-  "term": {"tmux_pane": "%3", "term_session_id": "...", "wezterm_pane": null},
-  "shell_pid": 81234,
-  "ssh": false
-}
+{ "v": 1, "kind": "shell.cmd",
+  "t_start_ms": 0, "t_end_ms": 0, "exit": 1,
+  "argv0": "kubectl", "subcmd": "logs",
+  "cwd": "<sent only over the local socket; daemon converts to HMAC(project root) and discards>",
+  "tty": "/dev/ttys004", "pane": {"tmux": "%3", "wezterm": null, "term_session": "…"},
+  "shell_pid": 81234, "ssh": false }
 ```
 
-**Privacy defaults:** full argv is never stored, because command lines contain
-secrets (`curl -H "Authorization: …"`, `export AWS_SECRET…`). Only
-`argv0` + an allowlisted subcommand are kept. Users can opt in to more detail
-per tool.
+The daemon resolves the project root (cached `git rev-parse` per directory),
+stores only `HMAC(key, project_root)`, and classifies `argv0` into a
+category. Anything beyond argv0 and the allowlisted subcommand is never
+collected. Opting in to more detail per tool is a Phase 3 consideration,
+and would need its own privacy review.
 
-**Features this enables:**
+**Features:** command categories over time, failure loops (same command
+failing N times in M minutes), late-night infra/ssh activity, and forced
+waiting on long builds and tests.
 
-- command categories over time (build/test, VCS, infra/deploy, remote/ssh, editors, agents)
-- **failure loops**: the same command failing N times within M minutes, a frustration proxy
-- late-night `ssh`/`kubectl`/`terraform`, an incident or on-call proxy
-- long-running builds/tests = forced waiting, and whether the user context-switches while waiting
+**Window attribution:** `shell_pid → tty → terminal emulator PID → window`,
+with tmux/iTerm2/WezTerm/kitty pane IDs to disambiguate where available.
 
-**Window attribution:** we map `shell_pid → tty → terminal emulator PID → window`
-by walking the process tree. Tabs and panes inside one window are
-disambiguated with terminal-specific identifiers (tmux active pane, iTerm2
-session ID, WezTerm/kitty pane IDs). Where that isn't possible, the window
-is the unit of attribution.
+**Out of scope:** SSH remote shells and WSL (Phase 3 bridge).
 
 ### 4.3 AI-agent sessions (Claude Code first)
 
-Claude Code exposes **hooks** configured in `~/.claude/settings.json`.
-`burnout install-hooks --claude` registers `burnout hook claude` for these
-events:
+**The one-human / N-agents model.** One person can run several agent
+sessions (plus subagents) at once, so there are two kinds of timelines:
 
-| Hook event | Meaning for us |
-|------------|----------------|
-| `SessionStart` / `SessionEnd` | session boundaries |
-| `UserPromptSubmit` | human hands work to the agent → **agent-working segment starts** |
-| `PreToolUse` / `PostToolUse` | agent activity inside the turn (tool mix: edits vs. bash vs. reads) |
-| `Notification` | agent is **blocked on the human** (permission prompt / waiting for input) |
-| `Stop` / `SubagentStop` | agent finished → **human segment starts** |
+- **One human timeline** with states `reading`, `composing`, `approving`,
+  `elsewhere`, `away` and `unattributed`. A state is attributed to **at most
+  one session at a time**: the session whose terminal holds the most
+  attention.
+- **N agent timelines**, one per session, with states `working`,
+  `blocked_on_human` and `idle`. These may overlap.
 
-Each hook receives JSON on stdin (`session_id`, `transcript_path`, `cwd`,
-`hook_event_name`, …). We forward a minimal event and never copy prompt
-or response text.
+Invariant (property-tested): Σ human sub-states ≤ wall time. Features use
+both timelines: agent parallelism, time blocked on the human, human
+context switches while agents work, and reading vs. composing.
 
-**Timeline for one session:**
+**Hook events** registered by `burnout install-hooks --claude`. The
+settings merge follows the same rules as §4.2: merge into the existing
+file, preserve other hooks, back up first, write atomically, restore on
+uninstall. It also handles user, project and managed settings.
 
-```
-UserPromptSubmit      Notification(permission)   PostToolUse          Stop                 UserPromptSubmit
-      │── agent working ──│── human: approving ──│── agent working ──│── human segment ───│
-                                                                      │  split by attention│
-                                                                      │  engine into:      │
-                                                                      │   reading          │
-                                                                      │   composing        │
-                                                                      │   elsewhere        │
-                                                                      │   away             │
-```
+| Event | Use |
+|-------|-----|
+| `SessionStart` / `SessionEnd` | open / close the session's agent timeline |
+| `UserPromptSubmit` | agent → `working`; closes any open segment of the previous turn |
+| `PreToolUse` / `PostToolUse` | tool mix; registered **async** where supported |
+| `PermissionRequest` (version-detected) | agent → `blocked_on_human`; human → `approving` if that terminal is attended |
+| `Notification` | fallback for blocked-on-human on versions without `PermissionRequest` |
+| `Stop` / `SubagentStop` | agent → `idle`; marks "fresh output" for presence |
+| `StopFailure` | agent → `idle` (error) |
 
-The "invert the agent time" idea is the right starting point, but the inverse
-is not the same as reading. We split each human segment using the attention engine:
+**Hook rules (security-relevant):**
+1. **The hook writes nothing to stdout, ever.** For `UserPromptSubmit` and
+   `SessionStart`, stdout is injected into Claude's context, so a stray
+   print would be a prompt injection in every user's sessions. Stderr is
+   also silent. The hook always exits 0. A test asserts empty stdout for
+   every event type.
+2. **Allowlisted payload fields only:** `session_id`, `hook_event_name`, the
+   tool name, timestamps. `cwd` goes through the same HMAC as in §4.2.
+   Prompt and response text and `transcript_path` contents are never read.
+3. **Segment closing.** The "approving" segment ends at the first of
+   `PreToolUse`, `PostToolUse`, or terminal input after the permission
+   request. Tool runtime is never counted as human time. Interrupted turns
+   (Esc) may not fire `Stop`, so open `working` segments close on the next
+   `UserPromptSubmit`, `SessionEnd` or `StopFailure`, or after 10 min with
+   no events.
+4. **Terminal mapping.** The hook walks its parent processes to the `claude`
+   process and its controlling tty, then maps that to a window as in §4.2.
 
-| Sub-state | Rule |
-|-----------|------|
-| **reading** | the Claude Code terminal window holds most of the attention, few keystrokes, scroll/hover or fresh output |
-| **composing** | keystrokes going to that terminal (typing the next prompt) |
-| **approving** | the `Notification` → next tool/stop window (decision latency) |
-| **elsewhere** | attention is on another window (browser, Slack, editor) |
-| **away** | presence ≈ 0 |
+**Removed from Phase 1:** tailing transcript files and receiving Claude Code
+OpenTelemetry. Both stream prompt content through our process. We'll
+revisit with field-level allowlists only if hooks prove insufficient.
 
-We do the same during **agent-working** segments: is the human watching the
-agent, multitasking, or away? "Context switches while the agent works" is
-probably one of the more useful fragmentation signals for agent-heavy work.
-
-**Sanity check:** we estimate an expected reading time from the response size
-(the token count from the transcript length, never the content) and flag
-"reading" that is 10× longer or shorter than expected.
-
-**Fallbacks:** if hooks aren't installed, we tail
-`~/.claude/projects/**/*.jsonl` timestamps (metadata only). Claude Code's
-OpenTelemetry export (including its active-time metrics) can be received by
-a local OTLP endpoint in the agent as a cross-check.
-
-**Extensibility:** an `AgentAdapter` interface (`Name()`, `Install()`,
-`Translate(raw) []Event`) lets us add Codex CLI, Aider, Cursor and others
-later without changing the sessionizer.
+**Extensibility:** an `AgentAdapter` (`Name()`, `Install()`, `Uninstall()`,
+`Translate(raw) ([]Event, error)`) adds Codex CLI, Aider, Cursor and others
+in Phase 3 without changing the timeline logic.
 
 ### 4.4 Browser (deferred)
 
-> **Deferred.** We'll design the extension and its distribution later. Until
-> then, browser activity is covered by the OS collectors: the browser
-> window's attention share plus its **window title** (usually the page
-> title), classified in memory by the cascade in §4.6 and never stored.
-> That is enough for coarse categories (docs vs. comms vs. video), but not
-> for per-tab detail.
+The browser extension is deferred. Until then:
+- **default:** browser time is category `browser` (titles are off by
+  default);
+- **with opt-in title classification:** page titles are redacted and
+  classified in memory (§4.6), and are never stored.
 
-The sketch below is kept for when we pick this up.
+Notes for later: per-tab domain + `visibilityState` via native messaging.
+Chrome and Edge only install from their stores; Firefox needs a
+Mozilla-signed `.xpi`.
 
+### 4.5 Check-ins (labels)
 
-A WebExtension (Chrome/Edge/Firefox) reports per-tab **domain** (not full
-URL by default), `document.visibilityState`, audible state and window ID to
-the agent via **native messaging**. That host is the same `burnout` binary in
-`native-host` mode. Chromium already does occlusion tracking, so a tab in a
-visible window on another monitor reports `visible`, which plugs straight into
-the attention engine as a richer "what's inside the browser window" signal.
-
-### 4.5 Self check-ins (labels)
-
-These run weekly, plus an optional daily one-tap mood prompt, from the tray:
-
-- **Weekly:** a short validated instrument. The Copenhagen Burnout Inventory
-  (free to use; personal + work-related subscales) is a good fit. Avoid MBI
-  (licensed).
-- **Daily (optional):** 1–2 sliders: energy and "how drained do you feel".
-- **Sleep (optional):** self-reported hours, or inferred from first and last
-  activity (a weak proxy, labelled as such).
-
-Check-ins are the ground truth that eventually turns the heuristic score
-into a learned model (§6). The UX must keep them very light: about 30 s a week.
+- **Weekly:** the Copenhagen Burnout Inventory (free to use;
+  personal + work-related subscales). Only **validated translations** are
+  offered, per language.
+- **Daily (optional):** a one-tap micro check-in with energy and "how
+  drained". This gives denser labels for validation (§7.5).
+- **Free text (optional):** may be scored locally by Laya against fixed
+  questions, and is discarded after scoring.
+- Target effort is about 30 s a week. High-band results trigger the safety
+  flow (§8.4).
 
 ### 4.6 Activity classification (role-aware)
 
-A static app→category map works for developers ("iTerm = terminal"). It
-fails for everyone who spends the day in a browser. "Chrome" can be lecture
-notes, Jira, a literature search or YouTube. The categories also depend on the
-role: for a student, Overleaf is *coursework*; for a PM, Figma is *review*.
-
-Onboarding asks for a **role profile** (developer / student / researcher /
-PM / custom). Each profile ships a category taxonomy and default feature
-weights. Classification is a cascade, cheapest step first:
+Onboarding sets a **role profile**. Each profile defines a category taxonomy
+and default feature weights. Classification is a cascade, cheapest first,
+and runs **before persistence**:
 
 ```
-activity (app id, domain, window title*, argv0)
-   │
-   ├─► 1. bundled rules (app ids, domains, commands)     ~80% of time, µs
-   ├─► 2. user overrides ("always count notion.so as planning")
-   ├─► 3. cache (hash → category)
-   ├─► 4. Laya, local, optional (ADR-0006)              unique items only, batched
-   │       state:    "app=Chrome domain=overleaf.com title=<redacted-ish>"
-   │       question: Choice[coursework, research, comms, admin, entertainment, …]
-   │       → category + probability; < 0.6 → "uncategorized"
-   └─► 5. "uncategorized" + ask the user in the weekly review
+activity (app id, domain-from-title*, redacted title*, argv0)
+  ├─► 1. sensitive-apps denylist + user exclusions  → category `private` (identity dropped)
+  ├─► 2. bundled rules (app ids, domains, commands)  ~80% of time, µs
+  ├─► 3. user overrides
+  ├─► 4. in-memory cache (HMAC key → category; never persisted)
+  ├─► 5. Laya sidecar, optional (ADR-0006): Choice[taxonomy], p < 0.6 → uncategorized
+  └─► 6. `uncategorized`, offered for labelling in the weekly review
 ```
 
-\* Window titles are classified **in memory** and then thrown away. We store
-only the category and a hash. With a local model, title classification can
-be enabled without ever persisting titles, which is a privacy improvement over
-the status quo.
+\* Titles are used only with opt-in **title classification**, and are
+redacted before any rule or Laya sees them. The redaction rules are in
+[Privacy & Security §4.1](privacy-and-security.md). Titles and title hashes
+are **never persisted**.
 
-Laya can also score free-text check-in notes (optional) against fixed
-questions such as "exhaustion: none/some/high". The text stays on the device
-and is never stored after scoring.
+### 4.7 Calendar busy blocks
 
-### 4.7 Calendar busy blocks (Phase 1, lite)
+Calendar data covers in-person meetings and meeting-heavy days, which
+matter for PMs and researchers.
 
-Device signals miss in-person meetings and undercount call-heavy days, which
-matter a lot for PMs and researchers. We read **only free/busy intervals**:
-start, end and busy status. No titles, attendees or locations. Sources:
-
-- **Phase 1:** a private ICS URL or `.ics` file. Google, Outlook and iCloud
-  all provide one. This is pure Go and needs no OAuth app. That matters for an
-  open-source project without a server, which can't keep an OAuth client
-  secret.
-- **Phase 2:** the OS calendar (macOS EventKit; Windows via Outlook/Graph only
-  if requested).
-
-Features: meeting hours, back-to-back chains, fragmentation of the
-remaining free time, after-hours meetings.
+- **Phase 1:** an ICS URL or `.ics` file. The URL is a **bearer secret to
+  the whole calendar**: it lives in the keystore, is fetched over HTTPS
+  only, and is never logged. The parser keeps only `DTSTART`, `DTEND`,
+  `TRANSP` and `STATUS` and discards everything else as it streams. The
+  fetch is one of the three opt-in network calls (§12).
+- **Phase 3:** the OS calendar (macOS EventKit).
+- **Features:** meeting hours, back-to-back chains, free-time
+  fragmentation, after-hours meetings.
 
 ---
 
-## 5. Data model (SQLite)
+## 5. Time model
+
+- **Logical day:** a configurable rollover, 04:00 local by default, so
+  1 a.m. work belongs to the day it continues. Intervals and rollups are
+  split at the rollover.
+- **Offsets:** every interval stores its UTC offset. DST changes and travel
+  produce correct local-day attribution, and "after-hours" uses the
+  offset in effect at the time.
+- **Clocks:** the daemon stamps receipt time with a monotonic clock anchored
+  to wall time. Emitter timestamps are used for ordering within a message
+  stream only, and skew over 5 min is rejected and counted. Suspend/resume
+  and wall-clock jumps close open intervals.
+- **Week start** follows the locale (Sunday or Monday).
+
+---
+
+## 6. Data model (SQLite)
+
+Sensitive columns (marked 🔒) are encrypted with AES-256-GCM using a data key
+held in the OS keystore (ADR-0007). `id` columns are integer primary keys.
 
 ```sql
--- append-only, short retention (default 30 days)
-CREATE TABLE raw_events (
-  id        INTEGER PRIMARY KEY,
-  ts        INTEGER NOT NULL,           -- unix ms
-  source    TEXT    NOT NULL,           -- os.focus | os.idle | shell | agent.claude | browser
-  kind      TEXT    NOT NULL,
-  payload   BLOB    NOT NULL            -- JSON
-);
+-- redacted events only; short retention (default 7 days); for reprocessing and debugging
+CREATE TABLE raw_events (id INTEGER PRIMARY KEY, recv_ms INTEGER NOT NULL, v INTEGER NOT NULL,
+  source TEXT NOT NULL, kind TEXT NOT NULL, payload BLOB NOT NULL /*🔒*/);
 
--- derived, medium retention (default 180 days)
-CREATE TABLE intervals (
-  id          INTEGER PRIMARY KEY,
-  start_ts    INTEGER NOT NULL,
-  end_ts      INTEGER NOT NULL,
-  kind        TEXT NOT NULL,            -- attention | shell_cmd | agent_turn | human_segment | idle | locked
-  app_id      TEXT,                     -- bundle id / exe name
-  category    TEXT,                     -- code | terminal | comms | meeting | docs | browse | media | other
-  window_key  TEXT,                     -- hashed window identity
-  monitor     INTEGER,
-  attended_s  REAL, focused_s REAL, visible_s REAL,
-  attrs       BLOB                      -- JSON: sub_state, exit code, argv0, session_id…
-);
-CREATE INDEX intervals_time ON intervals(start_ts);
+-- per-minute attention rollups per window (default 180 days)
+CREATE TABLE attention_minutes (
+  minute_ms INTEGER NOT NULL, utc_offset_min INTEGER NOT NULL, logical_day TEXT NOT NULL,
+  window_key TEXT NOT NULL,            -- HMAC(key, app id + window identity)
+  app_id TEXT,                         -- NULL when category = 'private' or aggregate-only
+  category TEXT NOT NULL, monitor INTEGER,
+  attended_s REAL NOT NULL, focused_s REAL NOT NULL, visible_s REAL NOT NULL,
+  PRIMARY KEY (minute_ms, window_key));
+CREATE INDEX attention_day ON attention_minutes(logical_day, category);
 
--- kept forever (tiny): one row per local day
-CREATE TABLE daily_features (
-  day         TEXT PRIMARY KEY,         -- YYYY-MM-DD local
-  features    BLOB NOT NULL,            -- JSON map name → value (versioned)
-  schema_ver  INTEGER NOT NULL
-);
+-- timeline intervals: shell commands, agent states, human states, presence, calendar (default 180 days)
+CREATE TABLE intervals (id INTEGER PRIMARY KEY,
+  start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, utc_offset_min INTEGER NOT NULL,
+  logical_day TEXT NOT NULL, kind TEXT NOT NULL,  -- shell_cmd | agent_state | human_state | presence | busy
+  category TEXT, session_key TEXT,                -- HMAC of agent session id
+  attrs BLOB /*🔒 argv0, subcmd, exit, state, presence reason (input|video|call), project HMAC…*/);
+CREATE INDEX intervals_kind ON intervals(kind, start_ms);
+CREATE INDEX intervals_day  ON intervals(logical_day, kind);
 
-CREATE TABLE checkins (ts INTEGER PRIMARY KEY, instrument TEXT, answers BLOB, score REAL);
-CREATE TABLE scores   (day TEXT PRIMARY KEY, strain REAL, components BLOB, forecast BLOB, model_ver TEXT);
+CREATE TABLE daily_features (logical_day TEXT PRIMARY KEY, registry_ver INTEGER NOT NULL,
+  coverage REAL NOT NULL, features BLOB NOT NULL /*🔒*/);           -- default 2 years
+CREATE TABLE scores (logical_day TEXT PRIMARY KEY, model_ver TEXT NOT NULL, strain REAL,
+  status TEXT NOT NULL, components BLOB /*🔒*/, forecast BLOB /*🔒*/);  -- status: ok | missing | calibrating
+CREATE TABLE checkins (id INTEGER PRIMARY KEY, ts_ms INTEGER NOT NULL, instrument TEXT NOT NULL,
+  answers BLOB NOT NULL /*🔒*/, score REAL);                       -- default 2 years
+CREATE TABLE annotations (id INTEGER PRIMARY KEY, start_day TEXT NOT NULL, end_day TEXT NOT NULL,
+  kind TEXT NOT NULL /* on_call|exam|release|vacation|sick|other */, note BLOB /*🔒*/);
+CREATE TABLE monitor_snapshots (ts_ms INTEGER PRIMARY KEY, topology TEXT NOT NULL); -- count, resolutions, arrangement; 180 days
+CREATE TABLE health_daily (logical_day TEXT PRIMARY KEY, slis TEXT NOT NULL);       -- coverage, drops, hook delivery; 180 days
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER NOT NULL);
 ```
 
-- Driver: `modernc.org/sqlite` (pure Go) keeps Linux and Windows builds free
-  of cgo. macOS needs cgo anyway for AppKit/CoreGraphics, so either driver
-  works there.
-- Encryption at rest: a database key is held in the OS keychain (macOS
-  Keychain, Windows Credential Manager / DPAPI, Secret Service on Linux). The
-  file is `0600`. SQLCipher is worth considering if a security review asks for it.
-- Retention jobs run nightly. `burnout export` writes JSON/CSV and
-  `burnout forget --since …` deletes data. Both matter for trust.
+**Driver and settings:**
+- `modernc.org/sqlite` (pure Go);
+- one writer goroutine, with batched transactions every 15 s;
+- `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, prepared
+  statements;
+- `secure_delete=ON` and `auto_vacuum=INCREMENTAL`, with an incremental
+  vacuum and `wal_checkpoint(TRUNCATE)` after the nightly retention job.
+  That's what makes deletion real (ADR-0007).
+
+**Locations:**
+
+| OS | Data directory | Note |
+|----|----------------|------|
+| macOS | `~/Library/Application Support/burnout` | Time Machine backs it up; data is still column-encrypted |
+| Windows | `%LOCALAPPDATA%\burnout` | Never Documents or OneDrive |
+| Linux | `$XDG_DATA_HOME/burnout` | |
+
+Directories are `0700` and files `0600`.
+
+**Volume:**
+- attention rollups: ~600 active minutes × ~5 windows ≈ 3k rows/day;
+- intervals: ~0.5–3k/day;
+- total ≈ 1–2 MB/day, comfortably under the disk budget at default
+  retention.
 
 ---
 
-## 6. Features and scoring
+## 7. Features and scoring
 
-### 6.1 Daily features (v1 set)
+### 7.1 Daily features (v1; each one declared in the registry, §3.5)
 
-Feature choice follows occupational-health research on overwork and recovery,
-plus developer-specific signals:
+| Group | Features |
+|-------|----------|
+| **Load** | attended work hours; after-hours share (outside core hours); weekend/holiday work minutes; meeting hours |
+| **Fragmentation** | context switches/hour; longest deep-work block; comms share and interrupt rate; back-to-back meetings; human context switches while agents work |
+| **Recovery** | breaks (presence 0 for ≥ 5 min) count and length; overnight gap (last → first activity); days since a light day |
+| **Friction** | shell failure loops and failure rate; late-night infra/ssh; approval latency trend (exploratory) |
+| **Agent** | agent parallelism; time blocked on human; reading vs. composing ratio |
 
-| Group | Feature | Why |
-|-------|---------|-----|
-| **Load** | attended work hours; share in "work" categories | volume |
-| | after-hours share (outside the user's configured or learned core hours) | lost recovery time |
-| | weekend/holiday work minutes | lost recovery time |
-| | first-activity / last-activity time | rough proxy for the sleep window |
-| **Fragmentation** | context switches/hour (attention changes > N s) | cognitive load |
-| | longest uninterrupted deep-work block | ability to focus |
-| | comms share (Slack/Teams/mail) and interrupt rate | reactive work |
-| | context switches during agent-working segments | waiting fragmentation |
-| **Recovery** | number and length of breaks (presence = 0 for ≥ 5 min) | micro-recovery |
-| | days since a "light day" | sustained load |
-| **Friction** | shell failure loops; failure rate | frustration |
-| | late-night infra/ssh activity | incidents/on-call |
-| | approval latency trend (Claude Code `Notification` → response) | decision fatigue (weak, exploratory) |
-| | keystroke-rate variance vs. baseline (counts only, optional) | fatigue (weak, exploratory) |
-| **Agent work** | reading vs. composing vs. elsewhere ratio; agent-working share | how the work is shifting |
+**Coverage** is recorded per day: the fraction of logged-in time the agent
+observed. A day below the coverage threshold (default 60%), or a day the
+device wasn't used, is **missing, not rest**. Work on another machine is
+indistinguishable from rest, so we say so in the UI and rely on import
+(F17) for multi-device users.
 
-Feature values are versioned (`schema_ver`) so the model can be retrained
-when definitions change.
+### 7.2 Strain score v1 (cold start, no labels)
 
-### 6.2 Strain score: v1 (cold start, no labels)
+1. **Calibration:** 14 days. The UI explains why there's no score yet, and
+   still shows the data.
+2. **Baselines:** robust per-feature statistics (median, MAD) over a
+   trailing 28 days, **kept separately for weekdays and weekends**.
+   Annotated vacation and sick days are excluded from baselines. Planned
+   crunch (on-call, exam, release) is included but tagged.
+3. **Deviation:** `z_f = (x_f − median_f) / max(1.4826·MAD_f, ε_f)`. The
+   floor `ε_f` is a per-feature constant from the registry, which avoids
+   divide-by-zero on zero-inflated features. Features that are mostly zero
+   use rates. z is signed so "worse" is positive, and clipped to ±4.
+4. **Absolute guardrails**, evaluated next to the relative score:
 
-1. **Baseline:** for each feature, robust per-user statistics (median and MAD)
-   over a trailing 28-day window, after a **14-day calibration period**. Until
-   calibration ends, the UI shows data but no score.
-2. **Deviation:** `z_f = (x_f − median_f) / (1.4826·MAD_f)`, signed so that
-   "worse" is positive, then clipped to ±4.
-3. **Composite:** `strain = Σ w_f · EWMA_7d(z_f)` with weights from the
-   literature-informed defaults (load and recovery weighted highest). The
-   result is mapped to 0–100.
-4. **Explainability:** the dashboard always shows the top 3 contributing
-   components ("after-hours work +2.1σ vs. your baseline").
+   | Guardrail | Default |
+   |-----------|---------|
+   | Attended work per week | ≥ 55 h (WHO/ILO evidence on long working hours) |
+   | Overnight gap | < 7 h |
+   | Weekend work | Both weekend days with > 2 h |
 
-The baseline also drifts upward if someone stays overworked for long enough. To
-counter that, keep a **long-term anchor** (the best 28-day window in the last
-6 months) next to the rolling baseline, and score against a blend of the two.
+   Guardrails also seed the long-term anchor, so a user who starts during
+   a crunch doesn't get a burnt-out "normal".
+5. **Composite:** `c = Σ_groups min(cap_g, Σ_{f∈g} w_f(role) · EWMA_7d(z_f)) + Σ guardrail penalties`.
+   The group caps stop correlated features (hours, after-hours,
+   last-activity) from triple-counting.
+6. **Mapping:** `strain = 100 / (1 + exp(−(c − c0)/s))`, with `c0` and `s`
+   documented in the registry.
+7. **Anchor:** the rolling baseline is blended with a long-term anchor. The
+   anchor is the 28-day window with the lowest composite in the last
+   6 months, seeded from guardrails until enough history exists. This
+   counters baselines drifting upward during long overwork.
+8. **Explainability:** the top 3 drivers in plain language ("after-hours
+   work +2.1σ vs. your usual weekdays").
 
-### 6.3 Trajectory / "how far off" (Phase 2)
+### 7.3 Trajectory (Phase 2)
 
-- Fit a local linear trend (or a simple Kalman filter for level + slope) on the
-  daily strain series.
-- If the slope is positive, report the estimated **days until strain crosses
-  the user's threshold** with an uncertainty band. The threshold starts at a
-  default (for example strain 70) and is personalised from check-ins: the
-  strain level at which CBI scores reached the "high" band.
-- Phrase it carefully: *"If the last 3 weeks' trend continues, you'll reach
-  your high-strain zone in ~3–6 weeks."* Never give a single date as if it
-  were certain.
+- A local linear trend or Kalman filter (level + slope) on daily strain,
+  skipping missing days.
+- The forecast is shown **only when the slope's 80% interval excludes 0**,
+  and only as a range: *"If the last 3 weeks' trend continues, you may reach
+  your high-strain zone in ~3–6 weeks."* It always comes with 1–2 suggestions
+  (§8.2).
+- Threshold: default strain 70, personalised once check-ins show where the
+  user's CBI reaches the high band.
 
-### 6.4 Learned model (Phase 2+)
+### 7.4 Learned model (Phase 2+)
 
-When a user has about 8 or more weekly check-ins:
+- **Per-user model:** after ≥ 8 weekly check-ins, an ordinal or Bayesian
+  logistic regression of the CBI band on lagged weekly features, with
+  strong priors.
+- **Population priors (Phase 4):** trained offline on voluntarily exported
+  data, but only after the research-export gate in
+  [Privacy & Security](privacy-and-security.md) is met (coarsening,
+  k-anonymity, preview, consent, ethics review).
+- **Stack:** research in Python (NumPy / scikit-learn / PyMC). Coefficients
+  ship as JSON. **Inference is pure Go** (gonum), with `leaves` as the GBDT
+  escape hatch (ADR-0004).
+- **Jev/Laya** classify inputs and never produce the score (ADR-0006).
 
-- **Per-user model:** ordinal or Bayesian logistic regression of CBI band on
-  lagged weekly features. Strong priors keep it stable with few points.
-- **Population priors (opt-in only):** there is no server, so "donation"
-  means the user runs `burnout export --research`. That writes an anonymised
-  file of weekly feature vectors and check-in scores, which they can choose to
-  contribute to a public research dataset (for example a PR to a data repo or
-  a university study). Priors trained offline on it ship as coefficients in
-  releases.
-- **Survival framing:** time-to-"high-burnout band" as a discrete-time hazard
-  model. This needs cohort data, so it is Phase 4 research.
+### 7.5 Validation
 
-**Stack:** research and training in Python (NumPy / scikit-learn / PyMC) on
-donated or synthetic data. Export coefficients as JSON. **Inference runs in
-pure Go** (gonum), with no Python runtime in the shipped binary. If we later
-need tree models, `leaves` (pure-Go LightGBM/XGBoost inference) is the escape
-hatch. See ADR-0004.
-
-**Where Jev/Laya fit:** they are *decision models over text*, not
-time-series models. Asking Laya "given these 30 days of features, what is
-the burnout risk?" would give an uncalibrated, unexplainable number. It
-would ignore the user's personal baseline and repeat statistics we already
-compute exactly. So they classify inputs (§4.6), and the statistics produce
-the score. See ADR-0006.
+- **Alpha:** ≥ 8 weeks, mixed roles, with weekly CBI plus daily micro
+  check-ins.
+- **Primary analysis:** repeated-measures correlation (rmcorr) between
+  weekly strain and CBI work-related burnout across users. Target r ≥ 0.4.
+- The analysis plan is pre-registered in `research/` before the alpha
+  starts.
+- Secondary checks: guardrail hit rates, coverage distribution, and
+  false-alarm rate (high strain with low CBI).
 
 ---
 
-## 7. Local API and UI
+## 8. Product experience
 
-- **Transport:** HTTP+JSON over a Unix socket (macOS/Linux) or a named pipe
-  (Windows). The dashboard is served on `127.0.0.1:<random>` with a per-launch
-  token in the URL, so other local users and web pages can't read it.
-- **Endpoints (sketch):**
-  - `GET /v1/status`: today's attended hours, strain, top drivers
-  - `GET /v1/days?from&to`: daily features + scores
-  - `GET /v1/timeline?day=`: intervals for a day's timeline view
-  - `GET /v1/agents/sessions?day=`: agent sessions with the human-segment breakdown
+### 8.1 Onboarding
+
+1. Explain what is and isn't collected, linking the in-app Privacy page
+   generated from the data inventory.
+2. Pick a role and core hours.
+3. Start in **zero-permission mode** (app focus, idle, pointer, hooks). Then
+   ask for each OS permission **just-in-time**, with a one-line "what this
+   adds" and a "not now" option.
+4. Offer the optional integrations: shell hooks, Claude Code hooks, ICS.
+5. Explain the 14-day calibration and the data-quality badge.
+
+The first run must be completed **interactively by the logged-in user**
+(anti-coercion; see Privacy & Security).
+
+### 8.2 Core loop
+
+**Weekly review** (about 2 min):
+- this week vs. your baseline, with the top drivers;
+- labelling uncategorized items;
+- annotating the week (on-call, exam, release, vacation);
+- **1–2 suggestions** tied to the top drivers, for example "you worked past
+  22:00 on 4 days; want a shutdown reminder at 21:30?";
+- the user sets or edits **boundaries** (shutdown time, no-weekend rule,
+  deep-work blocks), and adherence is tracked gently.
+
+### 8.3 Nudges
+
+- At most 1/day, never during Do Not Disturb/Focus, a screen share or a
+  presentation, and never outside the user's waking hours.
+- Copy is supportive and never shaming, and every nudge can be snoozed or
+  turned off.
+- The dashboard has a "blur numbers" option.
+
+### 8.4 Safety
+
+When CBI is in the high band, or free text suggests distress, the app shows
+supportive copy and **regional mental-health resources**. It doesn't send
+alarming forecasts. A mental-health professional reviews all
+score, forecast and safety copy before alpha.
+
+### 8.5 Accessibility and i18n
+
+- The dashboard meets WCAG 2.2 AA.
+- Copy is localised.
+- CBI is offered only in validated translations.
+- Input profiles (§4.1) cover assistive-technology users.
+
+### 8.6 Success metrics (no telemetry)
+
+Collected via opt-in in-app surveys and alpha interviews:
+- calibration completion;
+- weekly check-in completion;
+- 4- and 8-week retention;
+- % of users who set or changed a boundary after a review;
+- self-reported usefulness.
+
+These, plus §7.5, are the alpha exit criteria.
+
+---
+
+## 9. Local API and UI
+
+- **Transport:**
+  - **Unix socket** in a `0700` directory (`$XDG_RUNTIME_DIR/burnout`,
+    `~/Library/Application Support/burnout/run`), with a **peer-credential
+    check** (`SO_PEERCRED` / `LOCAL_PEERCRED`) for the same UID.
+  - **Windows named pipe** with an explicit DACL for the user's SID and
+    `PIPE_REJECT_REMOTE_CLIENTS`.
+- **Ingest:** unixgram datagrams / pipe messages, `≤ 4 KiB`, rate-limited
+  per source, strictly parsed (schema, §3.3), fuzzed in CI. Malformed
+  messages are dropped and counted.
+- **Query API (HTTP+JSON over the same socket/pipe):**
+  - `GET /v1/status`
+  - `GET /v1/days?from&to`
+  - `GET /v1/timeline?day=`
+  - `GET /v1/agents?day=`
+  - `GET /v1/privacy` (current opt-ins and inventory)
   - `POST /v1/checkins`
-  - `POST /v1/ingest`: hot path used by `emit`/`hook`. In practice this is a
-    unixgram datagram, not HTTP, to keep it under 1 ms
-- **UI:** a tray/menubar icon (`fyne.io/systray` or `getlantern/systray`) and
-  an embedded SPA (built once, `go:embed`). Wails or Fyne for a native
-  window is a Phase 2 decision; a browser tab is fine for v1.
-- **Nudges:** gentle and rate-limited (at most 1/day). For example: "4th day
-  this week past 10 pm. Want to set a shutdown reminder?"
+  - `POST /v1/annotations`
+  - `POST /v1/pause`
+  - `DELETE /v1/data?range=`
+- **Dashboard:** served on `127.0.0.1:<random port>`.
+  - The tray opens it with a **one-time launch token**, which the server
+    exchanges for an `HttpOnly; SameSite=Strict` session cookie, then
+    redirects. Tokens never stay in URLs or history.
+  - A **`Host` header allowlist** (`127.0.0.1:<port>`) defeats DNS
+    rebinding.
+  - No CORS, a strict CSP, `X-Frame-Options: DENY`, and CSRF tokens on
+    state-changing requests.
+- **UI:** a tray icon (always visible while collecting) and an embedded SPA
+  via `go:embed`. A native webview (Wails) is a Phase 2 option, which would
+  remove the TCP listener entirely.
 
 ---
 
-## 8. Reliability and operations
+## 10. Performance and scale
 
-- **Supervision:** launchd LaunchAgent (macOS), systemd `--user` unit
-  (Linux), and a Task Scheduler logon task or Startup entry (Windows). Each
-  restarts on crash.
-- **Hot-path safety:** `emit`/`hook` use a 50 ms timeout on the socket write
-  and always exit 0, so Claude Code hooks can never block the agent. Shell hooks
-  run the emitter in the background (`&!` in zsh, `disown` in bash).
-- **Backpressure:** a bounded in-memory queue with drop-oldest for
-  low-value events (pointer ticks). High-value events (shell, agent) go to a
-  small on-disk spool if the DB is busy.
-- **Clock and sleep:** monotonic clocks for durations. Suspend and resume
-  close all open intervals. Time-zone changes are stored per day.
-- **Self-telemetry:** local only. `burnout doctor` reports which collectors
-  are active, missing permissions, hook health and queue drops.
-- **Upgrades:** `daily_features` uses `schema_ver`, and migrations are
-  embedded and run at start.
+"Scale" for a local agent means **long-lived installs, heavy users and a
+growing contributor base**, not QPS.
 
-**Load estimate:** about 1 attention tick/s × 86,400 s/day, but only *changes*
-are persisted as intervals. Typical volume is 2–5k intervals/day plus
-200–2,000 shell events/day, roughly 1–3 MB/day raw before TTL. That is well
-within the disk budget.
+| Dimension | Design target | How we verify it |
+|-----------|---------------|------------------|
+| Heavy desktop | 50+ windows, 6 monitors, 30 tmux panes | stress trace replay |
+| Heavy shell | 10k commands/day | hook benchmark + replay |
+| Parallel agents | 10 sessions with subagents | timeline property tests + replay |
+| History | 2 years of data | soak DB; dashboard 90-day query < 100 ms |
+| Steady state | zero allocations per attention tick | `go test -bench` with `-benchmem` |
+| Long run | 7-day trace at 100× speed | soak test: RSS < 60 MB, DB size within budget, no drops |
+
+The other choices behind these targets:
+- the feature pipeline is **incremental per logical day**;
+- `GOMEMLIMIT` is set;
+- cgo callbacks run on locked OS threads and only touch atomic counters;
+- the Laya sidecar has its own budget and runs only on AC power, capped at
+  500 items/day (ADR-0006).
 
 ---
 
-## 9. Security and privacy
+## 11. Reliability and operations
 
-This app collects data at a level close to surveillance software. Trust is
-the product.
+### 11.1 SLIs and SLOs (local, shown in `doctor` and the data-quality badge)
 
-1. **Local-first.** No network calls by default, including no phone-home
-   analytics. Update checks are opt-in.
-2. **Minimise at the source.** No key values, no screen capture, no
-   prompt/response text, no full command lines, no full URLs. Window titles
-   are off by default; when enabled, they're classified locally and only the
-   category and a hash are stored.
-3. **Personal, not managerial.** No team or manager dashboard in the roadmap.
-   If team features ever come, they must be aggregate, opt-in and k-anonymous.
-   Write this down publicly.
-4. **Encrypted at rest**, and export/forget are always available.
-5. **Open source the agent.** People should be able to verify what is
-   collected. Binaries ship next to the source with signed provenance.
+| SLI | SLO |
+|-----|-----|
+| Coverage: present time attributed to a window/state | ≥ 98% |
+| Hook delivery: hook invocations ingested | ≥ 99.9% |
+| Dropped/malformed messages per day | < 10 |
+| Daemon availability during logged-in time | ≥ 99.5% |
+| Ingest latency | p99 < 1 ms |
 
----
+Days below the coverage threshold aren't scored (§7.1).
 
-## 10. Packaging and distribution (summary; see ADR-0005)
+### 11.2 Supervision and failure modes
 
-Everything is built and served **from this GitHub repository's Releases**,
-and everything is **free**: no paid accounts, certificates or hosting. Users
-download the package, along with anything it needs at runtime, and run it on
-their own device. There are no Homebrew, winget, Scoop, apt/rpm or AUR
-listings.
+| Failure | Behaviour |
+|---------|-----------|
+| Crash | launchd `KeepAlive` + `ThrottleInterval`; systemd `Restart=on-failure` + `StartLimitBurst`; Windows task restart |
+| Crash loop (3 in 10 min) | Start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray |
+| Hang | systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
+| Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
+| DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` backup (encrypted, 3 generations); quarantine the bad file |
+| Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |
+| Agent down | Hooks fail open (50 ms timeout, exit 0); the gap shows up as reduced coverage |
 
-- **GoReleaser** in GitHub Actions builds every artifact on `v*` tags:
-  - macOS: a `.dmg` with an ad-hoc-signed universal `.app`
-  - Linux: `.deb`, `.rpm` and `.tar.gz`
-  - Windows: `.msi` and `.zip`
-  - the optional `burnout-classify` sidecar
-- **Supply chain:** each release carries `checksums.txt` signed with cosign
-  (keyless), GitHub build-provenance attestations and an SBOM.
-- **Install:** `install.sh` / `install.ps1` from the repo (download, verify,
-  install, `burnout service install`), or a manual download from Releases.
-- **The app takes over package-manager jobs:** `burnout service`,
-  `burnout update` (manual or opt-in weekly, signature-verified, atomic
-  swap) and `burnout uninstall [--purge]`.
-- **No extra requirements:** a single static binary. The Linux desktop
-  bridges, the Laya sidecar (ONNX Runtime bundled) and the model weights are
-  all release assets here. Building from source needs only Go.
-- **macOS, without a paid Apple account:**
-  - No notarization. `install.sh` uses `curl`, which doesn't set the
-    quarantine flag; `.dmg` users click "Open Anyway" once.
-  - `burnout setup-signing` creates a self-signed code-signing cert in the
-    user's own keychain and re-signs the app on install and every update. The
-    signing identity stays stable, so Accessibility and Screen Recording
-    permissions survive updates (yabai uses the same approach).
-  - Build on macOS CI runners (free for public repos), because cgo
-    cross-compiles poorly.
-- **Linux:** the packages install the systemd user unit, the GNOME Shell
-  extension and the KWin script. Flatpak sandboxing would block most
-  collectors, so skip it.
-- **Windows:** unsigned by default, with the SmartScreen "Run anyway" step
-  documented. Apply to SignPath Foundation's free OSS signing to remove the
-  warning.
-- **Laya weights** are mirrored on a `models-*` release here (Apache-2.0,
-  NOTICE included) and pulled by SHA-256.
-- **Browser extension:** deferred (§4.4). When we pick it up, note that it's
-  the one thing GitHub Releases can't fully serve: Chrome and Edge only
-  install from their stores (or unpacked, in developer mode), and Firefox
-  needs a Mozilla-signed `.xpi`.
+### 11.3 Supportability without telemetry
+
+- **Logging:** structured `log/slog` with size-capped rotation (10 MB × 3).
+  Sensitive values are wrapped in `Sensitive[T]`, whose `String()` and
+  `LogValue()` return `[redacted]`, so a careless log line can't leak.
+- **Diagnostics:** `burnout doctor` shows versions, the component
+  compatibility check, collector and permission states, opt-ins, SLIs,
+  safe-mode status and FDE status. `doctor --bundle` writes a **redacted**
+  archive that the user previews before attaching it to an issue.
+- **Debugging:** pprof and expvar are available only over the local socket,
+  and only when debug is enabled in config.
+
+### 11.4 Release and upgrade
+
+- Releases use semver with conventional-commit release notes, plus a beta
+  channel (GitHub pre-releases).
+- Rollback is `burnout update --to vX`, and the previous binary is kept.
+- **Data compatibility:** version N reads data written by N-2, and
+  migrations are forward-only, with a backup first.
+- Install-type-aware updates and signature checks are covered in ADR-0005.
 
 ---
 
-## 11. Proposed repository layout
+## 12. Security and privacy (summary)
+
+The full threat model, the **data inventory**, redaction rules, user
+controls and verification live in
+**[Privacy & Security](privacy-and-security.md)**, which wins over this
+document on what is collected. The essentials:
+
+- **Local-first, with exactly three outbound calls,** each opt-in and listed
+  in `doctor`: ICS fetch, update check, model pull. No telemetry.
+- **Minimise at source:**
+  - no key values, screen capture or prompt/response text;
+  - no argv beyond argv0 and the allowlisted subcommand;
+  - no persisted titles or title hashes;
+  - pointer positions are never persisted.
+- **Keyed identities:** every identity hash is
+  `HMAC-SHA256(per-install key, …)`, with the key in the OS keystore.
+- **At rest:** OS full-disk encryption (warned when off) **plus** AES-256-GCM
+  on sensitive columns, secure deletion, and default retention
+  (ADR-0007).
+- **User controls:** pause, private hours, exclusions, sensitive-apps
+  denylist → `private`, delete recent, aggregate-only mode, export, forget.
+- **Anti-coercion requirements:**
+  - the tray icon is always visible while collecting;
+  - there is no silent or headless install;
+  - first run is interactive;
+  - a monthly "what's being collected" reminder;
+  - no remote access.
+- **Local attack surface:**
+  - IPC ACLs and peer credentials;
+  - a dashboard hardened against DNS rebinding and CSRF;
+  - Wayland bridges over private connections only;
+  - a sandboxed Laya sidecar;
+  - input counting via counter-only callbacks and Raw Input.
+- **Supply chain:**
+  - pinned ECDSA release key plus optional cosign;
+  - Actions pinned by SHA;
+  - `govulncheck`, reproducible builds, SBOM, OpenSSF Scorecard;
+  - `SECURITY.md`.
+- **Honest scope:** malware running as the same user can read what we can.
+  We don't claim otherwise.
+
+---
+
+## 13. Packaging and distribution (summary; ADR-0005)
+
+- GoReleaser in GitHub Actions publishes to **GitHub Releases** only:
+  - a `.dmg` (ad-hoc-signed universal `.app`);
+  - `.deb`, `.rpm` and tarballs;
+  - `.msi` and `.zip`;
+  - the `burnout-classify` sidecar;
+  - a `models-*` release carrying the Laya weights.
+- **Integrity:** `checksums.txt` is signed with a **pinned ECDSA P-256
+  release key**, whose public key is embedded in `install.sh`,
+  `install.ps1` and the binary. The scripts verify it with
+  `openssl`/.NET, so users don't need extra tools. Cosign keyless
+  signatures and build-provenance attestations are additional checks.
+- **Updates:** `burnout update` rejects downgrades and keeps the previous
+  binary.
+  - Package installs (`.deb`/`.rpm`/`.msi`) download and verify the new
+    package and ask the user to install it.
+  - Script and tarball installs live in a user prefix and swap atomically.
+  - On macOS, automatic updates only notify.
+- **macOS without a paid account:**
+  - the installer uses `curl`, which avoids quarantine;
+  - a self-signed local signing key, restricted to `codesign` with a prompt
+    per use, keeps TCC permissions stable across updates;
+  - re-signing happens only during user-initiated installs and updates.
+- **Windows:** unsigned at first, with SignPath Foundation's free OSS
+  signing as the upgrade path.
+
+---
+
+## 14. Testing strategy
+
+| Layer | What |
+|-------|------|
+| Domain unit | Table tests per package; `Clock` injected; no OS |
+| Property | Σ attention ≤ presence ≤ 1; human timeline non-overlapping; Σ human sub-states ≤ wall time; z finite for all inputs |
+| Replay / golden | Recorded, annotated traces (2-monitor day, parallel agents, crunch week) → expected rollups, timelines, features, scores |
+| Contract | Recorded hook payloads per Claude Code version; datagram/bridge/sidecar schemas N and N-1 |
+| Fuzz | Ingest parser, ICS parser, config loader, schema decoding |
+| **Privacy canary** | Inject secret-looking strings into titles, argv, cwd, Claude payloads, ICS and check-in text → replay → grep the DB file bytes, WAL, logs, exports, backups and the doctor bundle; fail on any hit |
+| Leak | `ps`/`/proc` inspection during hooked commands; hook stdout empty for every event |
+| Platform integration | macOS, Windows, Linux (Xvfb X11; headless Mutter/Weston Wayland) runners |
+| Shells | bash 3.2, bash 5, zsh, fish 3, pwsh 7, with starship/atuin present |
+| Migration | Upgrade from every released schema; refuse-newer test |
+| Performance | Per-tick allocation benchmarks; hook latency per shell; soak (§10) |
+| Lint / arch | `golangci-lint`, `go-arch-lint` dependency rule, `time.Now` ban in domain, `govulncheck` |
+
+---
+
+## 15. Repository layout
 
 ```
 burnout-tracker/
-├── cmd/burnout/                 # single binary: daemon, emit, hook, status, doctor, install-hooks
-├── cmd/burnout-classify/        # optional Laya sidecar (ONNX Runtime)
+├── cmd/
+│   ├── burnout/                 # wiring only: daemon, emit, hook, status, doctor, config, service, update…
+│   └── burnout-classify/        # optional Laya sidecar
 ├── internal/
-│   ├── collector/               # interface + per-OS impls (build tags)
-│   │   ├── darwin/  windows/  x11/  wayland/{gnome,kde,wlroots}/
-│   ├── integrations/
-│   │   ├── shell/               # hook scripts (embedded) + installer
-│   │   └── agents/claude/       # AgentAdapter impl
-│   ├── bus/                     # typed events, channels
-│   ├── sessionize/              # raw events → intervals
-│   ├── attention/               # attention engine (pure, heavily unit-tested)
-│   ├── store/                   # sqlite, migrations, retention
-│   ├── features/                # daily feature extraction (versioned)
-│   ├── classify/                # rules → overrides → cache → Laya sidecar cascade
-│   ├── calendar/                # ICS free/busy import
-│   ├── score/                   # baseline, strain, forecast, model inference
-│   ├── api/                     # local HTTP/datagram server
-│   └── ui/                      # tray + embedded dashboard assets
-├── extensions/
-│   ├── gnome-shell/             # Wayland window/pointer bridge
-│   ├── kwin/
-│   └── browser/                 # deferred
-├── research/                    # Python/JAX notebooks, synthetic data, model export
+│   ├── domain/                  # pure, no I/O, no goroutines
+│   │   ├── types/               # Event, Interval, Window, Category, Sensitive[T]…
+│   │   ├── sessionize/  attention/  timeline/  classify/  features/  score/  review/
+│   │   └── ports/               # EventSource, Store, Classifier, Clock, KeyStore, Notifier
+│   ├── adapters/
+│   │   ├── collector/{darwin,windows,x11,wayland}/
+│   │   ├── ingest/              # socket/pipe server, schema validation, rate limits
+│   │   ├── store/sqlite/        # migrations, retention, column crypto
+│   │   ├── keystore/{darwin,windows,secretservice,file}/
+│   │   ├── classify/laya/       # sidecar client
+│   │   ├── calendar/ics/
+│   │   ├── integrations/{shell,claude}/
+│   │   ├── api/                 # query API + dashboard server
+│   │   └── ui/                  # tray + embedded SPA
+│   └── config/                  # TOML schema, defaults, validation
+├── schemas/                     # JSON Schemas for every cross-process contract
+├── extensions/{gnome-shell,kwin}/
+├── research/                    # Python notebooks, synthetic data, pre-registered analyses, coefficient export
 ├── packaging/                   # goreleaser, nfpm, wix, launchd/systemd units
-├── install.sh / install.ps1     # verified installers pulling from GitHub Releases
-└── docs/                        # this document + ADRs
+├── install.sh  install.ps1
+├── SECURITY.md                  # disclosure via GitHub private vulnerability reporting
+└── docs/                        # design, privacy & security, ADRs, reviews, compat matrix
 ```
-
-The `attention`, `sessionize`, `features` and `score` packages are **pure
-functions over event streams**. Recorded event traces can be replayed through
-them in tests, so tuning doesn't depend on any particular OS.
 
 ---
 
-## 12. Roadmap
+## 16. Roadmap
 
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
-| **0: Spike (2–3 wks)** | macOS + Windows focus/idle/pointer collectors, zsh hook, Claude Code hooks, SQLite, `burnout status`. **Laya spike** in parallel: CPU latency, RAM and accuracy on 500 hand-labelled titles/domains vs. rules-only | One developer's full day captured correctly on a 2-monitor setup; manual timeline matches reality within 10%. Go/no-go on Laya |
-| **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, role profiles + rules classifier, ICS busy blocks, daily features, heuristic strain, dashboard, weekly check-in, GitHub Releases pipeline + install scripts + `burnout update` | 10–20 alpha users (mixed roles) run it for 4 weeks; < 1% CPU; no shell regressions |
-| **2: Personalised** | Trend forecast, per-user learned model from check-ins, optional Laya classifier, KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
-| **3: Integrations** | More agent adapters (Codex, Aider, Cursor), OS calendars, editor plugins | — |
-| **4: Research** | `export --research`, population priors, survival model; optional peer-to-peer E2E sync | Ethics/privacy review done before any dataset is published |
+| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite with column crypto; `status` and `doctor`; canary test. **Laya spike** in parallel (accuracy on ~500 labelled samples vs. rules/kNN, CPU latency, RAM) | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green; Laya go/no-go |
+| **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
+| **2: Personalised** | Trend forecast; per-user model; optional Laya classifier; KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
+| **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
+| **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |
 
 ---
 
-## 13. Trade-offs and what to revisit
+## 17. Trade-offs and what to revisit
 
 | Decision | Trade-off | Revisit when |
 |----------|-----------|--------------|
-| Heuristic attention model | Explainable and deterministic, but the weights are hand-tuned | Enough check-ins and "what were you doing?" spot-labels exist to fit the weights |
-| Hooks over process scanning | Accurate and cheap, but requires install and misses unhooked shells | Users report gaps; add a process-tree sampler as a fallback |
-| Pure-Go inference | Simple shipping, but limited model families | A model clearly beats the linear/Bayesian baseline and needs a heavier runtime |
-| Local-only | Maximum trust, but no cross-device view and no population learning | Users ask for multi-device; do E2E sync, never plaintext cloud |
-| Single binary | Easy to distribute, but platform code is mixed with core | Platform glue grows large; split collectors into helper processes |
-| Weekly CBI labels | Validated and cheap, but sparse | Add daily micro-check-ins if label density limits the model |
+| Heuristic attention model | Explainable and deterministic, but hand-tuned weights | Opt-in spot-labels exist to fit weights |
+| Hooks over process scanning | Accurate and private, but needs install and misses unhooked shells | Users report gaps; add a process-tree sampler fallback |
+| Transcript/OTLP fallbacks removed | Simpler and more private, but no data until hooks are installed | Hooks prove insufficient; reintroduce with field allowlists |
+| Column encryption + FDE (not SQLCipher) | Pure Go, but metadata columns (times, categories) stay plaintext | A threat-model change requires full-file encryption |
+| Pure-Go inference | Simple shipping, but limited model families | A heavier model clearly beats the baseline |
+| Local-only | Maximum trust, but no cross-device view | Users ask for multi-device; E2E sync only |
+| In-process native collectors | Simple, but a native crash takes the daemon down (mitigated by safe mode) | Crash data from alpha |
+| Weekly CBI + daily micro check-in | Validated and light, but labels are still sparse | Validation underpowered |
 
 ---
 
-## 14. Resolved questions
+## 18. Glossary
 
-1. **"jev":** TypeSafe's Jev (closed, cloud). The design uses its
-   open-weight counterpart Laya, optionally and locally, for classification
-   only (ADR-0006).
+| Term | Meaning |
+|------|---------|
+| **Presence** | Probability the user is at the device and engaged, in [0,1] |
+| **Attention** | Presence distributed across visible windows (or `unattributed`) |
+| **Rollup** | Per-minute, per-window sums of attended/focused/visible seconds |
+| **Interval** | A timed span on a timeline: shell command, agent state, human state, presence, busy block |
+| **Human timeline** | The single sequence of the user's states across all agent sessions |
+| **Agent timeline** | Per-session sequence of `working` / `blocked_on_human` / `idle` |
+| **Logical day** | Local day with a configurable rollover (default 04:00) |
+| **Coverage** | Fraction of logged-in time observed; low-coverage days are missing |
+| **Strain** | 0–100 score from grouped, capped deviations plus guardrail penalties |
+| **Guardrail** | An absolute limit evaluated regardless of personal baseline |
+
+---
+
+## 19. Decisions log
+
+**Resolved:**
+1. **"jev":** TypeSafe's Jev (closed, cloud). Laya is used optionally and
+   locally, for classification only (ADR-0006).
 2. **Audience:** developers first, then students, researchers and PMs →
-   role profiles and a classification cascade. The browser extension is
-   deferred; window-title classification covers browsers in the meantime.
-3. **Business model:** none; open source → no server, research export
-   instead of telemetry, free signing options (ADR-0005).
+   role profiles and a classification cascade.
+3. **Business model:** none. Open source, no server, free distribution via
+   GitHub Releases (ADR-0005).
 4. **Calendar:** free/busy only, via ICS in Phase 1 (§4.7).
+5. **Browser extension:** deferred (§4.4).
+6. **Review findings (2026-10-20):** resolved in this version. See the
+   resolution table in the review.
 
-## 15. Open questions
+**Proposed defaults awaiting maintainer confirmation:**
+1. Encryption approach: FDE + column encryption (ADR-0007).
+2. Window titles off by default, with opt-in title classification.
+3. The anti-coercion requirements (Privacy & Security §5).
 
-1. **Licence:** Apache-2.0 (matches Laya, permissive) is the suggestion. The
-   GNOME Shell extension has to be GPL-2.0-or-later regardless.
+**Open:**
+1. **Licence:** Apache-2.0 is suggested (it matches Laya). The GNOME Shell
+   extension must be GPL-2.0-or-later.

@@ -4,7 +4,11 @@
 **Scope:** `docs/system-design.md`, `docs/adr/0001`–`0006`
 **Lenses:** architecture, product, systems, SRE, security, privacy, correctness,
 performance and scale, maintainability.
-**Verdict:** **Not ready to build against yet.** The direction is sound: local-first,
+**Status:** **Resolved in design v0.2** (same day). See the
+[resolution table](#9-resolution-v02) at the end. Three items are proposed
+defaults that need maintainer confirmation.
+
+**Original verdict:** **Not ready to build against yet.** The direction is sound: local-first,
 the attention model, hooks, and statistical scoring with local classification.
 But the docs contradict themselves on encryption and window titles. Several
 privacy and security mechanisms are asserted rather than specified, and
@@ -636,20 +640,99 @@ phenomenon in ICD-11, not a disease, helps. Even so:
 ## 8. Recommended doc changes (checklist)
 
 **Before Phase 0 code:**
-- [ ] Add §9.1 threat model + §9.2 data inventory; decide encryption (3.1) and title default (2.2)
-- [ ] Specify keyed HMAC everywhere; shell-side argv0 extraction (3.4); hook stdout rule (4.2)
-- [ ] Rewrite §4.3 timeline for one-human/N-agents (4.1), interrupts, PermissionRequest
-- [ ] Add dependency rule + versioned contracts + config model (1.1–1.3)
-- [ ] Fix localhost dashboard auth (3.2) and IPC ACLs (3.8)
+- [x] Add §9.1 threat model + §9.2 data inventory; decide encryption (3.1) and title default (2.2)
+- [x] Specify keyed HMAC everywhere; shell-side argv0 extraction (3.4); hook stdout rule (4.2)
+- [x] Rewrite §4.3 timeline for one-human/N-agents (4.1), interrupts, PermissionRequest
+- [x] Add dependency rule + versioned contracts + config model (1.1–1.3)
+- [x] Fix localhost dashboard auth (3.2) and IPC ACLs (3.8)
 
 **Before alpha:**
-- [ ] Scoring fixes: MAD floor, absolute guardrails, weekday seasonality, coverage/missing, correlated groups, 0–100 mapping (4.4)
-- [ ] Validation plan with rmcorr, 8+ weeks (4.5); logical day (4.6)
-- [ ] Privacy controls: pause, exclusions, sensitive denylist, delete-recent (2.3); anti-stalkerware requirements (2.4); secure deletion (2.5)
-- [ ] Updater/installer integrity + package-install update path (3.3); supply-chain hardening (3.5)
-- [ ] D-Bus exposure fix (3.6); macOS signing-key ACL (3.7); Raw Input on Windows (3.9)
-- [ ] SLIs + coverage badge, failure-mode runbook, `doctor --bundle`, `Sensitive[T]` logging (6.1–6.3)
-- [ ] Intervention loop, safety copy, onboarding/permissions, annotations (7.1–7.4)
-- [ ] Per-collector cadence, energy, stress/soak tests (5.1–5.3)
+- [x] Scoring fixes: MAD floor, absolute guardrails, weekday seasonality, coverage/missing, correlated groups, 0–100 mapping (4.4)
+- [x] Validation plan with rmcorr, 8+ weeks (4.5); logical day (4.6)
+- [x] Privacy controls: pause, exclusions, sensitive denylist, delete-recent (2.3); anti-stalkerware requirements (2.4); secure deletion (2.5)
+- [x] Updater/installer integrity + package-install update path (3.3); supply-chain hardening (3.5)
+- [x] D-Bus exposure fix (3.6); macOS signing-key ACL (3.7); Raw Input on Windows (3.9)
+- [x] SLIs + coverage badge, failure-mode runbook, `doctor --bundle`, `Sensitive[T]` logging (6.1–6.3)
+- [x] Intervention loop, safety copy, onboarding/permissions, annotations (7.1–7.4)
+- [x] Per-collector cadence, energy, stress/soak tests (5.1–5.3)
 
 **Before 1.0:** the remaining M/L items.
+
+---
+
+## 9. Resolution (v0.2)
+
+SD = [system design](../system-design.md), PS = [privacy & security](../privacy-and-security.md), ADRs in [`docs/adr/`](../adr/).
+
+| # | Finding | Resolved in |
+|---|---------|-------------|
+| 1.1 | Dependency rule | SD §3.2; ADR-0001 |
+| 1.2 | Versioned contracts | SD §3.3; ADR-0001 |
+| 1.3 | Config model | SD §3.4; ADR-0001 |
+| 1.4 | Typed payloads / feature registry | SD §3.5; ADR-0001 |
+| 1.5 | Components + compat matrix | SD §3.1; ADR-0001 |
+| 1.6 | Native crash → safe mode | SD §11.2; ADR-0001 |
+| 1.7 | Doc hygiene + glossary | SD §2.1 (F-numbers), §18 glossary; JAX and `burnoutd` removed; ADR-0005 context |
+| 2.1 | Data inventory + canary test | PS §3, §12; SD §14 |
+| 2.2 | Title default + keyed HMAC + redaction | PS §3.1, §4.1, §4.5; SD §4.6; ADR-0006 |
+| 2.3 | Privacy controls | PS §5.1; SD F13 |
+| 2.4 | Anti-coercion | PS §5.2 (AC-1…AC-6); SD §8.1, §12 |
+| 2.5 | Real deletion / retention | PS §7.2; SD §6; ADR-0007 |
+| 2.6 | Data directory locations | PS §7.3; SD §6; ADR-0007 |
+| 2.7 | Network calls + ICS secret | PS §6, §4.4; SD §4.7, §12 |
+| 2.8 | Transcript / OTLP fallbacks | Removed from Phase 1: SD §4.3; ADR-0003 Option D |
+| 2.9 | Research export | PS §11.1; ADR-0004; SD §7.4 |
+| 2.10 | Screen-share leaks | PS §5.1; SD §8.3 |
+| 2.11 | Sensitive app ids | PS §5.1 (denylist, aggregate-only) |
+| 3.1 | Threat model + encryption | PS §2, §7.1; ADR-0007 (FDE + column AES-GCM) |
+| 3.2 | Dashboard auth | PS §8.2; SD §9 |
+| 3.3 | Installer/updater integrity | PS §9.1–9.2; ADR-0005; SD §13 |
+| 3.4 | Shell argv leak | PS §4.2; SD §4.2; ADR-0003; ps-leak test PS §12 |
+| 3.5 | Supply chain | PS §9.4 |
+| 3.6 | D-Bus exposure | PS §8.3; SD §4.1; ADR-0002 |
+| 3.7 | macOS signing key ACL | PS §9.3; ADR-0005 |
+| 3.8 | IPC hardening | PS §8.1; SD §9 |
+| 3.9 | Keylogger APIs | PS §8.6; SD §4.1; ADR-0002 |
+| 3.10 | Sidecar sandbox | PS §8.4; ADR-0006 |
+| 3.11 | Dotfile/settings edits | PS §8.5; SD §4.2–4.3; ADR-0003 |
+| 4.1 | One human / N agents | SD §4.3; ADR-0003 |
+| 4.2 | Hook semantics (stdout, interrupts, approvals, async, tty, remote) | SD §4.3; ADR-0003; PS §4.3 |
+| 4.3 | Attention edge cases | SD §4.1; ADR-0002 |
+| 4.4 | Scoring statistics | SD §7.1–7.2; ADR-0004 |
+| 4.5 | Validation plan | SD §7.5; ADR-0004 |
+| 4.6 | Logical day / time | SD §5 |
+| 4.7 | Shell coverage (interactive, coexistence, WSL, SSH) | SD §4.2; ADR-0003 |
+| 4.8 | Persistence granularity | SD §4.1, §6; ADR-0002 |
+| 4.9 | Laya budget | SD §2.2, §10; ADR-0006; PS §8.4 |
+| 5.1 | Collector cadence | SD §4.1; ADR-0002 |
+| 5.2 | Energy / App Nap | SD §2.2, §4.1; ADR-0002 |
+| 5.3 | Stress + soak | SD §10, §14 |
+| 5.4 | SQLite settings | SD §6 |
+| 5.5 | Go runtime | SD §10 |
+| 5.6 | Shell hook cost | SD §2.2, §4.2; ADR-0003 |
+| 6.1 | SLIs/SLOs | SD §11.1 |
+| 6.2 | Failure modes | SD §11.2 |
+| 6.3 | Supportability | SD §11.3; PS §10 |
+| 6.4 | Release engineering | SD §11.4; ADR-0005 |
+| 6.5 | Platform policy | SD §2.2; ADR-0005 |
+| 6.6 | CI test matrix | SD §14; PS §12 |
+| 7.1 | Intervention loop + principle | SD §1, §8.2; F15 |
+| 7.2 | Safety | SD §8.4; F16 |
+| 7.3 | Onboarding + permissions | SD §8.1, §2.3 (zero-permission mode) |
+| 7.4 | Annotations | SD §8.2, §6, §7.2; F14 |
+| 7.5 | Success metrics | SD §8.6 |
+| 7.6 | Portability | SD F17; ADR-0007 (passphrase-wrapped key) |
+| 7.7 | Accessibility + i18n | SD §2.2, §8.5, §4.1 (input profiles) |
+| 7.8 | Regulatory wording | SD §1; PS §11.2 |
+
+**Decisions made while resolving**, which go beyond the review's wording:
+- Input activity counts are **opt-in on every platform** and **never persisted**. They exist only as in-memory 5 s counters for the attention engine.
+- Agent session ids are stored as HMACs, so our data doesn't link to transcript files on disk.
+- Hook processes don't compute HMACs; the daemon does it on receipt. That keeps keystore access out of the hot path, and raw paths only cross the same-user socket.
+- An egress CI test enforces that only the three opt-in calls can reach the network.
+- `raw_events.payload` is encrypted along with the other sensitive columns.
+
+**Proposed defaults awaiting maintainer confirmation** (SD §19):
+1. FDE + column encryption (ADR-0007).
+2. Window titles off by default, with opt-in title classification.
+3. The anti-coercion requirements AC-1…AC-6.
