@@ -61,7 +61,7 @@ cosign keyless signing, and GitHub artifact attestations.
 - `burnout service install|uninstall`: launchd LaunchAgent, systemd `--user`
   unit, Windows logon task. It's idempotent, and the `.deb`/`.rpm`/`.msi`
   call it on install.
-- `burnout install-hooks` / `install-browser` (native-messaging manifests).
+- `burnout install-hooks` (shell + Claude Code hooks).
 - `burnout update`: **manual, or opt-in automatic.** It queries the GitHub
   Releases API, downloads the asset, verifies the cosign signature and
   checksum, then swaps the binary atomically (rename on Unix; staged replace
@@ -107,7 +107,7 @@ fits a small, non-commercial project, and having the source and binaries side
 by side is a trust signal for a monitoring app. In exchange, we take on
 updates, service registration and uninstall, which a package manager would
 otherwise handle. Those are well-understood problems, and they are needed
-anyway for hooks and browser manifests.
+anyway for hooks.
 
 **Code signing without paying.** Our own verification (cosign + checksums)
 covers integrity. The OS-level gates are handled like this:

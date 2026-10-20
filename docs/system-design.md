@@ -50,7 +50,7 @@ server**: every component runs on the user's machine.
 | F6 | Show today/week/trend in a local dashboard, a tray icon and a CLI (`burnout status`) | 1 |
 | F7 | Short periodic self-check-ins (labels for the model) | 1 |
 | F8 | Forecast time-to-threshold | 2 |
-| F9 | Browser extension: per-tab domain + visibility, via native messaging to the agent | 2 |
+| F9 | Browser extension: per-tab domain + visibility, via native messaging to the agent | Deferred |
 | F11 | Role profiles (developer / student / researcher / PM) and role-aware activity classification | 1 (rules), 2 (Laya) |
 | F12 | Calendar free/busy blocks via ICS | 1 |
 | F10 | Optional, opt-in, end-to-end-encrypted multi-device sync | 4 |
@@ -91,7 +91,7 @@ server**: every component runs on the user's machine.
 ```
 ┌──────────────────────────── user's machine ─────────────────────────────┐
 │                                                                          │
-│  OS / desktop                Integrations (push)          Browser (P3)   │
+│  OS / desktop                Integrations (push)          Browser (later)│
 │  ┌──────────────┐   ┌──────────────────────────────┐   ┌──────────────┐  │
 │  │ focus events │   │ shell hooks (zsh/bash/fish/  │   │ extension    │  │
 │  │ window list  │   │   pwsh) → `burnout emit`     │   │ tab domain + │  │
@@ -316,7 +316,17 @@ a local OTLP endpoint in the agent as a cross-check.
 `Translate(raw) []Event`) lets us add Codex CLI, Aider, Cursor and others
 later without changing the sessionizer.
 
-### 4.4 Browser (Phase 2)
+### 4.4 Browser (deferred)
+
+> **Deferred.** We'll design the extension and its distribution later. Until
+> then, browser activity is covered by the OS collectors: the browser
+> window's attention share plus its **window title** (usually the page
+> title), classified in memory by the cascade in §4.6 and never stored.
+> That is enough for coarse categories (docs vs. comms vs. video), but not
+> for per-tab detail.
+
+The sketch below is kept for when we pick this up.
+
 
 A WebExtension (Chrome/Edge/Firefox) reports per-tab **domain** (not full
 URL by default), `document.visibilityState`, audible state and window ID to
@@ -632,13 +642,10 @@ listings.
   warning.
 - **Laya weights** are mirrored on a `models-*` release here (Apache-2.0,
   NOTICE included) and pulled by SHA-256.
-- **Browser extension (P2), the one exception:** Chrome and Edge won't
-  install extensions from outside their stores, except in developer mode
-  ("Load unpacked") or via enterprise policy. Firefox accepts a
-  self-hosted `.xpi` only if Mozilla signs it as an *unlisted* add-on. Plan:
-  publish signed `.xpi` + unpacked `.zip` on Releases, and decide on store
-  listings when Phase 2 starts. The native messaging host manifest is
-  registered by `burnout install-browser`.
+- **Browser extension:** deferred (§4.4). When we pick it up, note that it's
+  the one thing GitHub Releases can't fully serve: Chrome and Edge only
+  install from their stores (or unpacked, in developer mode), and Firefox
+  needs a Mozilla-signed `.xpi`.
 
 ---
 
@@ -667,7 +674,7 @@ burnout-tracker/
 ├── extensions/
 │   ├── gnome-shell/             # Wayland window/pointer bridge
 │   ├── kwin/
-│   └── browser/                 # Phase 3
+│   └── browser/                 # deferred
 ├── research/                    # Python/JAX notebooks, synthetic data, model export
 ├── packaging/                   # goreleaser, nfpm, wix, launchd/systemd units
 ├── install.sh / install.ps1     # verified installers pulling from GitHub Releases
@@ -686,7 +693,7 @@ them in tests, so tuning doesn't depend on any particular OS.
 |-------|-------|---------------|
 | **0: Spike (2–3 wks)** | macOS + Windows focus/idle/pointer collectors, zsh hook, Claude Code hooks, SQLite, `burnout status`. **Laya spike** in parallel: CPU latency, RAM and accuracy on 500 hand-labelled titles/domains vs. rules-only | One developer's full day captured correctly on a 2-monitor setup; manual timeline matches reality within 10%. Go/no-go on Laya |
 | **1: MVP (6–8 wks)** | Attention engine v1, human-segment split, all shells, Linux X11 + GNOME, role profiles + rules classifier, ICS busy blocks, daily features, heuristic strain, dashboard, weekly check-in, GitHub Releases pipeline + install scripts + `burnout update` | 10–20 alpha users (mixed roles) run it for 4 weeks; < 1% CPU; no shell regressions |
-| **2: Personalised + browser** | Trend forecast, per-user learned model from check-ins, optional Laya classifier, browser extension (moved up because non-dev roles live in the browser), KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
+| **2: Personalised** | Trend forecast, per-user learned model from check-ins, optional Laya classifier, KDE/wlroots, nudges | Strain correlates with CBI (target ρ ≥ 0.4 within-user) on alpha cohort |
 | **3: Integrations** | More agent adapters (Codex, Aider, Cursor), OS calendars, editor plugins | — |
 | **4: Research** | `export --research`, population priors, survival model; optional peer-to-peer E2E sync | Ethics/privacy review done before any dataset is published |
 
@@ -711,8 +718,8 @@ them in tests, so tuning doesn't depend on any particular OS.
    open-weight counterpart Laya, optionally and locally, for classification
    only (ADR-0006).
 2. **Audience:** developers first, then students, researchers and PMs →
-   role profiles, a classification cascade, and the browser extension moved
-   up to Phase 2.
+   role profiles and a classification cascade. The browser extension is
+   deferred; window-title classification covers browsers in the meantime.
 3. **Business model:** none; open source → no server, research export
    instead of telemetry, free signing options (ADR-0005).
 4. **Calendar:** free/busy only, via ICS in Phase 1 (§4.7).
@@ -721,6 +728,3 @@ them in tests, so tuning doesn't depend on any particular OS.
 
 1. **Licence:** Apache-2.0 (matches Laya, permissive) is the suggestion. The
    GNOME Shell extension has to be GPL-2.0-or-later regardless.
-2. **Browser stores (Phase 2):** the Chrome Web Store charges a one-time
-   $5 developer fee; Firefox and Edge are free. Is $5 acceptable, or should
-   Chrome users load the extension unpacked from Releases?
