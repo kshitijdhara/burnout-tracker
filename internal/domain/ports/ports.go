@@ -14,15 +14,6 @@ type Clock interface {
 	Now() time.Time
 }
 
-// KeyStore holds secrets in the OS keystore (or a 0600 file fallback).
-type KeyStore interface {
-	// GetOrCreate returns the named secret, creating a random 32-byte value on first use.
-	GetOrCreate(name string) (model.Sensitive[[]byte], error)
-	Delete(name string) error
-	// Backend names the storage in use, e.g. "keychain" or "file", for doctor.
-	Backend() string
-}
-
 // Collector produces desktop snapshots. Implementations are per OS.
 type Collector interface {
 	Snapshot(ctx context.Context) (model.Snapshot, error)

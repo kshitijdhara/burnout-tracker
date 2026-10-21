@@ -53,6 +53,7 @@ type Window struct {
 type Snapshot struct {
 	At            time.Time
 	Windows       []Window
+	Monitors      []Rect   // active displays in global coordinates, for topology
 	PointerWindow WindowID // window under the pointer, 0 if none
 	PointerMoved  bool
 	IdleFor       time.Duration // time since last user input of any kind

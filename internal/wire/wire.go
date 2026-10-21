@@ -28,6 +28,9 @@ const MaxMessageBytes = 4096
 const (
 	KindShellCommand = "shell.cmd"
 	KindAgentHook    = "agent.hook"
+	// KindPing carries no body. `burnout doctor` sends it to check the
+	// daemon is listening; the daemon drops it without counting an error.
+	KindPing = "ping"
 )
 
 // Message is the envelope for every hook-to-daemon message.
@@ -124,6 +127,11 @@ var (
 
 func (m Message) validate() error {
 	switch m.Kind {
+	case KindPing:
+		if m.Shell != nil || m.Agent != nil {
+			return fmt.Errorf("%w: ping body", ErrMalformed)
+		}
+		return nil
 	case KindShellCommand:
 		if m.Shell == nil || m.Agent != nil {
 			return fmt.Errorf("%w: shell body", ErrMalformed)

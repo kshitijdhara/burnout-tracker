@@ -84,3 +84,12 @@ func FuzzDecode(f *testing.F) {
 		}
 	})
 }
+
+func TestPing(t *testing.T) {
+	if _, err := Decode(strings.NewReader(`{"v":1,"kind":"ping"}`)); err != nil {
+		t.Fatalf("ping rejected: %v", err)
+	}
+	if _, err := Decode(strings.NewReader(`{"v":1,"kind":"ping","shell":{"argv0":"ls","start_ms":1,"end_ms":1}}`)); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("ping with body: %v", err)
+	}
+}
