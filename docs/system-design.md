@@ -141,7 +141,7 @@ component.
 │  │ window geom. │   │ Claude Code hooks →          │                     │
 │  │ pointer/idle │   │   `burnout hook claude`      │                     │
 │  │ input counts │   └──────────────┬───────────────┘                     │
-│  │ media/call   │                  │ v-tagged datagrams, ≤ 4 KiB         │
+│  │ media/call   │                  │ v-tagged messages, ≤ 4 KiB          │
 │  └──────┬───────┘                  │ socket (0700 dir, peer-cred) / pipe │
 │  ┌──────▼──────────────────────────▼────────────────────────────────┐    │
 │  │ burnout daemon                                                   │    │
@@ -162,7 +162,7 @@ component.
 ```
 domain   (attention, sessionize, timeline, classify/rules, features, score, review)
    ▲     imports only the standard library and internal/domain/types
-ports    (EventSource, Store, Classifier, Clock, KeyStore, Notifier): interfaces owned by the domain
+ports    (Collector, ProcessInfo, Clock; Sink, Hasher in app): interfaces owned by their consumers
    ▲
 adapters (collector/*, ingest, store/sqlite, keystore/*, classify/laya, api, ui, integrations/*)
    ▲
@@ -181,7 +181,7 @@ cmd/     (wiring only: config → adapters → domain)
 ### 3.3 Contracts
 
 Every cross-process message is versioned:
-- hook datagrams;
+- hook messages (one per stream connection);
 - the GNOME/KWin bridge protocol;
 - the sidecar's stdin/stdout protocol;
 - the export format.
@@ -319,7 +319,9 @@ Shell hooks, not process scanning or keylogging (ADR-0003).
 `burnout install-hooks` adds a **marked block** (`# >>> burnout >>>` …
 `# <<< burnout <<<`) to `.zshrc`, `.bashrc`, `config.fish` and the
 PowerShell `$PROFILE`. The rules for that block:
-- the original file is backed up first;
+- the original file is backed up first, into the app's data directory
+  (`hook-backups/`, owner-only), never next to the file, so a backup can't
+  land inside a dotfiles repository;
 - the write is atomic and idempotent;
 - `uninstall-hooks` restores the file exactly;
 - other preexec users (starship, atuin, iTerm2 shell integration) keep
@@ -343,6 +345,11 @@ PowerShell `$PROFILE`. The rules for that block:
    commands.
 3. On zsh/bash/fish the emitter runs in the background (`&!` / `disown`)
    with a 50 ms socket timeout, and always exits 0.
+4. A command that doesn't resolve (a typo or a pasted token) is sent with
+   an empty name and its exit code, so failure loops still count without
+   recording anything the user typed.
+5. The subcommand allowlist is owned by the domain classifier and rendered
+   into the hook script, so a word not on it never leaves the shell.
 
 **Event (after hook-side extraction):**
 
@@ -395,14 +402,17 @@ uninstall. It also handles user, project and managed settings.
 |-------|-----|
 | `SessionStart` / `SessionEnd` | open / close the session's agent timeline |
 | `UserPromptSubmit` | agent → `working`; closes any open segment of the previous turn |
-| `PreToolUse` / `PostToolUse` | tool mix; registered **async** where supported |
+| `PreToolUse` / `PostToolUse` | tool mix; synchronous in Phase 0 (an `async` hook option isn't verified), budget < 10 ms |
 | `PermissionRequest` (version-detected) | agent → `blocked_on_human`; human → `approving` if that terminal is attended |
 | `Notification` | fallback for blocked-on-human on versions without `PermissionRequest` |
-| `Stop` / `SubagentStop` | agent → `idle`; marks "fresh output" for presence |
-| `StopFailure` | agent → `idle` (error) |
+| `Stop` | agent → `idle`; marks "fresh output" for presence. (`SubagentStop` is not registered: subagents don't change the session's state) |
+| `StopFailure` | agent → `idle` (error). Not registered in Phase 0 until the Claude Code version that introduced it is verified; the 10-minute timeout covers it |
 
 **Hook rules (security-relevant):**
-1. **The hook writes nothing to stdout, ever.** For `UserPromptSubmit` and
+1. **The hook writes nothing to stdout, ever, and never blocks.** The
+   registered command is `'<bin>' hook claude || true`, because a Go runtime
+   crash exits with 2, which Claude Code treats as blocking. For
+   `UserPromptSubmit` and
    `SessionStart`, stdout is injected into Claude's context, so a stray
    print would be a prompt injection in every user's sessions. Stderr is
    also silent. The hook always exits 0. A test asserts empty stdout for
@@ -549,7 +559,10 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 
 **Driver and settings:**
 - `modernc.org/sqlite` (pure Go);
-- one writer goroutine, with batched transactions every 15 s;
+- the main loop writes in batched transactions every 15 s; maintenance
+  (retention in 5,000-row chunks, recovery copies) runs on its own goroutine,
+  and SQLite serialises the two writers (`busy_timeout` covers the overlap);
+- `status` and `doctor` open the database read-only and never migrate;
 - `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, prepared
   statements;
 - `secure_delete=ON` and `auto_vacuum=INCREMENTAL`, with an incremental
@@ -734,9 +747,13 @@ These, plus §7.5, are the alpha exit criteria.
     check** (`SO_PEERCRED` / `LOCAL_PEERCRED`) for the same UID.
   - **Windows named pipe** with an explicit DACL for the user's SID and
     `PIPE_REJECT_REMOTE_CLIENTS`.
-- **Ingest:** unixgram datagrams / pipe messages, `≤ 4 KiB`, rate-limited
-  per source, strictly parsed (schema, §3.3), fuzzed in CI. Malformed
-  messages are dropped and counted.
+- **Ingest:** one message per stream connection on the socket or pipe,
+  `≤ 4 KiB`, rate-limited per source (peer PID) and globally, strictly
+  parsed (schema, §3.3), fuzzed in CI.
+  Malformed messages are dropped and counted. Stream sockets rather than
+  datagrams, because peer-credential checks need a connection. On Windows
+  the pipe name includes the user's SID, and hooks verify the pipe server's
+  owner before sending.
 - **Query API (HTTP+JSON over the same socket/pipe):**
   - `GET /v1/status`
   - `GET /v1/days?from&to`
@@ -913,7 +930,7 @@ document on what is collected. The essentials:
 | Domain unit | Table tests per package; `Clock` injected; no OS |
 | Property | Σ attention ≤ presence ≤ 1; human timeline non-overlapping; Σ human sub-states ≤ wall time; z finite for all inputs |
 | Replay / golden | Recorded, annotated traces (2-monitor day, parallel agents, crunch week) → expected rollups, timelines, features, scores |
-| Contract | Recorded hook payloads per Claude Code version; datagram/bridge/sidecar schemas N and N-1 |
+| Contract | Recorded hook payloads per Claude Code version; message/bridge/sidecar schemas N and N-1 (`schemas/v1` is checked against the Go validation) |
 | Fuzz | Ingest parser, ICS parser, config loader, schema decoding |
 | **Privacy canary** | Inject secret-looking strings into titles, argv, cwd, Claude payloads, ICS and check-in text → replay → grep the DB file bytes, WAL, logs, exports, backups and the doctor bundle; fail on any hit |
 | Leak | `ps`/`/proc` inspection during hooked commands; hook stdout empty for every event |
@@ -936,7 +953,7 @@ burnout-tracker/
 │   ├── domain/                  # pure, no I/O, no goroutines
 │   │   ├── types/               # Event, Interval, Window, Category, Sensitive[T]…
 │   │   ├── sessionize/  attention/  timeline/  classify/  features/  score/  review/
-│   │   └── ports/               # EventSource, Store, Classifier, Clock, KeyStore, Notifier
+│   │   └── ports/               # Collector, ProcessInfo, Clock
 │   ├── adapters/
 │   │   ├── collector/{darwin,windows,x11,wayland}/
 │   │   ├── ingest/              # socket/pipe server, schema validation, rate limits

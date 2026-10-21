@@ -32,7 +32,7 @@ prompt/PSReadLine.
   environment variables or stdin. **Never as argv**: argv is visible to every
   local user via `ps` and `/proc` and gets logged by process auditing. The
   project root is HMAC'd by the daemon (keyed per install).
-- **PowerShell never spawns a process.** It writes the datagram in-process
+- **PowerShell never spawns a process.** It writes the message in-process
   with `System.IO.Pipes.NamedPipeClientStream` and a short timeout.
 - zsh/bash/fish run the emitter in the background (`&!` / `disown`).
 - **Coexistence:** the hooks chain with starship, atuin and iTerm2 shell
@@ -50,7 +50,8 @@ prompt/PSReadLine.
 - `PreToolUse`, `PostToolUse`
 - `PermissionRequest` (when available)
 - `Notification`
-- `Stop`, `StopFailure`, `SubagentStop`
+- `Stop` (`StopFailure` is not registered until verified; `SubagentStop`
+  is not registered because subagents don't change the session's state)
 
 The hook process follows these rules:
 - **It writes nothing to stdout, ever.** For `UserPromptSubmit` and
@@ -58,6 +59,8 @@ The hook process follows these rules:
   would inject text into the user's sessions. Diagnostics go to our log, not
   to stdout or stderr.
 - **It always exits 0**, within a 50 ms socket-write timeout.
+  The registered command ends in `|| true`, so even a Go runtime crash
+  (exit code 2, which Claude Code treats as blocking) can't block the user.
 - `PreToolUse`/`PostToolUse` are registered as **async** hooks where Claude
   Code supports it.
 - **Budget:** < 10 ms p99 per invocation.
@@ -99,7 +102,7 @@ The hook process follows these rules:
 - **Claude settings:** we *merge* into the existing JSON and preserve
   existing hooks. We validate before writing and respect managed and
   project-level settings, without overriding them.
-- **Every edit:** take a timestamped backup first, then write atomically
+- **Every edit:** take a backup into the app's data directory first, then write atomically
   (temp file + rename).
 - `uninstall-hooks` removes exactly what we added and nothing else.
 
@@ -155,7 +158,7 @@ in Phase 1.
 
 ## Action Items
 1. [ ] Embedded hook scripts with interactive guard and in-function argv0/subcommand extraction; `install-hooks` / `uninstall-hooks` with marked blocks, backups, atomic writes.
-2. [ ] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the datagram, the DB or logs.
+2. [ ] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the message, the DB or logs.
 3. [ ] Benchmarks in CI: p99 prompt overhead < 5 ms (zsh, bash 3.2, bash 5, fish); PowerShell in-process pipe write; Claude hook < 10 ms p99.
 4. [ ] Claude Code adapter: no-stdout test (any byte on stdout fails CI), version detection, `PermissionRequest`/`StopFailure`/timeout segment closing, parent-walk tty mapping.
 5. [ ] `internal/timeline`: one human timeline + N agent timelines, with property tests (non-overlapping human states; Σ human sub-states ≤ wall time).
