@@ -55,7 +55,7 @@ flags mismatches.
   ignores unknown fields, and drops and counts malformed messages. Contract
   tests run against recorded payloads.
 - **Config model.** One TOML file with a schema, defaults in code and
-  validation at load. Secrets (ICS URL, HMAC key, data key) live in the
+  validation at load. Secrets (ICS URL, HMAC key) live in the
   keystore, never in the file. Use `burnout config get/set`. Every privacy
   opt-in is a config key and is shown in `burnout doctor`.
 - **Feature registry.** Each daily feature is declared once: name, version,

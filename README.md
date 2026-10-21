@@ -38,3 +38,8 @@ Design phase (v0.2). Start here:
   - [0007 data protection at rest](docs/adr/0007-data-protection-at-rest.md)
 - [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md):
   findings and how v0.2 resolves them.
+
+## Licence
+
+[Apache-2.0](LICENSE). The GNOME Shell extension (when added) is
+GPL-2.0-or-later, as GNOME requires, and carries its own licence file.

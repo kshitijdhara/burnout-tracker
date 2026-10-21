@@ -1,6 +1,6 @@
 # Burnout Tracker — System Design
 
-**Status:** Draft v0.2 (incorporates the [2026-10-20 design review](reviews/2026-10-20-design-review.md))
+**Status:** Draft v0.3 (incorporates the [2026-10-20 design review](reviews/2026-10-20-design-review.md) and the maintainer decisions of 2026-10-21)
 **Date:** 2026-10-20
 **Related:** [Privacy & Security](privacy-and-security.md) (source of truth for what is collected) ·
 ADRs [0001](adr/0001-local-first-go-agent.md) ·
@@ -69,7 +69,7 @@ no streaks, no guilt-driven copy, and no red badges at 11 p.m.
 | F14 | Context annotations: on-call, exam week, release, vacation, sick | 1 |
 | F15 | Weekly review loop: drivers, suggestions, user-set boundaries, adherence | 1 |
 | F16 | Safety: supportive copy and regional resources when check-ins are in the high band | 1 |
-| F17 | Encrypted backup/restore (`burnout backup`/`restore`, data key wrapped with a user passphrase), and import of daily features from another machine | 2 |
+| F17 | Portable backup/restore (`burnout backup`/`restore`, passphrase-encrypted archive), and import of daily features from another machine | 2 |
 | F18 | `burnout doctor` (health, permissions, SLIs) and `doctor --bundle` (redacted diagnostics) | 1 |
 
 ### 2.2 Non-functional
@@ -152,7 +152,7 @@ component.
 │  └──────┬───────────────┬──────────────────┬────────────────────────┘    │
 │         ▼               ▼                  ▼                             │
 │   SQLite (WAL,     burnout-classify   tray · dashboard (127.0.0.1,       │
-│   column-encrypted  (optional,        cookie auth) · CLI                 │
+│   0600, on FDE,     (optional,        cookie auth) · CLI                 │
 │   ADR-0007)          sandboxed)                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -199,9 +199,9 @@ The rules:
 - There is one TOML file at `<config dir>/burnout/config.toml`. Its schema,
   defaults and validation live in code.
 - `burnout config get|set|validate` manages it, and it reloads when changed.
-- **Secrets never go in the config file.** The ICS URL, HMAC key and data key
-  live in the OS keystore (ADR-0007). `burnout keys rotate` rotates them;
-  rotating the HMAC key starts new identities (Privacy & Security §4.5).
+- **Secrets never go in the config file.** The ICS URL and the HMAC key live
+  in the OS keystore (ADR-0007). `burnout keys rotate` rotates the HMAC key,
+  which starts new identities (Privacy & Security §4.5).
 - Every privacy opt-in is a config key, and `burnout doctor` and the
   dashboard's Privacy page list them all with their current values.
 
@@ -506,13 +506,14 @@ matter for PMs and researchers.
 
 ## 6. Data model (SQLite)
 
-Sensitive columns (marked 🔒) are encrypted with AES-256-GCM using a data key
-held in the OS keystore (ADR-0007). `id` columns are integer primary keys.
+The database isn't encrypted by the app. At-rest protection is OS
+full-disk encryption plus owner-only permissions, and FDE status is checked
+and warned about (ADR-0007). `id` columns are integer primary keys.
 
 ```sql
 -- redacted events only; short retention (default 7 days); for reprocessing and debugging
 CREATE TABLE raw_events (id INTEGER PRIMARY KEY, recv_ms INTEGER NOT NULL, v INTEGER NOT NULL,
-  source TEXT NOT NULL, kind TEXT NOT NULL, payload BLOB NOT NULL /*🔒*/);
+  source TEXT NOT NULL, kind TEXT NOT NULL, payload BLOB NOT NULL);
 
 -- per-minute attention rollups per window (default 180 days)
 CREATE TABLE attention_minutes (
@@ -529,18 +530,18 @@ CREATE TABLE intervals (id INTEGER PRIMARY KEY,
   start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, utc_offset_min INTEGER NOT NULL,
   logical_day TEXT NOT NULL, kind TEXT NOT NULL,  -- shell_cmd | agent_state | human_state | presence | busy
   category TEXT, session_key TEXT,                -- HMAC of agent session id
-  attrs BLOB /*🔒 argv0, subcmd, exit, state, presence reason (input|video|call), project HMAC…*/);
+  attrs BLOB /* JSON: argv0, subcmd, exit, state, presence reason (input|video|call), project HMAC… */);
 CREATE INDEX intervals_kind ON intervals(kind, start_ms);
 CREATE INDEX intervals_day  ON intervals(logical_day, kind);
 
 CREATE TABLE daily_features (logical_day TEXT PRIMARY KEY, registry_ver INTEGER NOT NULL,
-  coverage REAL NOT NULL, features BLOB NOT NULL /*🔒*/);           -- default 2 years
+  coverage REAL NOT NULL, features BLOB NOT NULL);           -- default 2 years
 CREATE TABLE scores (logical_day TEXT PRIMARY KEY, model_ver TEXT NOT NULL, strain REAL,
-  status TEXT NOT NULL, components BLOB /*🔒*/, forecast BLOB /*🔒*/);  -- status: ok | missing | calibrating
+  status TEXT NOT NULL, components BLOB, forecast BLOB);  -- status: ok | missing | calibrating
 CREATE TABLE checkins (id INTEGER PRIMARY KEY, ts_ms INTEGER NOT NULL, instrument TEXT NOT NULL,
-  answers BLOB NOT NULL /*🔒*/, score REAL);                       -- default 2 years
+  answers BLOB NOT NULL, score REAL);                       -- default 2 years
 CREATE TABLE annotations (id INTEGER PRIMARY KEY, start_day TEXT NOT NULL, end_day TEXT NOT NULL,
-  kind TEXT NOT NULL /* on_call|exam|release|vacation|sick|other */, note BLOB /*🔒*/);
+  kind TEXT NOT NULL /* on_call|exam|release|vacation|sick|other */, note TEXT);
 CREATE TABLE monitor_snapshots (ts_ms INTEGER PRIMARY KEY, topology TEXT NOT NULL); -- count, resolutions, arrangement; 180 days
 CREATE TABLE health_daily (logical_day TEXT PRIMARY KEY, slis TEXT NOT NULL);       -- coverage, drops, hook delivery; 180 days
 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER NOT NULL);
@@ -559,7 +560,7 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 
 | OS | Data directory | Note |
 |----|----------------|------|
-| macOS | `~/Library/Application Support/burnout` | Time Machine backs it up; data is still column-encrypted |
+| macOS | `~/Library/Application Support/burnout` | Excluded from Time Machine (backup drives are often unencrypted) |
 | Windows | `%LOCALAPPDATA%\burnout` | Never Documents or OneDrive |
 | Linux | `$XDG_DATA_HOME/burnout` | |
 
@@ -805,7 +806,7 @@ Days below the coverage threshold aren't scored (§7.1).
 | Crash loop (3 in 10 min) | Start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray |
 | Hang | systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
-| DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` backup (encrypted, 3 generations); quarantine the bad file |
+| DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |
 | Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |
 | Agent down | Hooks fail open (50 ms timeout, exit 0); the gap shows up as reduced coverage |
 
@@ -848,9 +849,10 @@ document on what is collected. The essentials:
   - pointer positions are never persisted.
 - **Keyed identities:** every identity hash is
   `HMAC-SHA256(per-install key, …)`, with the key in the OS keystore.
-- **At rest:** OS full-disk encryption (warned when off) **plus** AES-256-GCM
-  on sensitive columns, secure deletion, and default retention
-  (ADR-0007).
+- **At rest:** OS full-disk encryption, checked with a persistent warning
+  when off; owner-only permissions; the data dir kept out of synced folders
+  and Time Machine; secure deletion and default retention (ADR-0007).
+  Portable backups are passphrase-encrypted.
 - **User controls:** pause, private hours, exclusions, sensitive-apps
   denylist → `private`, delete recent, aggregate-only mode, export, forget.
 - **Anti-coercion requirements:**
@@ -938,7 +940,7 @@ burnout-tracker/
 │   ├── adapters/
 │   │   ├── collector/{darwin,windows,x11,wayland}/
 │   │   ├── ingest/              # socket/pipe server, schema validation, rate limits
-│   │   ├── store/sqlite/        # migrations, retention, column crypto
+│   │   ├── store/sqlite/        # migrations, retention, secure deletion
 │   │   ├── keystore/{darwin,windows,secretservice,file}/
 │   │   ├── classify/laya/       # sidecar client
 │   │   ├── calendar/ics/
@@ -961,7 +963,7 @@ burnout-tracker/
 
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
-| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite with column crypto; `status` and `doctor`; canary test. **Laya spike** in parallel (accuracy on ~500 labelled samples vs. rules/kNN, CPU latency, RAM) | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green; Laya go/no-go |
+| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. **Laya spike** in parallel (accuracy on ~500 labelled samples vs. rules/kNN, CPU latency, RAM) | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green; Laya go/no-go |
 | **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
 | **2: Personalised** | Trend forecast; per-user model; optional Laya classifier; KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
@@ -976,7 +978,7 @@ burnout-tracker/
 | Heuristic attention model | Explainable and deterministic, but hand-tuned weights | Opt-in spot-labels exist to fit weights |
 | Hooks over process scanning | Accurate and private, but needs install and misses unhooked shells | Users report gaps; add a process-tree sampler fallback |
 | Transcript/OTLP fallbacks removed | Simpler and more private, but no data until hooks are installed | Hooks prove insufficient; reintroduce with field allowlists |
-| Column encryption + FDE (not SQLCipher) | Pure Go, but metadata columns (times, categories) stay plaintext | A threat-model change requires full-file encryption |
+| OS full-disk encryption only (no app-level DB encryption) | Simplest and no lost-key failure mode, but users without FDE are unprotected against device theft (warned) | Users without FDE turn out to be common, or a security review requires app-level encryption (ADR-0007 Option B) |
 | Pure-Go inference | Simple shipping, but limited model families | A heavier model clearly beats the baseline |
 | Local-only | Maximum trust, but no cross-device view | Users ask for multi-device; E2E sync only |
 | In-process native collectors | Simple, but a native crash takes the daemon down (mitigated by safe mode) | Crash data from alpha |
@@ -1014,12 +1016,12 @@ burnout-tracker/
 5. **Browser extension:** deferred (§4.4).
 6. **Review findings (2026-10-20):** resolved in this version. See the
    resolution table in the review.
-
-**Proposed defaults awaiting maintainer confirmation:**
-1. Encryption approach: FDE + column encryption (ADR-0007).
-2. Window titles off by default, with opt-in title classification.
-3. The anti-coercion requirements (Privacy & Security §5).
-
-**Open:**
-1. **Licence:** Apache-2.0 is suggested (it matches Laya). The GNOME Shell
-   extension must be GPL-2.0-or-later.
+7. **Encryption at rest:** rely on OS full-disk encryption, with no
+   app-level database encryption (ADR-0007, accepted).
+8. **Window titles:** off by default; opt-in title classification, never
+   persisted (ADR-0006).
+9. **Anti-coercion requirements** AC-1…AC-6 adopted (Privacy & Security
+   §5.2).
+10. **Licence:** Apache-2.0 for the project (`LICENSE`). The GNOME Shell
+    extension is GPL-2.0-or-later, as GNOME requires, and carries its own
+    licence file.

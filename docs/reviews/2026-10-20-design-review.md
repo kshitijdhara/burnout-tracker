@@ -684,7 +684,7 @@ SD = [system design](../system-design.md), PS = [privacy & security](../privacy-
 | 2.9 | Research export | PS §11.1; ADR-0004; SD §7.4 |
 | 2.10 | Screen-share leaks | PS §5.1; SD §8.3 |
 | 2.11 | Sensitive app ids | PS §5.1 (denylist, aggregate-only) |
-| 3.1 | Threat model + encryption | PS §2, §7.1; ADR-0007 (FDE + column AES-GCM) |
+| 3.1 | Threat model + encryption | PS §2, §7.1; ADR-0007: OS full-disk encryption only (accepted 2026-10-21), with an FDE check and warning, data dir kept out of Time Machine and synced folders, passphrase-encrypted portable backups |
 | 3.2 | Dashboard auth | PS §8.2; SD §9 |
 | 3.3 | Installer/updater integrity | PS §9.1–9.2; ADR-0005; SD §13 |
 | 3.4 | Shell argv leak | PS §4.2; SD §4.2; ADR-0003; ps-leak test PS §12 |
@@ -730,9 +730,12 @@ SD = [system design](../system-design.md), PS = [privacy & security](../privacy-
 - Agent session ids are stored as HMACs, so our data doesn't link to transcript files on disk.
 - Hook processes don't compute HMACs; the daemon does it on receipt. That keeps keystore access out of the hot path, and raw paths only cross the same-user socket.
 - An egress CI test enforces that only the three opt-in calls can reach the network.
-- `raw_events.payload` is encrypted along with the other sensitive columns.
 
-**Proposed defaults awaiting maintainer confirmation** (SD §19):
-1. FDE + column encryption (ADR-0007).
-2. Window titles off by default, with opt-in title classification.
-3. The anti-coercion requirements AC-1…AC-6.
+**Maintainer decisions (2026-10-21):**
+1. Encryption at rest relies on OS full-disk encryption. App-level column
+   encryption was not adopted; ADR-0007 is accepted with Option A.
+2. Window titles are off by default, with opt-in title classification.
+   Accepted.
+3. Anti-coercion requirements AC-1…AC-6. Accepted.
+4. Licence: Apache-2.0, with the GNOME Shell extension under
+   GPL-2.0-or-later. Accepted.

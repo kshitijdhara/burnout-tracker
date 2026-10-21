@@ -1,6 +1,6 @@
 # Privacy and Security
 
-**Status:** Draft v0.2
+**Status:** Draft v0.3 (decisions accepted 2026-10-21)
 **Date:** 2026-10-20
 **Related:** [System design](system-design.md) ·
 [ADR-0007 Data protection at rest](adr/0007-data-protection-at-rest.md) ·
@@ -39,7 +39,7 @@ Keywords **MUST**, **MUST NOT**, **SHOULD** and **MAY** are used as in RFC 2119.
 | T1 | Other local OS users on the same machine | I, T, S | **Yes** | 0700 dirs / 0600 files (§7); socket and pipe ACLs + peer-credential checks (§8.1); no command lines in the process table (§4.2) |
 | T2 | Websites in the user's browser: localhost port probing, DNS rebinding, CSRF, clickjacking | I, T, E | **Yes** | Dashboard auth via one-time token → cookie, `Host` allowlist, no CORS, CSP, frame denial, CSRF tokens (§8.2) |
 | T3 | Other apps in the desktop session (session D-Bus, accessibility APIs) | I | **Yes** | No public session-bus service; private peer-to-peer bridge with token handshake (§8.3) |
-| T4 | Backups, cloud sync of the home directory, a stolen powered-off device | I | **Yes** | Non-synced data dirs (§7.3); OS full-disk encryption checked + app-level column encryption (§7.1, ADR-0007); encrypted backups |
+| T4 | Backups, cloud sync of the home directory, a stolen powered-off device | I | **Yes** | OS full-disk encryption, checked and warned about when off (§7.1, ADR-0007); data dirs outside synced folders and excluded from Time Machine (§7.3); portable backups passphrase-encrypted |
 | T5 | Supply chain: dependencies, CI, release assets, installers, model weights | T, E | **Yes** | Pinned release signing key, downgrade protection, pinned Actions, reproducible builds, SBOM, SHA-256-pinned model weights (§9) |
 | T6 | Coercive installer: an employer, partner or family member installing it to watch someone | I, R | **Yes** | Anti-coercion requirements (§5.2): always-visible indicator, no silent install, interactive first run, periodic reminders, no remote access |
 | T7 | Malicious input to the agent from same-user processes (forged hook events, oversized messages) | T, D | **Yes** (integrity of our own data, availability) | Strict parsing, size caps, rate limits, fuzzing (§8.1). Forged events can skew the user's own stats; they can't escalate |
@@ -56,8 +56,9 @@ be collected. Adding a row requires a doc change reviewed like code.
 Defaults: **on** = collected after first-run consent; **opt-in** = off until
 the user enables it; **never** = not collected or not persisted at all.
 Retention values are defaults; all are configurable downwards (§5.1).
-"Encrypted" means app-level AES-256-GCM (ADR-0007) on top of OS disk
-encryption.
+Everything stored is in the local database, which is readable only by the
+user's account and protected at rest by OS full-disk encryption
+(ADR-0007).
 
 ### 3.1 Desktop activity
 
@@ -111,12 +112,12 @@ encryption.
 
 | Field | Source | Default | Stored as | Retention | Leaves device? |
 |-------|--------|---------|-----------|-----------|----------------|
-| Check-in answers (CBI items, daily sliders) | User | on (prompted; skippable) | Encrypted | 2 y | Never |
-| Check-in free text | User | **opt-in**, requires the Laya classifier | **Never persisted.** Scored in memory against fixed questions; only the scores are stored (encrypted) | — | Never |
-| Annotations (on-call, exam week, vacation, sick, …) | User | on (user-created) | Tag + period; optional note encrypted | 2 y | Never |
+| Check-in answers (CBI items, daily sliders) | User | on (prompted; skippable) | Item answers and computed score | 2 y | Never |
+| Check-in free text | User | **opt-in**, requires the Laya classifier | **Never persisted.** Scored in memory against fixed questions; only the scores are stored | — | Never |
+| Annotations (on-call, exam week, vacation, sick, …) | User | on (user-created) | Tag + period; optional short note | 2 y | Never |
 | Core hours, role, settings | User | on | Config file (no secrets) | Until changed | Never |
-| Daily features | Feature pipeline | on | Encrypted JSON per logical day | 2 y (configurable) | Never (Phase 4 research export only on explicit request, §11) |
-| Scores, components, forecasts | Scorer | on | Encrypted | 2 y (configurable) | Never |
+| Daily features | Feature pipeline | on | JSON per logical day | 2 y (configurable) | Never (Phase 4 research export only on explicit request, §11) |
+| Scores, components, forecasts | Scorer | on | Numbers and driver labels | 2 y (configurable) | Never |
 
 ### 3.6 Operational data
 
@@ -125,7 +126,8 @@ encryption.
 | Logs | Agent | on | Structured `slog`, PII-free by construction (§10) | Size-capped rotation (default 3 × 10 MB) | Never |
 | Health metrics (SLIs: coverage, drops, hook delivery) | Agent | on | Counters per day | 180 d | Never |
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
-| Backups | Nightly `VACUUM INTO` | on | Encrypted, 3 generations, in the data dir | 3 nights | Never |
+| Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
+| Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |
 | Spool (events buffered while the DB is busy) | Agent | on | Same redaction as raw events | Until flushed (minutes) | Never |
 | Raw events | Collectors / hooks | on | Only already-redacted events (classification and redaction happen before persistence) | 7 d | Never |
 
@@ -257,19 +259,24 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
 
 ### 7.1 Encryption
 
-- **Base layer:** OS full-disk encryption (FileVault, BitLocker, LUKS).
-  Onboarding and `burnout doctor` MUST warn when it is off.
-- **App layer:** AES-256-GCM on sensitive columns: `raw_events.payload`, `intervals.attrs`,
-  `daily_features.features`, `checkins.answers`, `scores.components`,
-  `scores.forecast`, `annotations.note`, and backups. The 256-bit data key
-  lives in the OS keystore (macOS Keychain, Windows DPAPI / Credential
-  Manager, Linux Secret Service).
-- **Linux without Secret Service** (e.g. i3/sway, minimal installs): key file
-  `0600` in the data dir, with a persistent warning in `doctor` and the
-  dashboard.
-- We claim "sensitive columns are encrypted with a key held in your OS
-  keystore". We do **not** claim the whole database is encrypted, or that
-  encryption protects against same-user malware (T8).
+- **At-rest protection is OS full-disk encryption** (FileVault, BitLocker /
+  Device Encryption, LUKS). The database itself is not encrypted by the app.
+- Onboarding MUST check FDE status and explain the risk when it is off.
+  `burnout doctor` and the dashboard MUST show a persistent warning while it
+  is off. Install is not blocked.
+- Owner-only permissions (§7.3) protect against other local users.
+- The data directory is kept out of places FDE doesn't cover:
+  - excluded from Time Machine (sticky exclusion);
+  - never in OneDrive/Documents;
+  - documented exclusion for Linux backup tools.
+- **Portable backups** (`burnout backup`) are passphrase-encrypted
+  (Argon2id + AES-256-GCM), because they're meant to leave the device.
+- **Claim:** "Your data stays on your device, readable only by your user
+  account. Turn on disk encryption to protect it if your device is lost or
+  stolen." We do **not** claim the database is encrypted, or that anything
+  protects against same-user malware (T8).
+- The **HMAC key** (§4.5) lives in the OS keystore, or in a `0600` key file
+  on Linux without Secret Service.
 
 ### 7.2 Retention and deletion
 
@@ -277,7 +284,7 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
   incremental vacuum after TTL jobs, and periodic `wal_checkpoint(TRUNCATE)`,
   so deleted rows don't linger in free pages or the WAL.
 - TTL jobs run nightly per §3.
-- `forget` and `uninstall --purge` MUST also delete: backups, spool files,
+- `forget` and `uninstall --purge` MUST also delete: local recovery copies, spool files,
   logs, the in-memory and on-disk caches, sidecar caches, the model (purge
   only), keystore items and any exports the app wrote to its own directory.
   Exports saved elsewhere are listed for the user to delete.
@@ -286,7 +293,7 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
 
 | OS | Data dir | Notes |
 |----|----------|-------|
-| macOS | `~/Library/Application Support/burnout` | Not synced by iCloud Drive; **is** included in Time Machine backups (documented; data is encrypted per §7.1) |
+| macOS | `~/Library/Application Support/burnout` | Not synced by iCloud Drive; **excluded from Time Machine** (sticky `tmutil addexclusion`), since backup drives are often unencrypted |
 | Windows | `%LOCALAPPDATA%\burnout` | Never under Documents (OneDrive Known Folder Move syncs it) |
 | Linux | `$XDG_DATA_HOME/burnout` (default `~/.local/share/burnout`) | |
 
