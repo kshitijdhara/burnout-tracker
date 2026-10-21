@@ -113,6 +113,10 @@ func TestEndToEnd(t *testing.T) {
 		}
 		zsh := exec.Command("zsh", "-i")
 		zsh.Env, zsh.Dir = env, projectDir
+		// An interactive zsh reads from /dev/tty when it has one, which would
+		// take over the developer's terminal. A new session has no
+		// controlling terminal, so zsh reads the script from stdin instead.
+		zsh.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		zsh.Stdin = strings.NewReader(strings.Join([]string{
 			"git -c user.name=" + canary + " status >/dev/null 2>&1",
 			"printf '%s' " + canary + " >/dev/null",
