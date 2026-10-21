@@ -40,6 +40,9 @@ type Capabilities struct {
 	InputCounts    bool // opt-in keystroke/scroll counters available
 	Titles         bool // window titles available (opt-in, may need a permission)
 	MissingPermits []string
+	// Limitations lists known gaps on this platform, e.g. "video and call
+	// detection not implemented", so doctor can show them.
+	Limitations []string
 }
 
 // ProcessInfo answers questions about the process tree.

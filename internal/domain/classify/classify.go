@@ -1,0 +1,105 @@
+// Package classify maps apps and commands to categories using bundled
+// rules (system design §4.6, cascade steps 1–3). The optional Laya step
+// lives in an adapter; this package is pure.
+package classify
+
+import (
+	"strings"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+)
+
+// Rules classifies app identifiers. The zero value is not usable; call New.
+type Rules struct {
+	exact     map[string]model.Category // lower-cased app id or exe name
+	prefixes  []prefixRule
+	private   map[string]bool // sensitive denylist + user exclusions, lower-cased
+	overrides map[string]model.Category
+}
+
+type prefixRule struct {
+	prefix string
+	cat    model.Category
+}
+
+// New returns the bundled rules plus the user's exclusions (recorded as
+// private) and overrides (which win over bundled rules but not over
+// exclusions).
+func New(exclusions []string, overrides map[string]model.Category) *Rules {
+	r := &Rules{
+		exact:     make(map[string]model.Category, len(bundledApps)),
+		private:   make(map[string]bool, len(sensitiveApps)+len(exclusions)),
+		overrides: make(map[string]model.Category, len(overrides)),
+	}
+	for cat, ids := range bundledApps {
+		for _, id := range ids {
+			r.exact[strings.ToLower(id)] = cat
+		}
+	}
+	for _, p := range bundledPrefixes {
+		r.prefixes = append(r.prefixes, prefixRule{strings.ToLower(p.prefix), p.cat})
+	}
+	for _, id := range sensitiveApps {
+		r.private[strings.ToLower(id)] = true
+	}
+	for _, id := range exclusions {
+		r.private[strings.ToLower(id)] = true
+	}
+	for id, cat := range overrides {
+		r.overrides[strings.ToLower(id)] = cat
+	}
+	return r
+}
+
+// App returns the category for an app id (bundle id or executable name).
+// Private apps return CategoryPrivate; callers must then drop the app id.
+func (r *Rules) App(appID string) model.Category {
+	id := strings.ToLower(appID)
+	if r.private[id] {
+		return model.CategoryPrivate
+	}
+	if c, ok := r.overrides[id]; ok {
+		return c
+	}
+	if c, ok := r.exact[id]; ok {
+		return c
+	}
+	for _, p := range r.prefixes {
+		if strings.HasPrefix(id, p.prefix) {
+			return p.cat
+		}
+	}
+	return model.CategoryUncategorized
+}
+
+// CommandCategory groups shell commands.
+type CommandCategory string
+
+// Command categories.
+const (
+	CmdVCS    CommandCategory = "vcs"
+	CmdBuild  CommandCategory = "build"
+	CmdInfra  CommandCategory = "infra"
+	CmdRemote CommandCategory = "remote"
+	CmdEditor CommandCategory = "editor"
+	CmdAgent  CommandCategory = "agent"
+	CmdOther  CommandCategory = "other"
+)
+
+// Command returns the category of a shell command name.
+func Command(argv0 string) CommandCategory {
+	if c, ok := commandCategories[argv0]; ok {
+		return c
+	}
+	return CmdOther
+}
+
+// Subcommand returns sub if it is a known subcommand of argv0, else "".
+// The shell hook sends a candidate word for allowlisted tools; only known
+// subcommands are kept, so a stray argument (a path, a token) is dropped.
+func Subcommand(argv0, sub string) string {
+	if subcommands[argv0][sub] {
+		return sub
+	}
+	return ""
+}
