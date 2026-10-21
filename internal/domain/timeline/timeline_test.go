@@ -132,7 +132,7 @@ func TestHumanStates(t *testing.T) {
 			if tc.blocked {
 				tr.OnAgent(ev(0, "s1", model.AgentPermissionAsk))
 			}
-			if got, _ := tr.humanState(tc.res, windows); got != tc.want {
+			if got, _ := humanState(tc.res, tr.Context(windows)); got != tc.want {
 				t.Fatalf("got %s, want %s", got, tc.want)
 			}
 		})
@@ -142,7 +142,7 @@ func TestHumanStates(t *testing.T) {
 func TestNoHumanTimelineWithoutSessions(t *testing.T) {
 	tr := New(DefaultParams())
 	for i := 1; i < 10; i++ {
-		tr.OnTick(result(i, 1, map[model.WindowID]float64{1: 1}, 1, true), nil)
+		tr.OnTick(result(i, 1, map[model.WindowID]float64{1: 1}, 1, true), TickContext{})
 	}
 	tr.Flush(at(10))
 	if got := states(tr.Drain(), model.IntervalHumanState); len(got) != 0 {
@@ -176,7 +176,7 @@ func TestOneHumanInvariant(t *testing.T) {
 		if rng.IntN(500) == 0 {
 			res.Dt = 0 // gap
 		}
-		tr.OnTick(res, windows)
+		tr.OnTick(res, tr.Context(windows))
 		tr.Advance(at(sec))
 		all = append(all, tr.Drain()...)
 	}
@@ -229,9 +229,9 @@ func assertNonOverlapping(t *testing.T, ivs []model.Interval) {
 func TestPresenceIntervals(t *testing.T) {
 	tr := New(DefaultParams())
 	for i := 1; i <= 5; i++ {
-		tr.OnTick(result(i, 1, map[model.WindowID]float64{1: 1}, 1, true), nil)
+		tr.OnTick(result(i, 1, map[model.WindowID]float64{1: 1}, 1, true), TickContext{})
 	}
-	tr.OnTick(result(6, 0.2, nil, 0, false), nil) // below PresentAt; ticks 1–5 cover [0 s, 5 s)
+	tr.OnTick(result(6, 0.2, nil, 0, false), TickContext{}) // below PresentAt; ticks 1–5 cover [0 s, 5 s)
 	ivs := filter(tr.Drain(), model.IntervalPresence)
 	if len(ivs) != 1 || ivs[0].Attrs.Reason != attention.ReasonInput || ivs[0].End.Sub(ivs[0].Start) != 5*time.Second {
 		t.Fatalf("presence intervals: %+v", ivs)
@@ -331,5 +331,35 @@ func TestSplitAtRolloverIsBounded(t *testing.T) {
 	parts := SplitAtRollover(model.Interval{Start: time.UnixMilli(1), End: end, Kind: model.IntervalShellCmd}, 4*time.Hour)
 	if len(parts) > MaxSplitDays+1 {
 		t.Fatalf("1970→now split into %d pieces", len(parts))
+	}
+}
+
+// Ticks held through an idle stretch reach OnTick late. Their human state
+// must follow the agent as it was when they were sampled: reading until the
+// permission prompt, not approving all along, and kept even if the session
+// ends before they are released.
+func TestDelayedTicksUseStatesFromSamplingTime(t *testing.T) {
+	windows := map[model.WindowID]string{1: "s1"}
+	reading := func(sec int) attention.Result {
+		return result(sec, 1, map[model.WindowID]float64{1: 1}, 0, false)
+	}
+	for _, then := range []model.AgentEventKind{model.AgentPermissionAsk, model.AgentSessionEnd} {
+		tr := New(DefaultParams())
+		tr.OnAgent(ev(0, "s1", model.AgentPromptSubmit))
+		var held []attention.Result
+		var ctxs []TickContext
+		for sec := 1; sec <= 60; sec++ { // sampled and held while the user reads
+			held = append(held, reading(sec))
+			ctxs = append(ctxs, tr.Context(windows))
+		}
+		tr.OnAgent(ev(60, "s1", then))
+		for i := range held { // released after the event
+			tr.OnTick(held[i], ctxs[i])
+		}
+		tr.Flush(at(61))
+		got := states(tr.Drain(), model.IntervalHumanState)
+		if len(got) != 1 || got[0] != HumanReading {
+			t.Errorf("after %s: human states %v, want [reading]", then, got)
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -126,6 +127,8 @@ type Daemon struct {
 
 	// Loop-owned state.
 	engine           *attention.Engine
+	resolver         attention.Resolver[tickRecord]
+	lastHeld         []heldWindow // reused while windows don't change
 	rollups          *attention.Rollups
 	tracker          *timeline.Tracker
 	windows          *sessionWindows
@@ -135,6 +138,38 @@ type Daemon struct {
 	lastTopology     string
 	locked           bool
 	ticks            int
+}
+
+// tickRecord is what consuming a tick's result needs besides the result,
+// kept while the resolver holds the tick: compact window facts (no titles,
+// bounds or pointer state) and the agent context at sampling time.
+type tickRecord struct {
+	windows []heldWindow
+	ctx     timeline.TickContext
+}
+
+// heldWindow is what recording a tick needs from one window.
+type heldWindow struct {
+	id      model.WindowID
+	appID   string
+	cat     model.Category
+	monitor int
+	visible float64
+	focused bool
+}
+
+// heldWindows extracts the windows of snap, reusing the previous slice when
+// nothing changed (the usual case while the user is idle).
+func (d *Daemon) heldWindows(snap model.Snapshot, cats map[model.WindowID]model.Category) []heldWindow {
+	ws := make([]heldWindow, len(snap.Windows))
+	for i, w := range snap.Windows {
+		ws[i] = heldWindow{id: w.ID, appID: w.AppID, cat: cats[w.ID], monitor: w.Monitor, visible: w.Visible, focused: w.Focused}
+	}
+	if slices.Equal(ws, d.lastHeld) {
+		return d.lastHeld
+	}
+	d.lastHeld = ws
+	return ws
 }
 
 // event is a validated, enriched hook message, ready for the loop.
@@ -207,7 +242,7 @@ func (d *Daemon) onTick(ctx context.Context) {
 		d.deps.Log.Debug("collector snapshot failed", "err", err)
 		return
 	}
-	d.locked = snap.Locked
+	d.locked = snap.Locked || snap.DisplayAsleep
 	cats := make(map[model.WindowID]model.Category, len(snap.Windows))
 	for _, w := range snap.Windows {
 		cats[w.ID] = d.deps.Rules.App(w.AppID)
@@ -218,10 +253,26 @@ func (d *Daemon) onTick(ctx context.Context) {
 		Categories:  cats,
 		FreshOutput: d.tracker.FreshOutput(snap.At, sessions),
 	})
-	d.rollups.Add(res, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
-	d.tracker.OnTick(res, sessions)
-	d.health.observe(res)
+	// Idle ticks are held until the stretch ends and its presence is known.
+	rec := tickRecord{windows: d.heldWindows(snap, cats), ctx: d.tracker.Context(sessions)}
+	d.consume(d.resolver.Push(res, rec))
 	d.recordTopology(ctx, snap)
+}
+
+// consume records ticks whose presence is final, in order.
+func (d *Daemon) consume(ticks []attention.Held[tickRecord]) {
+	for _, t := range ticks {
+		rec := t.Payload
+		snap := model.Snapshot{At: t.Result.At, Windows: make([]model.Window, len(rec.windows))}
+		cats := make(map[model.WindowID]model.Category, len(rec.windows))
+		for i, w := range rec.windows {
+			snap.Windows[i] = model.Window{ID: w.id, AppID: w.appID, Monitor: w.monitor, Visible: w.visible, Focused: w.focused}
+			cats[w.id] = w.cat
+		}
+		d.rollups.Add(t.Result, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
+		d.tracker.OnTick(t.Result, rec.ctx)
+		d.health.observe(t.Result, model.LogicalDay(t.Result.At, d.cfg.Rollover))
+	}
 }
 
 func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity {
@@ -350,6 +401,7 @@ func (d *Daemon) maintenanceLoop(ctx context.Context) {
 
 func (d *Daemon) shutdown() error {
 	now := d.deps.Clock.Now()
+	d.consume(d.resolver.Flush()) // an unfinished idle stretch keeps the grace rule
 	d.tracker.Flush(now)
 	// Use a fresh context: the run context is already cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

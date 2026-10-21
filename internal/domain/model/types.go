@@ -59,6 +59,12 @@ type Snapshot struct {
 	IdleFor       time.Duration // time since last user input of any kind
 	Keys          int           // key presses since the previous snapshot (opt-in; 0 when off)
 	Scrolls       int           // scroll/click events since the previous snapshot (opt-in; 0 when off)
-	Locked        bool          // screen locked, display asleep or session inactive
-	InputCountsOn bool          // whether Keys/Scrolls are real counts
+	Locked        bool          // screen locked or session inactive
+	DisplayAsleep bool          // displays asleep: away, unless a call holds presence
+	// CallActive is true while an app the user runs (not a background
+	// agent) is using the microphone, or a camera is on. It holds presence
+	// even when the call's window is hidden; Window.InCall marks the call's
+	// window when it is in the snapshot.
+	CallActive    bool
+	InputCountsOn bool // whether Keys/Scrolls are real counts
 }

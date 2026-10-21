@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -66,6 +68,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("desktop collector", false, err.Error())
 	} else {
 		caps := c.Capabilities()
+		snap, snapErr := c.Snapshot(ctx)
 		_ = c.Close()
 		check("desktop collector", true, caps.Name)
 		for _, p := range caps.MissingPermits {
@@ -73,6 +76,9 @@ func runDoctor(ctx context.Context, _ []string) error {
 		}
 		for _, l := range caps.Limitations {
 			fmt.Printf("  -  limitation: %s\n", l)
+		}
+		if snapErr == nil {
+			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(nil, nil)))
 		}
 	}
 
@@ -109,4 +115,37 @@ func checkFix(name string, ok bool, fix string) {
 		fix = ""
 	}
 	check(name, ok, fix)
+}
+
+// mediaNow describes the calls and video the collector sees at this
+// moment, so detection can be checked during a meeting or a video. Apps
+// classified as private are not named, as everywhere else.
+func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
+	var calls, video []string
+	for _, w := range snap.Windows {
+		name := w.AppID
+		if rules.App(w.AppID) == model.CategoryPrivate {
+			name = "a private app"
+		}
+		if w.InCall && !slices.Contains(calls, name) {
+			calls = append(calls, name)
+		}
+		if w.HasVideo && !slices.Contains(video, name) {
+			video = append(video, name)
+		}
+	}
+	var parts []string
+	switch {
+	case len(calls) > 0:
+		parts = append(parts, "in a call in "+strings.Join(calls, ", "))
+	case snap.CallActive:
+		parts = append(parts, "in a call (its window isn't visible)")
+	}
+	if len(video) > 0 {
+		parts = append(parts, "video playing in "+strings.Join(video, ", "))
+	}
+	if len(parts) == 0 {
+		return "no call or video detected"
+	}
+	return strings.Join(parts, "; ")
 }

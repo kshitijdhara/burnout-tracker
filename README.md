@@ -66,16 +66,30 @@ Sessions that were already open are not tracked.
 **4. Check it works.**
 
 ```sh
-~/.local/bin/burnout doctor   # permissions, disk encryption, daemon health
-~/.local/bin/burnout status   # today's summary
+~/.local/bin/burnout doctor     # permissions, disk encryption, daemon health, calls/video right now
+~/.local/bin/burnout status     # today's summary
+~/.local/bin/burnout timeline   # today minute by minute
 ```
 
-Minutes appear in `status` after a minute or two of use.
+Minutes appear in `status` after a minute or two of use. Time you spend
+reading without touching anything shows up once you next type, scroll or
+move the pointer (up to 8 minutes later), because only then is it clear
+you were there.
 
 **5. Things worth trying.**
 
-- Work across two monitors for a day and compare `status` with your own
-  sense of where your attention went; Phase 0 aims to be within about 10%.
+- **Measure a day.** Keep a rough log of what you do (meetings, reading,
+  coding, breaks, with times), then compare it with `burnout timeline`.
+  Phase 0 aims to be within about 10%. Note where they disagree.
+- **A meeting.** During a Google Meet, Zoom or Slack huddle, run
+  `burnout doctor`: "right now" should say you're in a call, and the
+  meeting should count even while you only listen. If it says "no call or
+  video detected", please report which app and browser you used.
+- **Reading.** Read an article for a few minutes without scrolling, then
+  scroll or type: the reading time should appear. Walk away and let the
+  screen lock instead: it shouldn't.
+- **Video.** Watch a video in a visible window without touching anything:
+  it should count.
 - Give Claude Code a task, switch to another window while it works, then
   come back and read its output. Reading time should count as yours, and
   the agent's working time as the agent's.
@@ -112,7 +126,7 @@ rm ~/.local/bin/burnout
 **Preview limits.** The daemon stops when its tab closes and does not start
 at login. There is no tray icon, and logs go to the terminal. Phase 0 needs
 no macOS privacy permissions, because window titles and input counts are
-off.
+off. Call and video detection is macOS-only for now.
 
 ### Windows and Linux
 
@@ -160,6 +174,7 @@ Phase 0 (spike). Design docs:
   - [0005 packaging via GitHub Releases](docs/adr/0005-packaging-and-distribution.md)
   - [0006 Laya/Jev for classification](docs/adr/0006-decision-model-for-classification.md)
   - [0007 data protection at rest](docs/adr/0007-data-protection-at-rest.md)
+  - [0008 deciding idle stretches after they end](docs/adr/0008-retroactive-idle-resolution.md)
 - [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md):
   findings and how v0.2 resolves them.
 

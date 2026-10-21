@@ -199,6 +199,12 @@ static int bt_screen_locked(void) {
 	return locked;
 }
 
+// bt_display_asleep reports whether the main display is asleep, which
+// counts as away even before the screen locks, unless a call is on.
+static int bt_display_asleep(void) {
+	return CGDisplayIsAsleep(CGMainDisplayID()) ? 1 : 0;
+}
+
 static int bt_preflight_screen_capture(void) {
 	return CGPreflightScreenCaptureAccess() ? 1 : 0;
 }
@@ -357,6 +363,8 @@ type Collector struct {
 	windows  []C.bt_window
 	displays []C.bt_rect
 	activity unsafe.Pointer // C-owned NSProcessInfo activity token
+	media    *mediaPoller
+	sampled  bool // a snapshot has been taken (the first waits for media)
 	closed   bool
 }
 
@@ -376,12 +384,15 @@ func New(opts Options) (*Collector, error) {
 		caps: ports.Capabilities{
 			Name: "darwin", Windows: true, Pointer: true, Idle: true,
 			Limitations: []string{
-				"video and call detection not implemented",
 				"focus is inferred from window z-order (no Accessibility permission)",
 			},
 		},
 	}
 	c.tr = newTranslator(c.bundleID)
+	perProcess, responsible := mediaSupport()
+	c.caps.Limitations = append(c.caps.Limitations,
+		mediaLimitations(mediaState{PerProcessMic: perProcess, Responsible: responsible})...)
+	c.media = startMediaPoller()
 
 	if opts.Titles {
 		if C.bt_preflight_screen_capture() == 1 {
@@ -448,6 +459,7 @@ func (c *Collector) Close() error {
 	}
 	C.bt_end_activity(c.activity)
 	c.activity = nil
+	c.media.close()
 	return nil
 }
 
@@ -485,6 +497,9 @@ func (c *Collector) readRaw() rawState {
 	}
 	st.IdleSeconds = float64(C.bt_idle_seconds())
 	st.Locked = C.bt_screen_locked() == 1
+	st.DisplayAsleep = C.bt_display_asleep() == 1
+	st.Media = c.media.current(!c.sampled)
+	c.sampled = true
 	return st
 }
 

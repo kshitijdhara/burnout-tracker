@@ -9,7 +9,8 @@ ADRs [0001](adr/0001-local-first-go-agent.md) ·
 [0004](adr/0004-modelling-strategy.md) ·
 [0005](adr/0005-packaging-and-distribution.md) ·
 [0006](adr/0006-decision-model-for-classification.md) ·
-[0007](adr/0007-data-protection-at-rest.md)
+[0007](adr/0007-data-protection-at-rest.md) ·
+[0008](adr/0008-retroactive-idle-resolution.md)
 
 ---
 
@@ -244,7 +245,7 @@ So we model **attention as a distribution over visible windows** (ADR-0002).
 | Pointer position + window-at-point | 1 Hz | never persisted |
 | Idle / lock | 5 s + lock events | |
 | Input counts (keys, scroll, clicks) | per tick, counter only; **opt-in**, never persisted | macOS listen-only `CGEventTap` whose callback only increments a counter; Windows **Raw Input** (`RIDEV_INPUTSINK`) on a locked OS thread; key codes are never read. Without the opt-in, idle-time deltas stand in |
-| Media / call | event | video in a visible window, or mic in use |
+| Media / call | 3 s poll on macOS, on its own goroutine | a call: a regular app (with a Dock icon, so not a voice trigger or dictation utility) capturing audio, or a camera in use; video: a display-sleep assertion from an app or a helper in its bundle (not command-line tools like `caffeinate`). macOS reads these without any permission (CoreAudio process objects, CoreMediaIO, IOKit assertions) and maps helper processes to their app. Windows and Linux: not yet (ADR-0008) |
 
 Everything pauses when the screen is locked or the user is idle, and runs at
 half rate on battery. On macOS the sampling thread opts out of App Nap
@@ -266,13 +267,21 @@ else:                            attention(w) = softmax(s / T)(w) * presence
 
 presence ∈ [0,1]:
   1.0 while input within the last 30 s, or a call is active, or video plays in a visible window
-  then decays over an app-aware grace window:
-     terminal with fresh agent output (Stop < 3 min ago): 3 min
-     documents/PDF/browser:                               2 min
-     default:                                             60 s
+  then an idle stretch, decided when it ends (ADR-0008):
+     ended by the user's own input within its cap, no lock or sleep → 1.0 throughout (confirmed idle)
+     the cap is measured by OS idle time and grows if the window gets fresh agent output
+     otherwise (lock, display sleep, sleep gap, past the cap)      → decays over a grace window
+                                          grace   cap
+     terminal with fresh agent output:    3 min   8 min
+     documents/PDF/browser:               2 min   8 min
+     default:                             60 s    4 min
   audio-only media does NOT hold presence
-  0 when locked / asleep / paused
+  0 when locked / paused, or display asleep unless a call is active
 ```
+
+Idle ticks are held until their stretch ends, so rollups for those minutes
+are written late (additive upserts merge them). `burnout timeline` shows a
+day minute by minute for checking against a hand-written log.
 
 - The weights `a_*`, the temperature `T`, and the constants `τ`, `θ` and `k`
   are config with documented defaults. They will be fitted from opt-in
@@ -562,7 +571,7 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 - the main loop writes in batched transactions every 15 s; maintenance
   (retention in 5,000-row chunks, recovery copies) runs on its own goroutine,
   and SQLite serialises the two writers (`busy_timeout` covers the overlap);
-- `status` and `doctor` open the database read-only and never migrate;
+- `status`, `timeline` and `doctor` open the database read-only and never migrate;
 - `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, prepared
   statements;
 - `secure_delete=ON` and `auto_vacuum=INCREMENTAL`, with an incremental

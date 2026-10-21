@@ -2,6 +2,7 @@ package darwin
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,12 +27,77 @@ type point struct{ X, Y int }
 // rawState is everything one tick reads from the OS, in front-to-back
 // window order, before any interpretation.
 type rawState struct {
-	Windows     []rawWindow
-	Displays    []model.Rect
-	Pointer     point
-	PointerOK   bool
-	IdleSeconds float64
-	Locked      bool
+	Windows       []rawWindow
+	Displays      []model.Rect
+	Pointer       point
+	PointerOK     bool
+	IdleSeconds   float64
+	Locked        bool
+	DisplayAsleep bool
+	Media         mediaState
+}
+
+// mediaState is which apps are in a call or keep the display awake, and
+// whether a camera is on, after resolveMedia has mapped processes to apps.
+type mediaState struct {
+	OK               bool // media was read at all
+	PerProcessMic    bool // MicPIDs is meaningful (macOS 14.2+)
+	Responsible      bool // helper processes are mapped to their app
+	MicPIDs          []int
+	MicAny           bool // fallback: the default input device is running
+	CameraOn         bool
+	DisplayAwakePIDs []int // apps keeping the display awake, e.g. playing video
+}
+
+// rawMedia is one media poll as the OS reports it: raw process ids.
+type rawMedia struct {
+	PerProcessMic, Responsible bool
+	MicPIDs                    []int // processes capturing audio input
+	MicAny                     bool
+	CameraOn                   bool
+	AwakePIDs                  []int // processes holding a display-awake assertion
+}
+
+// processLookup answers questions about processes for resolveMedia.
+type processLookup interface {
+	responsible(pid int) int   // the app responsible for pid (itself if none)
+	regularApp(pid int) bool   // an app with a Dock icon, not a background agent
+	executable(pid int) string // the executable's path, "" if unknown
+}
+
+// resolveMedia maps raw processes to the apps that own windows:
+//   - a call is a regular app capturing audio, through any of its helpers.
+//     Background agents that keep the microphone open (voice triggers,
+//     dictation utilities) are not calls.
+//   - video is a display-awake assertion from an app or one of its bundled
+//     helpers. Command-line tools are left out: `caffeinate -d` run in a
+//     terminal would otherwise make the terminal look like it plays video.
+func resolveMedia(raw rawMedia, p processLookup) mediaState {
+	st := mediaState{
+		OK: true, PerProcessMic: raw.PerProcessMic, Responsible: raw.Responsible,
+		MicAny: raw.MicAny, CameraOn: raw.CameraOn,
+	}
+	for _, pid := range raw.MicPIDs {
+		if app := p.responsible(pid); p.regularApp(app) && !slices.Contains(st.MicPIDs, app) {
+			st.MicPIDs = append(st.MicPIDs, app)
+		}
+	}
+	for _, pid := range raw.AwakePIDs {
+		if !inAppBundle(p.executable(pid)) {
+			continue
+		}
+		if app := p.responsible(pid); !slices.Contains(st.DisplayAwakePIDs, app) {
+			st.DisplayAwakePIDs = append(st.DisplayAwakePIDs, app)
+		}
+	}
+	return st
+}
+
+// inAppBundle reports whether an executable lives inside an app or XPC
+// service bundle (browsers, players and their helpers, WebKit's services),
+// as opposed to a command-line tool such as /usr/bin/caffeinate.
+func inAppBundle(path string) bool {
+	return strings.Contains(path, ".app/") || strings.Contains(path, ".xpc/")
 }
 
 // inputCounts are cumulative event-tap counters since the tap started.
@@ -79,6 +145,7 @@ func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.
 		Monitors:      append([]model.Rect(nil), st.Displays...),
 		IdleFor:       idleDuration(st.IdleSeconds),
 		Locked:        st.Locked || len(st.Displays) == 0,
+		DisplayAsleep: st.DisplayAsleep,
 		InputCountsOn: cnt.On,
 	}
 	t.applyCounts(&snap, cnt)
@@ -126,7 +193,46 @@ func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.
 		}
 		snap.Windows = append(snap.Windows, mw)
 	}
+	applyMedia(&snap, st.Media)
 	return snap
+}
+
+// applyMedia marks calls and video. A call is active while a regular app
+// captures audio, or a camera is on, even when the call's window is
+// covered or on another Space. macOS doesn't say which of an app's windows
+// holds the call or the video, so they go to its most visible window in
+// the snapshot, if it has one there; the engine decides whether that
+// window is visible enough to matter.
+func applyMedia(snap *model.Snapshot, m mediaState) {
+	if !m.OK {
+		return
+	}
+	for _, pid := range m.MicPIDs {
+		snap.CallActive = true
+		if w := mostVisibleOf(snap.Windows, pid); w != nil {
+			w.InCall = true
+		}
+	}
+	if (!m.PerProcessMic && m.MicAny) || m.CameraOn {
+		snap.CallActive = true
+	}
+	for _, pid := range m.DisplayAwakePIDs {
+		if w := mostVisibleOf(snap.Windows, pid); w != nil {
+			w.HasVideo = true
+		}
+	}
+}
+
+// mostVisibleOf returns pid's most visible window, the frontmost on a tie,
+// or nil.
+func mostVisibleOf(ws []model.Window, pid int) *model.Window {
+	var best *model.Window
+	for i := range ws {
+		if ws[i].PID == pid && (best == nil || ws[i].Visible > best.Visible) {
+			best = &ws[i]
+		}
+	}
+	return best
 }
 
 // applyCounts converts cumulative tap counters into per-snapshot deltas.
@@ -199,4 +305,16 @@ func cleanLabel(s string) string {
 		s = strings.ToValidUTF8(s[:maxLabelLen], "")
 	}
 	return s
+}
+
+// mediaLimitations describes what media detection can't do on this Mac.
+func mediaLimitations(m mediaState) []string {
+	var out []string
+	if !m.PerProcessMic {
+		out = append(out, "calls are detected from the microphone being in use at all, not per app (needs macOS 14.2 or later)")
+	}
+	if !m.Responsible {
+		out = append(out, "browser calls and video may not be matched to the browser's window")
+	}
+	return append(out, "any camera in use counts as a call, including apps like OBS that aren't calls")
 }
