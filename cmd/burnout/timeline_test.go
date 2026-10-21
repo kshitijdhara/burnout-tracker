@@ -71,3 +71,16 @@ func TestMediaNow(t *testing.T) {
 		}
 	}
 }
+
+func TestPrintableEscapesTerminalControls(t *testing.T) {
+	for in, want := range map[string]string{
+		"com.google.Chrome":    "com.google.Chrome",
+		"Evil\x1b]0;pwned\x07": `Evil\u001b]0;pwned\u0007`,
+		"abc\u202eexe.txt":     "abc\\u202eexe.txt",
+		"Café — Notes":         "Café — Notes",
+	} {
+		if got := printable(in); got != want {
+			t.Errorf("printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

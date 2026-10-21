@@ -123,7 +123,7 @@ func checkFix(name string, ok bool, fix string) {
 func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
 	var calls, video []string
 	for _, w := range snap.Windows {
-		name := w.AppID
+		name := printable(w.AppID)
 		if rules.App(w.AppID) == model.CategoryPrivate {
 			name = "a private app"
 		}

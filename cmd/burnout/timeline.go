@@ -97,7 +97,7 @@ func printTimeline(w io.Writer, day string, minutes []sqlite.MinuteActivity) {
 		if !prevEnd.IsZero() && r.start.After(prevEnd) {
 			_, _ = fmt.Fprintf(w, "  %s–%s %7s  away, locked or idle\n", clock(prevEnd), clock(r.start), span(r.start.Sub(prevEnd)))
 		}
-		label := r.label
+		label := printable(r.label)
 		switch {
 		case label == sqlite.UnattributedLabel:
 			label = "present, no clear window"

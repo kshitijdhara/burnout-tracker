@@ -28,6 +28,11 @@ func installOpts(path, version string) InstallOptions {
 // newline), so an install/uninstall round trip must reproduce them byte for
 // byte.
 var fixtures = map[string]string{
+	"empty hooks": `{
+  "model": "opus",
+  "hooks": {}
+}
+`,
 	"no hooks": `{
   "model": "opus",
   "permissions": {

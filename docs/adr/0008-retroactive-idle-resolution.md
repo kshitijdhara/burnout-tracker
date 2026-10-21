@@ -63,9 +63,13 @@ holds it even while the display sleeps, since listening needs no screen; a
 lock always means away. On macOS:
 - **Calls:** a regular app (one with a Dock icon) capturing audio, even
   when its window is covered or on another Space. Background agents that
-  keep the microphone open, like voice triggers, don't count. Any camera in
-  use also counts, which can't be tied to an app: an app like OBS keeps it
-  on without a call (a documented limitation). Before macOS 14.2 only the
+  keep the microphone open, like voice triggers, don't count. Cameras are
+  not queried: CoreMediaIO loads third-party camera plugins into the
+  calling process on older macOS, which would put outside code in the
+  process that holds the identity key, and a camera can't be tied to an
+  app (OBS keeps one on without a call). Call apps typically keep the
+  microphone open while muted, so it finds the call alone. Before macOS
+  14.2 only the
   default input device's state is known, and a device that also plays
   audio (a headset) is ignored so music isn't mistaken for a call.
 - **Video:** a display-sleep assertion from an app or a helper inside its

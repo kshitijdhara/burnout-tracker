@@ -83,8 +83,10 @@ you were there.
   Phase 0 aims to be within about 10%. Note where they disagree.
 - **A meeting.** During a Google Meet, Zoom or Slack huddle, run
   `burnout doctor`: "right now" should say you're in a call, and the
-  meeting should count even while you only listen. If it says "no call or
-  video detected", please report which app and browser you used.
+  meeting should count even while you only listen. Run it again while
+  muted: calls are found from the microphone being in use, so this checks
+  your call app keeps it open. If it says "no call or video detected",
+  please report which app and browser you used, and whether you were muted.
 - **Reading.** Read an article for a few minutes without scrolling, then
   scroll or type: the reading time should appear. Walk away and let the
   screen lock instead: it shouldn't.
