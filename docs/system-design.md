@@ -343,6 +343,11 @@ PowerShell `$PROFILE`. The rules for that block:
    commands.
 3. On zsh/bash/fish the emitter runs in the background (`&!` / `disown`)
    with a 50 ms socket timeout, and always exits 0.
+4. A command that doesn't resolve (a typo or a pasted token) is sent with
+   an empty name and its exit code, so failure loops still count without
+   recording anything the user typed.
+5. The subcommand allowlist is owned by the domain classifier and rendered
+   into the hook script, so a word not on it never leaves the shell.
 
 **Event (after hook-side extraction):**
 
@@ -395,11 +400,11 @@ uninstall. It also handles user, project and managed settings.
 |-------|-----|
 | `SessionStart` / `SessionEnd` | open / close the session's agent timeline |
 | `UserPromptSubmit` | agent → `working`; closes any open segment of the previous turn |
-| `PreToolUse` / `PostToolUse` | tool mix; registered **async** where supported |
+| `PreToolUse` / `PostToolUse` | tool mix; synchronous in Phase 0 (an `async` hook option isn't verified), budget < 10 ms |
 | `PermissionRequest` (version-detected) | agent → `blocked_on_human`; human → `approving` if that terminal is attended |
 | `Notification` | fallback for blocked-on-human on versions without `PermissionRequest` |
 | `Stop` / `SubagentStop` | agent → `idle`; marks "fresh output" for presence |
-| `StopFailure` | agent → `idle` (error) |
+| `StopFailure` | agent → `idle` (error). Not registered in Phase 0 until the Claude Code version that introduced it is verified; the 10-minute timeout covers it |
 
 **Hook rules (security-relevant):**
 1. **The hook writes nothing to stdout, ever.** For `UserPromptSubmit` and
@@ -734,9 +739,10 @@ These, plus §7.5, are the alpha exit criteria.
     check** (`SO_PEERCRED` / `LOCAL_PEERCRED`) for the same UID.
   - **Windows named pipe** with an explicit DACL for the user's SID and
     `PIPE_REJECT_REMOTE_CLIENTS`.
-- **Ingest:** unixgram datagrams / pipe messages, `≤ 4 KiB`, rate-limited
-  per source, strictly parsed (schema, §3.3), fuzzed in CI. Malformed
-  messages are dropped and counted.
+- **Ingest:** one message per stream connection on the socket or pipe,
+  `≤ 4 KiB`, rate-limited, strictly parsed (schema, §3.3), fuzzed in CI.
+  Malformed messages are dropped and counted. Stream sockets rather than
+  datagrams, because peer-credential checks need a connection.
 - **Query API (HTTP+JSON over the same socket/pipe):**
   - `GET /v1/status`
   - `GET /v1/days?from&to`

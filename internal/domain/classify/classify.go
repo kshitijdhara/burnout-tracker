@@ -4,6 +4,8 @@
 package classify
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -102,4 +104,15 @@ func Subcommand(argv0, sub string) string {
 		return sub
 	}
 	return ""
+}
+
+// Subcommands returns a copy of the subcommand allowlist, tool → sorted
+// subcommands. The shell hook renders it into the hook script, so words not
+// listed never leave the shell; the daemon checks them again on receipt.
+func Subcommands() map[string][]string {
+	out := make(map[string][]string, len(subcommands))
+	for tool, subs := range subcommands {
+		out[tool] = slices.Sorted(maps.Keys(subs))
+	}
+	return out
 }

@@ -216,9 +216,9 @@ func (d *Daemon) onShell(s *wire.ShellCommand) {
 		End:        time.UnixMilli(s.EndMs),
 		ProjectKey: d.projectKey(s.Cwd),
 	}
-	if cmd.Argv0 == "" {
-		return // unresolved command (for example a pasted token): nothing to record
-	}
+	// An unresolved command (a typo or a pasted token) arrives with an empty
+	// argv0. It is kept as an unnamed failure, so failure loops still count,
+	// without recording anything the user typed.
 	d.queue(timeline.ShellInterval(cmd, string(classify.Command(cmd.Argv0)), d.cfg.Rollover)...)
 }
 

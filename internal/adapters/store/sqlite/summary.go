@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -169,4 +170,17 @@ func (s *Store) scanRows(ctx context.Context, query string, args []any, fn func(
 		}
 	}
 	return rows.Err()
+}
+
+// Health returns the SLI JSON recorded for a logical day, or "" if none.
+func (s *Store) Health(ctx context.Context, logicalDay string) (string, error) {
+	var slis string
+	err := s.db.QueryRowContext(ctx, `SELECT slis FROM health_daily WHERE logical_day = ?`, logicalDay).Scan(&slis)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("sqlite: read health: %w", err)
+	}
+	return slis, nil
 }

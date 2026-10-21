@@ -21,9 +21,26 @@ check, model download. Window titles, command arguments and prompt text are
 never stored. [Privacy & Security](docs/privacy-and-security.md) lists
 every field that is collected.
 
+## Trying Phase 0
+
+Phase 0 is a developer preview: no installer, tray icon or dashboard yet.
+Desktop collection works on macOS and Windows; on Linux only shell and
+Claude Code hooks are recorded for now.
+
+```sh
+go build -o bin/burnout ./cmd/burnout
+bin/burnout setup          # read what is collected, consent
+bin/burnout install-hooks  # zsh hook + Claude Code hooks (backs up files first)
+bin/burnout daemon         # leave running
+bin/burnout status         # today's summary
+bin/burnout doctor         # permissions, disk encryption, health
+```
+
+`bin/burnout uninstall-hooks` removes the hooks exactly.
+
 ## Status
 
-Design phase (v0.2). Start here:
+Phase 0 (spike). Design docs:
 
 - [System design](docs/system-design.md)
 - [Privacy & Security](docs/privacy-and-security.md): the threat model and

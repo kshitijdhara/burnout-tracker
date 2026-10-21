@@ -130,7 +130,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 		Argv0: "git", Subcmd: "ghp_tokenlike", Exit: 1, StartMs: t0.UnixMilli(), EndMs: t0.Add(2 * time.Second).UnixMilli(),
 		Cwd: "/home/u/" + canary,
 	}}
-	msgs <- wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{Argv0: "", StartMs: 1, EndMs: 2}}
+	msgs <- wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{Argv0: "", Exit: 127, StartMs: t0.UnixMilli(), EndMs: t0.UnixMilli() + 5}}
 	msgs <- wire.Message{V: 1, Kind: wire.KindAgentHook, Agent: &wire.AgentHook{
 		Agent: "claude", Event: "UserPromptSubmit", SessionID: "sess-" + canary, AgentPID: 300, AtMs: t0.UnixMilli(),
 	}}
@@ -172,6 +172,9 @@ func TestDaemonEndToEnd(t *testing.T) {
 		switch {
 		case iv.Kind == model.IntervalShellCmd:
 			shell++
+			if iv.Attrs.Argv0 == "" {
+				continue // the unresolved command: kept, unnamed
+			}
 			if iv.Attrs.Argv0 != "git" || iv.Attrs.Subcommand != "" || iv.Attrs.ProjectKey == "" {
 				t.Fatalf("shell interval %+v", iv)
 			}
@@ -181,8 +184,8 @@ func TestDaemonEndToEnd(t *testing.T) {
 			composing++
 		}
 	}
-	if shell != 1 {
-		t.Fatalf("want 1 shell interval (unresolved argv0 dropped), got %d", shell)
+	if shell != 2 {
+		t.Fatalf("want 2 shell intervals (one unnamed), got %d", shell)
 	}
 	if agentWorking != 1 || composing == 0 {
 		t.Fatalf("agent working=%d, human composing=%d; intervals: %+v", agentWorking, composing, sink.intervals)
