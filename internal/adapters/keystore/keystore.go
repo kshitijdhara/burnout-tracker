@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/zalando/go-keyring"
 
@@ -58,21 +59,52 @@ type options struct{ fileOnly bool }
 // WithFileOnly skips the OS keyring and always uses the file backend.
 func WithFileOnly() Option { return func(o *options) { o.fileOnly = true } }
 
+// backendMarker records which backend was chosen the first time, so later
+// runs never silently switch (a switch would mean a new HMAC key and a break
+// in every project and window identity).
+const backendMarker = "backend"
+
+// Marker values.
+const (
+	markerOS   = "os"
+	markerFile = "file"
+)
+
+// probeTimeout bounds the first-run keyring probe. A locked keychain in a
+// headless session can block indefinitely waiting for a prompt.
+const probeTimeout = 3 * time.Second
+
 // New returns a Store backed by the OS keyring if it works, otherwise by
-// files under <dir>/keys.
+// files under <dir>/keys. The first choice is recorded and reused.
 func New(dir string, opts ...Option) (*Store, error) {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
 	}
-	if !o.fileOnly && probeKeyring() {
-		return &Store{backend: osKeyring{}}, nil
-	}
 	fb, err := newFileBackend(filepath.Join(dir, "keys"))
 	if err != nil {
 		return nil, err
 	}
-	return &Store{backend: fb}, nil
+	if o.fileOnly {
+		return &Store{backend: fb}, nil
+	}
+	marker, err := fb.get(backendMarker)
+	switch {
+	case err == nil && marker == markerOS:
+		return &Store{backend: osKeyring{}}, nil
+	case err == nil:
+		return &Store{backend: fb}, nil
+	case !errors.Is(err, errNotFound):
+		return nil, err
+	}
+	choice, be := markerFile, backend(fb)
+	if probeKeyring(probeTimeout) {
+		choice, be = markerOS, osKeyring{}
+	}
+	if err := fb.set(backendMarker, choice); err != nil {
+		return nil, err
+	}
+	return &Store{backend: be}, nil
 }
 
 // GetOrCreate returns the named secret, generating a random one on first use.
@@ -124,15 +156,27 @@ func (s *Store) Delete(name string) error {
 // or "file".
 func (s *Store) Backend() string { return s.backend.name() }
 
-// probeKeyring checks the OS keyring end to end. Linux without a Secret
-// Service, or a locked keychain in a headless session, fails here.
-func probeKeyring() bool {
-	if err := keyring.Set(Service, probeName, "ok"); err != nil {
+// probeKeyring checks the OS keyring end to end within timeout. Linux
+// without a Secret Service, or a locked keychain in a headless session,
+// fails here. On timeout the probe goroutine is abandoned; it only runs once
+// per install.
+func probeKeyring(timeout time.Duration) bool {
+	ok := make(chan bool, 1)
+	go func() {
+		if err := keyring.Set(Service, probeName, "ok"); err != nil {
+			ok <- false
+			return
+		}
+		v, err := keyring.Get(Service, probeName)
+		_ = keyring.Delete(Service, probeName)
+		ok <- err == nil && v == "ok"
+	}()
+	select {
+	case r := <-ok:
+		return r
+	case <-time.After(timeout):
 		return false
 	}
-	v, err := keyring.Get(Service, probeName)
-	_ = keyring.Delete(Service, probeName)
-	return err == nil && v == "ok"
 }
 
 type osKeyring struct{}
@@ -179,25 +223,32 @@ func (osKeyring) name() string {
 
 // fileBackend stores one secret per 0600 file in a 0700 directory. It only
 // protects against other local users; the doctor command says so. Access
-// goes through an os.Root so names can never escape the directory.
+// goes through an os.Root so names can never escape the directory. The root
+// is opened per operation, so no handle outlives a call (Windows can't
+// delete a directory with an open handle).
 type fileBackend struct {
-	dir  string
-	root *os.Root
+	dir string
 }
 
 func newFileBackend(dir string) (fileBackend, error) {
 	if err := paths.EnsurePrivateDir(dir); err != nil {
 		return fileBackend{}, err
 	}
-	root, err := os.OpenRoot(dir)
+	return fileBackend{dir: dir}, nil
+}
+
+func (f fileBackend) withRoot(fn func(*os.Root) error) error {
+	root, err := os.OpenRoot(f.dir)
 	if err != nil {
-		return fileBackend{}, fmt.Errorf("keystore: open %s: %w", dir, err)
+		return fmt.Errorf("keystore: open %s: %w", f.dir, err)
 	}
-	return fileBackend{dir: dir, root: root}, nil
+	defer func() { _ = root.Close() }()
+	return fn(root)
 }
 
 func (f fileBackend) get(name string) (string, error) {
-	b, err := f.root.ReadFile(name)
+	var b []byte
+	err := f.withRoot(func(r *os.Root) (err error) { b, err = r.ReadFile(name); return err })
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", errNotFound
 	}
@@ -213,25 +264,28 @@ func (f fileBackend) get(name string) (string, error) {
 // set creates the file exclusively so two processes racing to create the
 // same secret can't overwrite each other; the loser reads the winner's value.
 func (f fileBackend) set(name, value string) error {
-	fh, err := f.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	err := f.withRoot(func(r *os.Root) error {
+		fh, err := r.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := fh.WriteString(value); err != nil {
+			_ = fh.Close()
+			return err
+		}
+		return fh.Close()
+	})
 	if errors.Is(err, fs.ErrExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("keystore: write %s: %w", name, err)
 	}
-	if _, err := fh.WriteString(value); err != nil {
-		_ = fh.Close()
-		return fmt.Errorf("keystore: write %s: %w", name, err)
-	}
-	if err := fh.Close(); err != nil {
-		return fmt.Errorf("keystore: write %s: %w", name, err)
-	}
 	return nil
 }
 
 func (f fileBackend) del(name string) error {
-	err := f.root.Remove(name)
+	err := f.withRoot(func(r *os.Root) error { return r.Remove(name) })
 	if errors.Is(err, fs.ErrNotExist) {
 		return errNotFound
 	}

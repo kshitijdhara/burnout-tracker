@@ -130,3 +130,46 @@ func TestFallsBackWhenKeyringFails(t *testing.T) {
 		t.Fatalf("backend = %s, want file", s.Backend())
 	}
 }
+
+// Once the OS keyring was chosen, a later failure must surface as an error,
+// never as a silent switch to files (which would mean a new HMAC key).
+func TestBackendChoiceIsSticky(t *testing.T) {
+	dir := t.TempDir()
+	keyring.MockInit()
+	s, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Backend() == BackendFile {
+		t.Fatal("expected the OS keyring on first run")
+	}
+	if _, err := s.GetOrCreate("hmac"); err != nil {
+		t.Fatal(err)
+	}
+
+	keyring.MockInitWithError(errors.New("keychain locked"))
+	s2, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s2.Backend() == BackendFile {
+		t.Fatal("backend silently switched to files")
+	}
+	if _, err := s2.GetOrCreate("hmac"); err == nil {
+		t.Fatal("expected the keyring error to surface")
+	}
+
+	// And a file choice stays a file choice even when the keyring recovers.
+	fileDir := t.TempDir()
+	if _, err := New(fileDir); err != nil {
+		t.Fatal(err)
+	}
+	keyring.MockInit()
+	s3, err := New(fileDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s3.Backend() != BackendFile {
+		t.Fatalf("backend = %s, want file", s3.Backend())
+	}
+}

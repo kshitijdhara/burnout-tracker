@@ -52,6 +52,7 @@ func TestEndToEnd(t *testing.T) {
 		"HOME="+home, "ZDOTDIR="+home,
 		"BURNOUT_DATA_DIR="+dataDir, "BURNOUT_CONFIG_DIR="+configDir, "BURNOUT_RUNTIME_DIR="+runtimeDir,
 		"CLAUDE_CONFIG_DIR="+filepath.Join(home, ".claude"),
+		envKeystore+"=file", // never touch the developer's real keychain
 		"PATH="+os.Getenv("PATH"),
 	)
 	run := func(stdin string, args ...string) (stdout, stderr string, err error) {
@@ -82,7 +83,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = daemon.Process.Kill() })
-	waitFor(t, func() bool {
+	waitFor(t, &daemonLog, func() bool {
 		c, err := net.Dial("unix", filepath.Join(runtimeDir, "burnout.sock"))
 		if err == nil {
 			_ = c.Close()
@@ -178,7 +179,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 }
 
-func waitFor(t *testing.T, ok func() bool) {
+func waitFor(t *testing.T, log *bytes.Buffer, ok func() bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -188,5 +189,5 @@ func waitFor(t *testing.T, ok func() bool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("timed out waiting for the daemon")
+	t.Fatalf("timed out waiting for the daemon; its log:\n%s", log.String())
 }

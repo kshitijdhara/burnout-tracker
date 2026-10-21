@@ -59,8 +59,10 @@ func TestLiveSnapshot(t *testing.T) {
 }
 
 func TestToRect(t *testing.T) {
+	// x spans 10.5–111.0 and y 20.25–70.25; rounding outward gives
+	// x 10–111 (width 101) and y 20–71 (height 51).
 	r := toRect(10.5, 20.25, 100.5, 50)
-	if r.X != 10 || r.Y != 20 || r.W != 102 || r.H != 51 {
+	if r.X != 10 || r.Y != 20 || r.W != 101 || r.H != 51 {
 		t.Errorf("toRect = %+v", r)
 	}
 }

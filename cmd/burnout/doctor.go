@@ -16,8 +16,9 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
-// runDoctor prints what is and isn't working. It never changes anything
-// and makes no network calls.
+// runDoctor prints what is and isn't working. It doesn't change data or
+// settings (it may create the data directory and record the keystore
+// choice, as the daemon would) and makes no network calls.
 func runDoctor(ctx context.Context, _ []string) error {
 	fmt.Println("burnout", version)
 	dataDir, err := paths.DataDir()
@@ -47,7 +48,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		fmt.Printf("  ?  disk encryption: unknown (%s)\n", detail)
 	}
 
-	if keys, err := keystore.New(dataDir); err == nil {
+	if keys, err := keystore.New(dataDir, keystoreOptions()...); err == nil {
 		note := keys.Backend()
 		if note == "file" {
 			note += " (no OS keystore found; key file is owner-only)"

@@ -24,6 +24,17 @@ import (
 // hmacKeyName is the keystore entry for identity hashing.
 const hmacKeyName = "hmac"
 
+// envKeystore set to "file" forces the file keystore. Tests use it so they
+// never write into the developer's real OS keychain.
+const envKeystore = "BURNOUT_KEYSTORE"
+
+func keystoreOptions() []keystore.Option {
+	if os.Getenv(envKeystore) == keystore.BackendFile {
+		return []keystore.Option{keystore.WithFileOnly()}
+	}
+	return nil
+}
+
 // messageBuffer bounds hook messages waiting for the main loop.
 const messageBuffer = 4096
 
@@ -47,7 +58,7 @@ func runDaemon(ctx context.Context, _ []string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	keys, err := keystore.New(dataDir)
+	keys, err := keystore.New(dataDir, keystoreOptions()...)
 	if err != nil {
 		return err
 	}
