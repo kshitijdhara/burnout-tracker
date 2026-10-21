@@ -33,11 +33,16 @@ __burnout_preexec() {
   w=( ${(z)3} )
   local -i i=1 n=${#w}
 
-  # Skip NAME=value assignments and prefix words that run another command.
+  # Skip NAME=value assignments and prefix words that run another command,
+  # including the shell's own: negation, grouping, coproc, repeat N. $3 is
+  # zsh's reformatted text, so "repeat 2 git" arrives as
+  # "repeat 2 ; do ; git …" and "{ git }" as "{ ; git ; }": the separators
+  # and the do are skipped too.
   while (( i <= n )); do
     case $w[i] in
       ([A-Za-z_][A-Za-z0-9_]#=*) (( i++ )) ;;
-      (sudo|command|builtin|exec|nocorrect|noglob|time|nohup) (( i++ )) ;;
+      (sudo|command|builtin|exec|nocorrect|noglob|time|nohup|coproc|-|\!|\{|\(|\;|do) (( i++ )) ;;
+      (repeat) (( i += 2 )) ;;
       (env)
         (( i++ ))
         while (( i <= n )) && [[ $w[i] == -* || $w[i] == [A-Za-z_][A-Za-z0-9_]#=* ]]; do
@@ -49,14 +54,15 @@ __burnout_preexec() {
   (( i <= n )) || return 0
 
   local cmd=${(Q)w[i]}
-  # A leading ~/ is expanded by hand: ${~cmd} would also glob what was typed.
+  # Like zsh, expand only an unquoted leading ~/ (so '~/x' stays unresolved).
+  # Done by hand because ${~cmd} would also expand ~user and named
+  # directories, which can mean a passwd lookup on every command.
   local file=$cmd
-  [[ $file == '~/'* ]] && file=$HOME${file#\~}
+  [[ $w[i] == '~/'* ]] && file=$HOME${cmd#\~}
   # Keep the name only if it resolves to something runnable. A pasted token
   # that isn't a command must never become argv0. Hash lookups avoid forking.
-  # reswords is a plain array: (Ie) matches exactly, where a [$cmd]
-  # subscript would evaluate the typed word as arithmetic.
-  if (( ${+aliases[$cmd]} || ${+functions[$cmd]} || ${+builtins[$cmd]} || ${reswords[(Ie)$cmd]} || ${+commands[$cmd]} )); then
+  # Reserved words (if, for, [[ …) are not commands and are never recorded.
+  if (( ${+aliases[$cmd]} || ${+functions[$cmd]} || ${+builtins[$cmd]} || ${+commands[$cmd]} )); then
     __burnout_argv0=${cmd:t}
   elif [[ $file == */* && -x $file && ! -d $file ]]; then
     __burnout_argv0=${cmd:t}

@@ -27,7 +27,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		return err
 	}
 
-	require("consent recorded", hasConsent(), "run `burnout setup`")
+	checkFix("consent recorded", hasConsent(), "run `burnout setup`")
 	switch err := paths.CheckPrivate(dataDir); {
 	case errors.Is(err, paths.ErrUnverified):
 		fmt.Println("  ?  data dir is owner-only: not verified on this platform")
@@ -40,7 +40,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 	pctx, cancel := context.WithTimeout(ctx, time.Second)
 	err = ingest.Ping(pctx)
 	cancel()
-	require("daemon is running", err == nil, "start it with `burnout daemon`")
+	checkFix("daemon is running", err == nil, "start it with `burnout daemon`")
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
@@ -102,9 +102,9 @@ func check(name string, ok bool, detail string) {
 	fmt.Printf("  %s %s\n", mark, name)
 }
 
-// require is check for a condition whose detail is only a fix, shown when
+// checkFix is check for a condition whose detail is only a fix, shown when
 // the condition fails.
-func require(name string, ok bool, fix string) {
+func checkFix(name string, ok bool, fix string) {
 	if ok {
 		fix = ""
 	}

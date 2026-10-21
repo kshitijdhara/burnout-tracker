@@ -66,18 +66,27 @@ jobs:
       - name: Install shells for hook tests
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zsh fish
+      # CI has no terminal, but developers run the tests from one. On Linux
+      # the race run happens under a pseudo-terminal, so a test that grabs
+      # /dev/tty (as an interactive zsh does) fails here instead of hanging
+      # on a laptop. macOS runs the suite without a terminal, then the
+      # packages that start a shell again under one.
+      - name: Test (race, under a terminal)
+        if: runner.os == 'Linux'
+        run: script -qec "go test -race -count=1 -timeout=10m ./..." /dev/null </dev/null
       - name: Test (race)
-        if: runner.os != 'Windows'
+        if: runner.os == 'macOS'
         run: go test -race -count=1 ./...
+      - name: Test shell-launching packages (under a terminal)
+        if: runner.os == 'macOS'
+        # Python's pty works the same on every platform and returns the
+        # child's exit status, unlike BSD script(1).
+        run: >-
+          python3 -c 'import os, pty, sys; sys.exit(os.waitstatus_to_exitcode(pty.spawn(sys.argv[1:])))'
+          go test -count=1 -timeout=3m ./cmd/burnout/ ./internal/adapters/integrations/shell/ </dev/null
       - name: Test
         if: runner.os == 'Windows'
         run: go test -count=1 ./...
-      # CI has no terminal, but developers run the tests from one. Run them
-      # under a pseudo-terminal too, so a test that grabs /dev/tty (as an
-      # interactive zsh does) fails here instead of hanging on a laptop.
-      - name: Test (under a terminal)
-        if: runner.os == 'Linux'
-        run: script -qec "go test -count=1 -timeout=3m ./..." /dev/null </dev/null
       - name: Build
         run: go build -o bin/ ./cmd/...
 
