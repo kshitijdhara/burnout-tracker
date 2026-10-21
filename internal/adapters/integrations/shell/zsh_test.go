@@ -21,8 +21,8 @@ type record struct {
 
 // runZsh drives an interactive zsh (reading commands from stdin, which
 // still runs preexec/precmd) with the rendered hook and a fake emitter, and
-// returns one record per emitter invocation.
-func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) []record {
+// returns one record per emitter invocation and the shell's output.
+func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) ([]record, string) {
 	t.Helper()
 	if _, err := exec.LookPath("zsh"); err != nil {
 		t.Skip("zsh not installed")
@@ -63,7 +63,8 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	// A minimal environment keeps failure output small and free of the
 	// test runner's own variables.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TERM=dumb", "PS1=", "PROMPT=", "RPROMPT="}
-	if b, err := cmd.CombinedOutput(); err != nil && interactive {
+	b, err := cmd.CombinedOutput()
+	if err != nil && interactive {
 		t.Logf("zsh output: %s", b)
 	}
 
@@ -96,7 +97,7 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 		}
 		recs = append(recs, r)
 	}
-	return recs
+	return recs, string(b)
 }
 
 func byArgv0(recs []record) map[string][]record {
@@ -118,7 +119,7 @@ func TestZshHookNeverLeaksCommandLine(t *testing.T) {
 		"FOO=CANARYCCC env -i true",
 		"git -C /tmp CANARYDDD >/dev/null 2>&1",
 	}
-	recs := runZsh(t, true, commands, len(commands))
+	recs, _ := runZsh(t, true, commands, len(commands))
 	if len(recs) != len(commands) {
 		t.Fatalf("got %d emitter records, want %d: %+v", len(recs), len(commands), recs)
 	}
@@ -178,8 +179,32 @@ func keys(m map[string][]record) []string {
 }
 
 func TestZshHookSilentWhenNotInteractive(t *testing.T) {
-	recs := runZsh(t, false, []string{"true", "printf x >/dev/null"}, 0)
+	recs, _ := runZsh(t, false, []string{"true", "printf x >/dev/null"}, 0)
 	if len(recs) != 0 {
 		t.Fatalf("non-interactive shell emitted %d records", len(recs))
+	}
+}
+
+// TestZshHookResolvesTildePathsAndReservedWords covers a command run as
+// ~/path/to/tool and a reserved word. The hook once looked words up in the
+// reswords array by subscript, which zsh evaluates as arithmetic: a leading
+// ~ printed "bad math expression" before every such command, and it was
+// never recorded.
+func TestZshHookResolvesTildePathsAndReservedWords(t *testing.T) {
+	commands := []string{
+		"mkdir -p ~/bin && printf '#!/bin/sh\\n' >~/bin/tool && chmod +x ~/bin/tool",
+		"~/bin/tool",
+		"if true; then :; fi",
+	}
+	recs, out := runZsh(t, true, commands, len(commands))
+	if strings.Contains(out, "math") || strings.Contains(out, "__burnout") {
+		t.Fatalf("hook printed an error: %s", out)
+	}
+	got := byArgv0(recs)
+	if len(got["tool"]) != 1 {
+		t.Errorf("~/bin/tool not recorded as tool: %v", keys(got))
+	}
+	if len(got["if"]) != 1 {
+		t.Errorf("reserved word not recorded: %v", keys(got))
 	}
 }
