@@ -149,3 +149,14 @@ func TestCwdValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestIsAbsPathAcceptsPosixFormEverywhere(t *testing.T) {
+	for _, p := range []string{"/home/u", "/c/Users/u"} {
+		if !IsAbsPath(p) {
+			t.Errorf("%s rejected", p)
+		}
+	}
+	if IsAbsPath("rel/dir") {
+		t.Error("relative path accepted")
+	}
+}

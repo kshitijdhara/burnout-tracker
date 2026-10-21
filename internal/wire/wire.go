@@ -166,13 +166,20 @@ func (s *ShellCommand) validate() error {
 	return validCwd(s.Cwd)
 }
 
+// IsAbsPath reports whether p is absolute either natively or in POSIX form.
+// Hooks on Windows can run under Git Bash or WSL and report "/c/Users/…"
+// style paths, which filepath.IsAbs rejects there.
+func IsAbsPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/")
+}
+
 // validCwd accepts an empty or absolute, reasonably short path. Paths are
 // only ever turned into an HMAC'd project key, never stored.
 func validCwd(cwd string) error {
 	if cwd == "" {
 		return nil
 	}
-	if len(cwd) > MaxPathBytes || !filepath.IsAbs(cwd) || strings.ContainsRune(cwd, 0) {
+	if len(cwd) > MaxPathBytes || !IsAbsPath(cwd) || strings.ContainsRune(cwd, 0) {
 		return fmt.Errorf("%w: cwd", ErrInvalidData)
 	}
 	return nil

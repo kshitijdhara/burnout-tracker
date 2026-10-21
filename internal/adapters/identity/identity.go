@@ -11,6 +11,7 @@ import (
 	"hash"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,7 +85,7 @@ func NewRoots() *Roots {
 // the cache when it completes. Relative or oversized dirs return "", which
 // callers treat as "no project".
 func (r *Roots) Resolve(dir string, timeout time.Duration) string {
-	if len(dir) > maxDirLen || !filepath.IsAbs(dir) {
+	if len(dir) > maxDirLen || !isAbsPath(dir) {
 		return ""
 	}
 	dir = filepath.Clean(dir)
@@ -152,4 +153,10 @@ func findRoot(dir string) string {
 		}
 		d = parent
 	}
+}
+
+// isAbsPath accepts native absolute paths and POSIX-style ones ("/c/Users/…"
+// from Git Bash on Windows), matching the wire contract's rule.
+func isAbsPath(p string) bool {
+	return filepath.IsAbs(p) || strings.HasPrefix(p, "/")
 }

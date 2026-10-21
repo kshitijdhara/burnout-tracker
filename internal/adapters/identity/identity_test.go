@@ -97,7 +97,7 @@ func TestResolveNeverBlocksPastTimeout(t *testing.T) {
 	r.find = func(string) string { <-release; return "/slow-root" }
 	defer close(release)
 
-	dir := filepath.Join(string(filepath.Separator), "mnt", "hung", "x")
+	dir := filepath.Join(t.TempDir(), "mnt", "hung", "x") // absolute on every OS
 	start := time.Now()
 	if got := r.Resolve(dir, 20*time.Millisecond); got != dir {
 		t.Fatalf("got %q, want the dir itself on timeout", got)
