@@ -13,6 +13,10 @@ const (
 	ReasonGrace = "grace"
 	ReasonVideo = "video"
 	ReasonCall  = "call"
+	// ReasonReading marks idle time confirmed as present after the fact:
+	// the user came back to the keyboard or pointer within the reading cap,
+	// with no lock or sleep in between (see Resolver).
+	ReasonReading = "reading"
 )
 
 // Input is one tick's snapshot plus what the caller knows about its windows.
@@ -42,6 +46,18 @@ type Result struct {
 	// KeyboardActive is true when keyboard input went to the focused window
 	// within the input window.
 	KeyboardActive bool
+
+	// Idle is true inside an idle stretch: no recent input, call or visible
+	// video, screen unlocked. Presence then holds the grace rule's value,
+	// which a Resolver may later replace (see ReasonReading).
+	Idle bool
+	// Cap bounds how long an idle stretch can still be confirmed as reading.
+	// Set on idle ticks only.
+	Cap time.Duration
+	// Shares is the attention distribution if the user is present, summing
+	// with UnattributedShare to 1. Set on idle ticks only, for the Resolver.
+	Shares            map[model.WindowID]float64
+	UnattributedShare float64
 }
 
 // Top returns the window holding the most attention and its share. It
@@ -67,6 +83,11 @@ type Engine struct {
 	hoverWindow  model.WindowID
 	hoverSince   time.Time
 	lastTouched  map[model.WindowID]time.Time
+
+	// The current idle stretch, if any. Its grace and cap are fixed when it
+	// starts, from the window the user was attending then.
+	inStretch                bool
+	stretchGrace, stretchCap time.Duration
 }
 
 // New returns an engine with the given parameters.
@@ -101,25 +122,44 @@ func (e *Engine) Tick(in Input) Result {
 	e.forget(s.Windows)
 
 	res.Presence, res.Reason = e.presence(in)
+	res.Idle = e.inStretch
+	if res.Presence == 0 && !res.Idle {
+		e.lastTop = 0
+		return res
+	}
+
+	shares, unattributed := e.distribution(in, focused, keys, scroll)
+	if res.Idle {
+		res.Cap, res.Shares, res.UnattributedShare = e.stretchCap, shares, unattributed
+	}
 	if res.Presence == 0 {
 		e.lastTop = 0
 		return res
 	}
-
-	scores, best := e.scores(in, focused, keys, scroll)
-	if best < e.p.UnattributedBelow {
-		res.Unattributed = res.Presence
-		e.lastTop = 0
-		return res
-	}
-	for id, share := range softmax(scores, e.p.Temperature) {
+	res.Unattributed = unattributed * res.Presence
+	for id, share := range shares {
 		res.Attention[id] = share * res.Presence
 	}
-	e.lastTop, _ = res.Top()
+	if res.Unattributed > 0 {
+		e.lastTop = 0
+	} else {
+		e.lastTop, _ = res.Top()
+	}
 	return res
 }
 
+// distribution returns attention shares as if the user were present,
+// summing with the unattributed share to 1.
+func (e *Engine) distribution(in Input, focused model.WindowID, keys, scroll float64) (map[model.WindowID]float64, float64) {
+	scores, best := e.scores(in, focused, keys, scroll)
+	if best < e.p.UnattributedBelow {
+		return map[model.WindowID]float64{}, 1
+	}
+	return softmax(scores, e.p.Temperature), 0
+}
+
 func (e *Engine) reset() {
+	e.inStretch = false
 	e.keys.clear()
 	e.scroll.clear()
 	e.hoverWindow = 0
@@ -178,9 +218,31 @@ func (e *Engine) forget(ws []model.Window) {
 }
 
 func (e *Engine) presence(in Input) (float64, string) {
-	s := in.Snapshot
+	p, reason := e.activePresence(in.Snapshot)
+	if reason != "" || in.Snapshot.Locked {
+		e.inStretch = false
+		return p, reason
+	}
+	if !e.inStretch {
+		e.inStretch = true
+		e.stretchGrace, e.stretchCap = e.grace(in), e.readingCap(in)
+	}
+	over := in.Snapshot.IdleFor - e.p.ActiveInput
+	if over >= e.stretchGrace {
+		return 0, ""
+	}
+	return 1 - float64(over)/float64(e.stretchGrace), ReasonGrace
+}
+
+// activePresence reports presence that needs no inference: a locked
+// screen, a call, visible video, or recent input. It returns no reason
+// when none applies and the user is idle.
+func (e *Engine) activePresence(s model.Snapshot) (float64, string) {
 	if s.Locked {
 		return 0, ""
+	}
+	if s.CallActive {
+		return 1, ReasonCall
 	}
 	for _, w := range s.Windows {
 		if w.InCall {
@@ -196,27 +258,34 @@ func (e *Engine) presence(in Input) (float64, string) {
 	if s.IdleFor <= e.p.ActiveInput {
 		return 1, ReasonInput
 	}
-	grace := e.grace(in)
-	over := s.IdleFor - e.p.ActiveInput
-	if over >= grace {
-		return 0, ""
-	}
-	return 1 - float64(over)/float64(grace), ReasonGrace
+	return 0, ""
 }
 
 // grace picks the grace window from the window the user was last attending.
 func (e *Engine) grace(in Input) time.Duration {
-	g := e.p.GraceDefault
+	return e.byLastWindow(in, e.p.GraceDefault, e.p.GraceDocs, e.p.GraceAgentOutput)
+}
+
+// readingCap picks how long an idle stretch can still be confirmed as
+// reading, from the window the user was last attending.
+func (e *Engine) readingCap(in Input) time.Duration {
+	return e.byLastWindow(in, e.p.ReadingCapDefault, e.p.ReadingCapDocs, e.p.ReadingCapAgentOutput)
+}
+
+// byLastWindow chooses between per-context durations by the window the
+// user was last attending, scaled for the input profile.
+func (e *Engine) byLastWindow(in Input, def, docs, agentOutput time.Duration) time.Duration {
+	d := def
 	switch {
 	case e.lastTop != 0 && in.FreshOutput[e.lastTop]:
-		g = e.p.GraceAgentOutput
+		d = agentOutput
 	case e.lastTop != 0:
 		switch in.Categories[e.lastTop] {
 		case model.CategoryDocs, model.CategoryBrowser:
-			g = e.p.GraceDocs
+			d = docs
 		}
 	}
-	return time.Duration(float64(g) * e.p.graceScale())
+	return time.Duration(float64(d) * e.p.graceScale())
 }
 
 func (e *Engine) scores(in Input, focused model.WindowID, keys, scroll float64) (map[model.WindowID]float64, float64) {

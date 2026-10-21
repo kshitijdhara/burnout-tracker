@@ -91,6 +91,7 @@ func topology(monitors []model.Rect) string {
 type health struct {
 	day                                   string
 	presentS, attributedS                 float64
+	callS, videoS, readingS               float64 // presence held by each signal
 	shellEvents, agentEvents              int
 	collectorErrors, flushErrors, dropped int
 }
@@ -100,6 +101,9 @@ type healthJSON struct {
 	Coverage        float64           `json:"coverage"`
 	PresentS        float64           `json:"present_s"`
 	AttributedS     float64           `json:"attributed_s"`
+	CallS           float64           `json:"call_s"`
+	VideoS          float64           `json:"video_s"`
+	ReadingS        float64           `json:"reading_s"`
 	ShellEvents     int               `json:"shell_events"`
 	AgentEvents     int               `json:"agent_events"`
 	CollectorErrors int               `json:"collector_errors"`
@@ -115,6 +119,14 @@ func (h *health) observe(res attention.Result) {
 	dt := res.Dt.Seconds()
 	h.presentS += res.Presence * dt
 	h.attributedS += (res.Presence - res.Unattributed) * dt
+	switch res.Reason {
+	case attention.ReasonCall:
+		h.callS += dt
+	case attention.ReasonVideo:
+		h.videoS += dt
+	case attention.ReasonReading:
+		h.readingS += dt
+	}
 }
 
 // seed continues from a stored row for day. Malformed rows are ignored.
@@ -125,6 +137,7 @@ func (h *health) seed(day, stored string) {
 	}
 	*h = health{
 		day: day, presentS: j.PresentS, attributedS: j.AttributedS,
+		callS: j.CallS, videoS: j.VideoS, readingS: j.ReadingS,
 		shellEvents: j.ShellEvents, agentEvents: j.AgentEvents,
 		collectorErrors: j.CollectorErrors, flushErrors: j.FlushErrors, dropped: j.Dropped,
 	}
@@ -146,6 +159,7 @@ func (h *health) json(day string, hooks, ingest map[string]uint64) string {
 	}
 	b, _ := json.Marshal(healthJSON{
 		Coverage: coverage, PresentS: h.presentS, AttributedS: h.attributedS,
+		CallS: h.callS, VideoS: h.videoS, ReadingS: h.readingS,
 		ShellEvents: h.shellEvents, AgentEvents: h.agentEvents,
 		CollectorErrors: h.collectorErrors, FlushErrors: h.flushErrors, Dropped: h.dropped,
 		Hooks: hooks, Ingest: ingest,

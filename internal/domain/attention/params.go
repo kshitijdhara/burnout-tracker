@@ -38,6 +38,11 @@ type Params struct {
 	ActiveInput time.Duration
 	// After that, presence decays linearly to 0 over an app-aware grace window.
 	GraceDefault, GraceDocs, GraceAgentOutput time.Duration
+	// An idle stretch that ends with the user's input within this long of
+	// its start, with no lock or sleep in between, counts as present in
+	// full (reading, thinking). Longer or interrupted stretches keep the
+	// grace rule. App-aware like the grace windows.
+	ReadingCapDefault, ReadingCapDocs, ReadingCapAgentOutput time.Duration
 
 	// Window of recent input used for the key/scroll signals.
 	InputWindow time.Duration
@@ -57,14 +62,17 @@ func DefaultParams() Params {
 		Temperature:       0.12,
 		UnattributedBelow: 0.15,
 		KeysSat:           3, ScrollSat: 2, HoverSat: 5 * time.Second,
-		RecentTau:        60 * time.Second,
-		ActiveInput:      30 * time.Second,
-		GraceDefault:     60 * time.Second,
-		GraceDocs:        2 * time.Minute,
-		GraceAgentOutput: 3 * time.Minute,
-		InputWindow:      5 * time.Second,
-		MaxGap:           5 * time.Second,
-		VideoMinVisible:  0.2,
+		RecentTau:             60 * time.Second,
+		ActiveInput:           30 * time.Second,
+		GraceDefault:          60 * time.Second,
+		GraceDocs:             2 * time.Minute,
+		GraceAgentOutput:      3 * time.Minute,
+		ReadingCapDefault:     4 * time.Minute,
+		ReadingCapDocs:        8 * time.Minute,
+		ReadingCapAgentOutput: 8 * time.Minute,
+		InputWindow:           5 * time.Second,
+		MaxGap:                5 * time.Second,
+		VideoMinVisible:       0.2,
 	}
 }
 

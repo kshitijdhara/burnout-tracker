@@ -345,3 +345,97 @@ func TestTopologyIsStable(t *testing.T) {
 		t.Fatalf("topology %q vs %q", a, b)
 	}
 }
+
+// scriptedCollector replays one browser window, one second per call, with
+// idle time and lock state from the script.
+type scriptedCollector struct {
+	clock  *fakeClock
+	idle   []time.Duration // IdleFor per tick
+	locked []bool
+	n      int
+}
+
+func (f *scriptedCollector) Snapshot(context.Context) (model.Snapshot, error) {
+	i := f.n
+	f.n++
+	at := t0.Add(time.Duration(i) * time.Second)
+	f.clock.set(at)
+	return model.Snapshot{
+		At:       at,
+		Windows:  []model.Window{{ID: 1, AppID: "com.apple.Safari", Bounds: model.Rect{W: 800, H: 600}, Visible: 1, Focused: true}},
+		Monitors: []model.Rect{{W: 1920, H: 1080}},
+		IdleFor:  f.idle[i], Locked: f.locked[i],
+	}, nil
+}
+func (f *scriptedCollector) Capabilities() ports.Capabilities {
+	return ports.Capabilities{Name: "scripted"}
+}
+func (f *scriptedCollector) Close() error { return nil }
+
+// readingScript: 10 s of input, then idle reading for idleS seconds, then
+// one tick of input or of a locked screen.
+func readingScript(idleS int, endLocked bool) *scriptedCollector {
+	f := &scriptedCollector{}
+	for range 10 {
+		f.idle, f.locked = append(f.idle, 0), append(f.locked, false)
+	}
+	for s := 1; s <= idleS; s++ {
+		f.idle, f.locked = append(f.idle, time.Duration(s)*time.Second), append(f.locked, false)
+	}
+	f.idle, f.locked = append(f.idle, 0), append(f.locked, endLocked)
+	return f
+}
+
+// The daemon holds an idle stretch until it ends, then records it: in full
+// when the user comes back (reading), by the grace rule when the screen
+// locks. Nothing is lost either way, including at shutdown mid-stretch.
+func TestDaemonResolvesIdleStretches(t *testing.T) {
+	cases := []struct {
+		name         string
+		script       *scriptedCollector
+		ticks        int // ticks to run before shutdown; 0 = the whole script
+		minS, maxS   float64
+		wantReadingS bool
+	}{
+		{"user returns", readingScript(300, false), 0, 309, 311, true},
+		{"screen locks", readingScript(300, true), 0, 9 + 30 + 59, 9 + 30 + 61, false},
+		{"shutdown mid-stretch", readingScript(300, false), 200, 9 + 30 + 59, 9 + 30 + 61, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := &fakeClock{now: t0}
+			tc.script.clock = clock
+			sink := &fakeSink{}
+			d := New(DefaultConfig(), Deps{
+				Clock: clock, Collector: tc.script, Sink: sink, Hasher: fakeHasher{},
+				ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
+				Rules: classify.New(nil, nil), AgentKind: agentKind,
+				Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			})
+			n := tc.ticks
+			if n == 0 {
+				n = len(tc.script.idle)
+			}
+			for range n {
+				d.onTick(context.Background())
+			}
+			if err := d.shutdown(); err != nil {
+				t.Fatal(err)
+			}
+			attended := 0.0
+			for _, r := range sink.rollups {
+				attended += r.AttendedS
+			}
+			if attended < tc.minS || attended > tc.maxS {
+				t.Fatalf("attended %.1fs, want %.0f–%.0f", attended, tc.minS, tc.maxS)
+			}
+			var h healthJSON
+			if err := json.Unmarshal([]byte(sink.health), &h); err != nil {
+				t.Fatal(err)
+			}
+			if (h.ReadingS > 0) != tc.wantReadingS {
+				t.Fatalf("health reading_s = %.0f, want reading=%v", h.ReadingS, tc.wantReadingS)
+			}
+		})
+	}
+}

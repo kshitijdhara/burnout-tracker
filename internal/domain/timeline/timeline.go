@@ -289,8 +289,8 @@ func (t *Tracker) tickPresence(res attention.Result) {
 		return
 	}
 	reason := res.Reason
-	if reason == attention.ReasonGrace {
-		reason = attention.ReasonInput // grace is the tail of input presence
+	if reason == attention.ReasonGrace || reason == attention.ReasonReading {
+		reason = attention.ReasonInput // both are the tail of input presence
 	}
 	t.presence = t.extend(t.presence, model.IntervalPresence, res, span{state: "present", reason: reason})
 }

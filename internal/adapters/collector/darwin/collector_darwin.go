@@ -199,6 +199,12 @@ static int bt_screen_locked(void) {
 	return locked;
 }
 
+// bt_display_asleep reports whether the main display is asleep, which
+// counts as away even before the screen locks.
+static int bt_display_asleep(void) {
+	return CGDisplayIsAsleep(CGMainDisplayID()) ? 1 : 0;
+}
+
 static int bt_preflight_screen_capture(void) {
 	return CGPreflightScreenCaptureAccess() ? 1 : 0;
 }
@@ -342,6 +348,11 @@ const (
 	maxDisplays = 32
 )
 
+// mediaEvery is how often, in snapshots, media state is polled. Calls and
+// video change slowly; polling every few seconds keeps the per-tick cost
+// to the window list.
+const mediaEvery = 3
+
 var errClosed = errors.New("darwin: collector is closed")
 
 // Collector reads desktop state through CoreGraphics and AppKit.
@@ -357,6 +368,9 @@ type Collector struct {
 	windows  []C.bt_window
 	displays []C.bt_rect
 	activity unsafe.Pointer // C-owned NSProcessInfo activity token
+	media    mediaReader
+	lastMed  mediaState
+	reads    int
 	closed   bool
 }
 
@@ -376,12 +390,12 @@ func New(opts Options) (*Collector, error) {
 		caps: ports.Capabilities{
 			Name: "darwin", Windows: true, Pointer: true, Idle: true,
 			Limitations: []string{
-				"video and call detection not implemented",
 				"focus is inferred from window z-order (no Accessibility permission)",
 			},
 		},
 	}
 	c.tr = newTranslator(c.bundleID)
+	c.caps.Limitations = append(c.caps.Limitations, mediaLimitations(c.media.read())...)
 
 	if opts.Titles {
 		if C.bt_preflight_screen_capture() == 1 {
@@ -484,7 +498,12 @@ func (c *Collector) readRaw() rawState {
 		st.PointerOK = true
 	}
 	st.IdleSeconds = float64(C.bt_idle_seconds())
-	st.Locked = C.bt_screen_locked() == 1
+	st.Locked = C.bt_screen_locked() == 1 || C.bt_display_asleep() == 1
+	if c.reads%mediaEvery == 0 {
+		c.lastMed = c.media.read()
+	}
+	c.reads++
+	st.Media = c.lastMed
 	return st
 }
 

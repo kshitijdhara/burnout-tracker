@@ -27,6 +27,7 @@ func commands() []command {
 		{"setup", "interactive first-run: review what is collected and consent", runSetup},
 		{"daemon", "run the collector daemon (normally started by the OS service)", runDaemon},
 		{"status", "show today's summary", runStatus},
+		{"timeline", "show a day minute by minute: timeline [YYYY-MM-DD]", runTimeline},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
 		{"install-hooks", "install shell (zsh) and Claude Code hooks", runInstallHooks},
 		{"uninstall-hooks", "remove shell and Claude Code hooks", runUninstallHooks},

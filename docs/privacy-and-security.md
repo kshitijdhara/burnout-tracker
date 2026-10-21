@@ -74,7 +74,7 @@ user's account and protected at rest by OS full-disk encryption
 | Attention ticks (1 Hz) | Attention engine | on (in memory) | **Never persisted.** Only minute rollups are written | — | Never |
 | Input activity counts (keys, clicks, scroll) | Windows Raw Input; macOS listen-only event tap (Input Monitoring); X11 XInput2 | **opt-in** | **Never persisted.** Rolling 5 s counters in memory feed the attention engine only. Key codes are **never read** (§8.6). Without this opt-in, attention uses idle-time deltas | — | Never |
 | Idle / lock / sleep state | OS idle and session APIs | on | State-change intervals | 180 d | Never |
-| Media / call state | NowPlaying / SMTC / MPRIS; mic-in-use indicator | on | Folded into presence intervals as the reason presence was held (`input` / `video` / `call`). No track, title, URL or audio content | 180 d | Never |
+| Media / call state | macOS: which app captures audio (CoreAudio process objects), whether a camera is in use (CoreMediaIO), which app keeps the display awake (IOKit assertions), all without a permission. Other platforms: not yet | on | Which app is in a call or playing video is used in memory only, to hold presence and attribute attention. Persisted only as the reason presence was held (`input` / `video` / `call`). No audio, video, track, title or URL is ever read | 180 d | Never |
 
 ### 3.2 Terminal
 
@@ -124,7 +124,7 @@ user's account and protected at rest by OS full-disk encryption
 | Field | Source | Default | Stored as | Retention | Leaves device? |
 |-------|--------|---------|-----------|-----------|----------------|
 | Logs | Agent | on | Structured `slog`, PII-free by construction (§10) | Size-capped rotation (default 3 × 10 MB) | Never |
-| Health metrics (SLIs: coverage, drops, hook delivery) | Agent | on | Counters per day | 180 d | Never |
+| Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed reading) | Agent | on | Counters per day | 180 d | Never |
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
 | Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |

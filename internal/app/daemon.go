@@ -126,6 +126,7 @@ type Daemon struct {
 
 	// Loop-owned state.
 	engine           *attention.Engine
+	resolver         attention.Resolver[tickRecord]
 	rollups          *attention.Rollups
 	tracker          *timeline.Tracker
 	windows          *sessionWindows
@@ -135,6 +136,14 @@ type Daemon struct {
 	lastTopology     string
 	locked           bool
 	ticks            int
+}
+
+// tickRecord is what consuming a tick's result needs besides the result,
+// kept while the resolver holds the tick.
+type tickRecord struct {
+	snap     model.Snapshot
+	cats     map[model.WindowID]model.Category
+	sessions map[model.WindowID]string
 }
 
 // event is a validated, enriched hook message, ready for the loop.
@@ -218,10 +227,19 @@ func (d *Daemon) onTick(ctx context.Context) {
 		Categories:  cats,
 		FreshOutput: d.tracker.FreshOutput(snap.At, sessions),
 	})
-	d.rollups.Add(res, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
-	d.tracker.OnTick(res, sessions)
-	d.health.observe(res)
+	// Idle ticks are held until the stretch ends and its presence is known.
+	d.consume(d.resolver.Push(res, tickRecord{snap: snap, cats: cats, sessions: sessions}))
 	d.recordTopology(ctx, snap)
+}
+
+// consume records ticks whose presence is final, in order.
+func (d *Daemon) consume(ticks []attention.Held[tickRecord]) {
+	for _, t := range ticks {
+		rec := t.Payload
+		d.rollups.Add(t.Result, rec.snap, func(w model.Window) attention.Identity { return d.identify(w, rec.cats[w.ID]) })
+		d.tracker.OnTick(t.Result, rec.sessions)
+		d.health.observe(t.Result)
+	}
 }
 
 func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity {
@@ -350,6 +368,7 @@ func (d *Daemon) maintenanceLoop(ctx context.Context) {
 
 func (d *Daemon) shutdown() error {
 	now := d.deps.Clock.Now()
+	d.consume(d.resolver.Flush()) // an unfinished idle stretch keeps the grace rule
 	d.tracker.Flush(now)
 	// Use a fresh context: the run context is already cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

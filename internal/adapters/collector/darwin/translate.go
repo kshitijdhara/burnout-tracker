@@ -32,6 +32,20 @@ type rawState struct {
 	PointerOK   bool
 	IdleSeconds float64
 	Locked      bool
+	Media       mediaState
+}
+
+// mediaState is which apps use the microphone or keep the display awake,
+// and whether a camera is on. PIDs are of the responsible app, the process
+// that owns the windows, when macOS can tell.
+type mediaState struct {
+	OK               bool  // media was read at all
+	PerProcessMic    bool  // MicPIDs is meaningful (macOS 14.2+)
+	Responsible      bool  // helper processes are mapped to their app
+	MicPIDs          []int // regular apps (with a Dock icon) capturing audio
+	MicAny           bool  // fallback: the default input device is running
+	CameraOn         bool
+	DisplayAwakePIDs []int // apps keeping the display awake, e.g. playing video
 }
 
 // inputCounts are cumulative event-tap counters since the tap started.
@@ -126,7 +140,43 @@ func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.
 		}
 		snap.Windows = append(snap.Windows, mw)
 	}
+	applyMedia(&snap, st.Media)
 	return snap
+}
+
+// applyMedia marks calls and video. A call is active while a regular app
+// captures audio, or a camera is on, even when the call's window is
+// covered or on another Space. The call and the video are attributed to
+// their app's frontmost window in the snapshot, if it has one there; the
+// engine decides whether that window is visible enough to matter.
+func applyMedia(snap *model.Snapshot, m mediaState) {
+	if !m.OK {
+		return
+	}
+	for _, pid := range m.MicPIDs {
+		snap.CallActive = true
+		if w := frontmostOf(snap.Windows, pid); w != nil {
+			w.InCall = true
+		}
+	}
+	if (!m.PerProcessMic && m.MicAny) || m.CameraOn {
+		snap.CallActive = true
+	}
+	for _, pid := range m.DisplayAwakePIDs {
+		if w := frontmostOf(snap.Windows, pid); w != nil {
+			w.HasVideo = true
+		}
+	}
+}
+
+// frontmostOf returns pid's first window in front-to-back order, or nil.
+func frontmostOf(ws []model.Window, pid int) *model.Window {
+	for i := range ws {
+		if ws[i].PID == pid {
+			return &ws[i]
+		}
+	}
+	return nil
 }
 
 // applyCounts converts cumulative tap counters into per-snapshot deltas.
@@ -199,4 +249,16 @@ func cleanLabel(s string) string {
 		s = strings.ToValidUTF8(s[:maxLabelLen], "")
 	}
 	return s
+}
+
+// mediaLimitations describes what media detection can't do on this Mac.
+func mediaLimitations(m mediaState) []string {
+	var out []string
+	if !m.PerProcessMic {
+		out = append(out, "calls are detected from the microphone being in use at all, not per app (needs macOS 14.2 or later)")
+	}
+	if !m.Responsible {
+		out = append(out, "browser calls and video may not be matched to the browser's window")
+	}
+	return out
 }
