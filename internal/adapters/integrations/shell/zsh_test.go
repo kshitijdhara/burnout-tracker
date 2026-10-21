@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -50,6 +51,10 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	var cmd *exec.Cmd
 	if interactive {
 		cmd = exec.Command("zsh", "-f", "-i")
+		// An interactive zsh reads from /dev/tty when it has one, which would
+		// take over the developer's terminal. A new session has no
+		// controlling terminal, so zsh reads the script from stdin instead.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		cmd.Stdin = strings.NewReader("source '" + hook + "'\n" + strings.Join(commands, "\n") + "\n")
 	} else {
 		cmd = exec.Command("zsh", "-f", "-c", "source '"+hook+"'; "+strings.Join(commands, "; "))

@@ -72,6 +72,12 @@ jobs:
       - name: Test
         if: runner.os == 'Windows'
         run: go test -count=1 ./...
+      # CI has no terminal, but developers run the tests from one. Run them
+      # under a pseudo-terminal too, so a test that grabs /dev/tty (as an
+      # interactive zsh does) fails here instead of hanging on a laptop.
+      - name: Test (under a terminal)
+        if: runner.os == 'Linux'
+        run: script -qec "go test -count=1 -timeout=3m ./..." /dev/null </dev/null
       - name: Build
         run: go build -o bin/ ./cmd/...
 
