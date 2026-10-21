@@ -1,0 +1,69 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+    - forbidigo
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    misspell:
+      locale: UK
+      ignore-rules: [normalize, normalized, normalizes, initialize, initialized, serialize, serialized, color, behavior, analyze, organization, authorization, favor]
+    depguard:
+      rules:
+        # The dependency rule (system design §3.2): the domain is pure and
+        # imports nothing outside the standard library and itself.
+        domain:
+          files: ["**/internal/domain/**"]
+          list-mode: lax
+          deny:
+            - pkg: github.com/kshitijdhara/burnout-tracker/internal/adapters
+              desc: domain must not import adapters
+            - pkg: github.com/kshitijdhara/burnout-tracker/internal/app
+              desc: domain must not import the application layer
+            - pkg: github.com/kshitijdhara/burnout-tracker/internal/wire
+              desc: domain must not depend on wire formats
+            - pkg: github.com/kshitijdhara/burnout-tracker/internal/config
+              desc: domain receives configuration as plain values
+            - pkg: os
+              desc: domain does no I/O
+            - pkg: net
+              desc: domain does no I/O
+            - pkg: database/sql
+              desc: domain does no I/O
+        # Only the three opt-in egress paths may use an HTTP client
+        # (privacy & security §6). None exist yet in Phase 0.
+        egress:
+          files: ["$all", "!**/internal/adapters/egress/**"]
+          list-mode: lax
+          deny:
+            - pkg: net/http
+              desc: outbound HTTP is only allowed in internal/adapters/egress; the local dashboard server is the other exception
+    forbidigo:
+      forbid:
+        - pattern: ^time\.Now$
+          msg: inject a ports.Clock instead of calling time.Now in domain code
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: never print to stdout from library code; hook processes must keep stdout empty
+  exclusions:
+    rules:
+      # time.Now is fine outside the domain (adapters supply the clock).
+      - path-except: internal/domain/
+        linters: [forbidigo]
+        text: time\.Now
+      # The CLI is the one place allowed to print, and never from hook subcommands.
+      - path: cmd/burnout/
+        linters: [forbidigo]
+        text: fmt\.Print
+      - path: _test\.go
+        linters: [gosec, forbidigo, unparam]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
