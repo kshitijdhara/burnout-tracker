@@ -111,7 +111,12 @@ func TestEndToEnd(t *testing.T) {
 		if out, _, err := run("", "install-hooks", "--claude=false"); err != nil {
 			t.Fatalf("install-hooks: %v\n%s", err, out)
 		}
-		zsh := exec.Command("zsh", "-i")
+		// A deadline turns a zsh that waits on input into a fast failure
+		// instead of a hang until go test's own timeout.
+		zctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		zsh := exec.CommandContext(zctx, "zsh", "-i")
+		zsh.WaitDelay = time.Second
 		zsh.Env, zsh.Dir = env, projectDir
 		// An interactive zsh reads from /dev/tty when it has one, which would
 		// take over the developer's terminal. A new session has no
@@ -125,7 +130,9 @@ func TestEndToEnd(t *testing.T) {
 		}, "\n") + "\n")
 		var zout bytes.Buffer
 		zsh.Stdout, zsh.Stderr = &zout, &zout
-		if err := zsh.Run(); err != nil {
+		if err := zsh.Run(); zctx.Err() != nil {
+			t.Fatalf("zsh still running after 30s (waiting on a terminal?): %s", zout.String())
+		} else if err != nil {
 			t.Logf("zsh exited: %v (%s)", err, zout.String())
 		}
 		time.Sleep(300 * time.Millisecond) // background emitters

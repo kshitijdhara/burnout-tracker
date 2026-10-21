@@ -52,10 +52,12 @@ mkdir -p ~/.local/bin && cp bin/burnout ~/.local/bin/
 ~/.local/bin/burnout daemon         # in its own terminal tab; leave it running
 ```
 
-`setup` must run in an interactive terminal. If macOS asks whether burnout
-may use your keychain, choose **Always Allow**. If the keychain can't be
-reached within a few seconds, burnout keeps its key in an owner-only file
-in the data folder instead, and stays on that choice.
+`setup` must run in an interactive terminal. burnout keeps its key in your
+keychain through macOS's own `security` tool, so the first `daemon` (or
+`doctor`) run may show a keychain prompt that names `security` rather than
+burnout. Choose **Always Allow**, and answer within a few seconds: if the
+keychain doesn't respond in about 3 s, burnout keeps its key in an
+owner-only file in the data folder instead, and stays on that choice.
 
 **3. Pick up the hooks.** Open a new terminal tab so zsh loads the hook, and
 start a new Claude Code session (`/hooks` inside Claude Code lists them).
@@ -83,7 +85,9 @@ Minutes appear in `status` after a minute or two of use.
   focus is inferred from window order, which has not yet been checked on
   many real machines, so reports are very welcome.
 
-**6. Remove everything.**
+**6. Remove everything.** On macOS the data and config folders are the same
+folder. Deleting it also deletes `hook-backups/`, the copies of the files
+`install-hooks` changed; copy that folder out first if you want to keep them.
 
 ```sh
 ~/.local/bin/burnout uninstall-hooks   # removes exactly what install-hooks added
@@ -93,18 +97,15 @@ security delete-generic-password -s burnout -a hmac   # if the keychain was used
 rm ~/.local/bin/burnout
 ```
 
-On macOS the data and config folders are the same folder. Before deleting
-it, note that `hook-backups/` inside holds copies of the files
-`install-hooks` changed.
-
 **Stopping things.**
 
 - The daemon: press Ctrl-C in its tab. If you've lost the tab, run
   `pkill -INT -x burnout` from any terminal. Either way it saves what it
   has and exits cleanly.
-- A stuck command (for example a test run that stopped printing): press
-  Ctrl-C. If it ignores that, run `pkill -f 'go-build.*\.test'` from another tab.
-  If the terminal looks garbled afterwards, type `reset`.
+- A stuck test run: press Ctrl-C. If it ignores that, run
+  `pkill -f 'go-build.*/(burnout|shell)\.test'` from another tab; the pattern
+  matches only this project's tests that start a shell, not other Go test
+  runs. If the terminal looks garbled afterwards, type `reset`.
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
@@ -115,14 +116,34 @@ off.
 
 ### Windows and Linux
 
-- **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
-  install hooks with `burnout install-hooks --zsh=false`. Data lives in
-  `%LOCALAPPDATA%\burnout`, config in `%APPDATA%\burnout`.
-- **Linux:** there is no desktop collector yet, so only shell and Claude
-  Code hooks are recorded. Data lives in `~/.local/share/burnout`, config
-  in `~/.config/burnout`.
+Steps 2–5 are the same as on macOS. Building and removing differ:
 
-The other steps are the same as on macOS.
+- **Linux:** there is no desktop collector yet, so only shell and Claude
+  Code hooks are recorded. Build as on macOS without `xcode-select`. To
+  remove everything:
+
+  ```sh
+  ~/.local/bin/burnout uninstall-hooks
+  # stop the daemon with Ctrl-C, then:
+  rm -rf ~/.local/share/burnout ~/.config/burnout   # data (incl. hook-backups/) and config
+  secret-tool clear service burnout username hmac    # if a keyring was used
+  rm ~/.local/bin/burnout
+  ```
+
+- **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
+  install hooks with `burnout install-hooks --zsh=false`. Stop the daemon
+  with Ctrl-C in its window (`pkill` and `pgrep` don't exist on Windows).
+  To remove everything, in Command Prompt:
+
+  ```bat
+  burnout uninstall-hooks
+  rmdir /s /q "%LOCALAPPDATA%\burnout"
+  rmdir /s /q "%APPDATA%\burnout"
+  cmdkey /delete:burnout:hmac
+  ```
+
+  The first folder holds the data (and `hook-backups\`), the second the
+  config; the last line removes the key from Credential Manager.
 
 ## Status
 

@@ -3,6 +3,7 @@
 package shell
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,9 @@ import (
 	"testing"
 	"time"
 )
+
+// zshDeadline bounds each zsh run in these tests.
+const zshDeadline = 30 * time.Second
 
 // record is what the fake emitter captured for one command.
 type record struct {
@@ -48,24 +52,32 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 		t.Fatal(err)
 	}
 
+	// A deadline turns a zsh that waits on input into a fast failure
+	// instead of a hang until go test's own timeout.
+	ctx, cancel := context.WithTimeout(t.Context(), zshDeadline)
+	defer cancel()
 	var cmd *exec.Cmd
 	if interactive {
-		cmd = exec.Command("zsh", "-f", "-i")
+		cmd = exec.CommandContext(ctx, "zsh", "-f", "-i")
 		// An interactive zsh reads from /dev/tty when it has one, which would
 		// take over the developer's terminal. A new session has no
 		// controlling terminal, so zsh reads the script from stdin instead.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		cmd.Stdin = strings.NewReader("source '" + hook + "'\n" + strings.Join(commands, "\n") + "\n")
 	} else {
-		cmd = exec.Command("zsh", "-f", "-c", "source '"+hook+"'; "+strings.Join(commands, "; "))
+		cmd = exec.CommandContext(ctx, "zsh", "-f", "-c", "source '"+hook+"'; "+strings.Join(commands, "; "))
 	}
+	cmd.WaitDelay = time.Second
 	cmd.Dir = dir
 	// A minimal environment keeps failure output small and free of the
 	// test runner's own variables.
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TERM=dumb", "PS1=", "PROMPT=", "RPROMPT="}
-	b, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("zsh still running after %s (waiting on a terminal?): %s", zshDeadline, output)
+	}
 	if err != nil && interactive {
-		t.Logf("zsh output: %s", b)
+		t.Logf("zsh output: %s", output)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -83,12 +95,12 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	}
 	var recs []record
 	for _, f := range files {
-		b, err := os.ReadFile(f)
+		data, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := record{raw: string(b), env: map[string]string{}}
-		for _, line := range strings.Split(string(b), "\n") {
+		r := record{raw: string(data), env: map[string]string{}}
+		for _, line := range strings.Split(string(data), "\n") {
 			if a, ok := strings.CutPrefix(line, "ARGS="); ok {
 				r.args = a
 			} else if k, v, ok := strings.Cut(line, "="); ok {
@@ -97,7 +109,7 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 		}
 		recs = append(recs, r)
 	}
-	return recs, string(b)
+	return recs, string(output)
 }
 
 func byArgv0(recs []record) map[string][]record {
@@ -185,26 +197,47 @@ func TestZshHookSilentWhenNotInteractive(t *testing.T) {
 	}
 }
 
-// TestZshHookResolvesTildePathsAndReservedWords covers a command run as
-// ~/path/to/tool and a reserved word. The hook once looked words up in the
-// reswords array by subscript, which zsh evaluates as arithmetic: a leading
-// ~ printed "bad math expression" before every such command, and it was
-// never recorded.
-func TestZshHookResolvesTildePathsAndReservedWords(t *testing.T) {
+// TestZshHookResolvesLikeZsh checks the hook names the command zsh would
+// actually run: an unquoted ~/ path resolves, a quoted one does not; the
+// shell's prefix words (!, coproc, repeat N, grouping) are skipped to the
+// real command; reserved words are never recorded as commands. It also pins
+// that the hook prints nothing: it once evaluated the typed word as
+// arithmetic, printing "bad math expression" before ~/ commands.
+func TestZshHookResolvesLikeZsh(t *testing.T) {
 	commands := []string{
 		"mkdir -p ~/bin && printf '#!/bin/sh\\n' >~/bin/tool && chmod +x ~/bin/tool",
 		"~/bin/tool",
+		"'~/bin/tool' 2>/dev/null",
+		"~/CANARYEEE 2>/dev/null",
+		"! git status >/dev/null 2>&1",
+		"repeat 2 git status >/dev/null 2>&1",
+		"{ git status } >/dev/null 2>&1",
 		"if true; then :; fi",
 	}
 	recs, out := runZsh(t, true, commands, len(commands))
-	if strings.Contains(out, "math") || strings.Contains(out, "__burnout") {
+	if strings.Contains(out, "__burnout_preexec:") || strings.Contains(out, "__burnout_precmd:") {
 		t.Fatalf("hook printed an error: %s", out)
 	}
 	got := byArgv0(recs)
 	if len(got["tool"]) != 1 {
-		t.Errorf("~/bin/tool not recorded as tool: %v", keys(got))
+		t.Errorf("~/bin/tool: want one record named tool: %v", keys(got))
 	}
-	if len(got["if"]) != 1 {
-		t.Errorf("reserved word not recorded: %v", keys(got))
+	// The quoted ~/ path, the missing ~/CANARYEEE and the if statement.
+	if len(got[""]) != 3 {
+		t.Errorf("unresolved commands: want 3 with an empty name, got %d: %v", len(got[""]), keys(got))
+	}
+	gits := got["git"]
+	if len(gits) != 3 {
+		t.Errorf("prefixed git commands: want 3, got %d: %v", len(gits), keys(got))
+	}
+	for _, r := range gits {
+		if r.env[EnvSubcmd] != "status" {
+			t.Errorf("prefixed git lost its subcommand: %v", burnoutEnv(r))
+		}
+	}
+	for _, r := range recs {
+		if strings.Contains(r.raw, "CANARY") {
+			t.Fatalf("typed text reached the emitter: %v", burnoutEnv(r))
+		}
 	}
 }
