@@ -74,7 +74,7 @@ user's account and protected at rest by OS full-disk encryption
 | Attention ticks (1 Hz) | Attention engine | on (in memory) | **Never persisted.** Only minute rollups are written | — | Never |
 | Input activity counts (keys, clicks, scroll) | Windows Raw Input; macOS listen-only event tap (Input Monitoring); X11 XInput2 | **opt-in** | **Never persisted.** Rolling 5 s counters in memory feed the attention engine only. Key codes are **never read** (§8.6). Without this opt-in, attention uses idle-time deltas | — | Never |
 | Idle / lock / sleep state | OS idle and session APIs | on | State-change intervals | 180 d | Never |
-| Media / call state | macOS: which app captures audio (CoreAudio process objects), whether a camera is in use (CoreMediaIO), which app keeps the display awake (IOKit assertions), all without a permission. Other platforms: not yet | on | Which app is in a call or playing video is used in memory only, to hold presence and attribute attention. Persisted only as the reason presence was held (`input` / `video` / `call`). No audio, video, track, title or URL is ever read | 180 d | Never |
+| Media / call state | macOS: which app captures audio (CoreAudio process objects), which app keeps the display awake (IOKit assertions), all without a permission. Other platforms: not yet | on | Which app is in a call or playing video is used in memory only, to hold presence and attribute attention. Persisted only as the reason presence was held (`input` / `video` / `call`). No audio, video, track, title or URL is ever read. Cameras are not queried: on older macOS that would load third-party camera plugins into the agent | 180 d | Never |
 
 ### 3.2 Terminal
 

@@ -245,7 +245,7 @@ So we model **attention as a distribution over visible windows** (ADR-0002).
 | Pointer position + window-at-point | 1 Hz | never persisted |
 | Idle / lock | 5 s + lock events | |
 | Input counts (keys, scroll, clicks) | per tick, counter only; **opt-in**, never persisted | macOS listen-only `CGEventTap` whose callback only increments a counter; Windows **Raw Input** (`RIDEV_INPUTSINK`) on a locked OS thread; key codes are never read. Without the opt-in, idle-time deltas stand in |
-| Media / call | 3 s poll on macOS, on its own goroutine | a call: a regular app (with a Dock icon, so not a voice trigger or dictation utility) capturing audio, or a camera in use; video: a display-sleep assertion from an app or a helper in its bundle (not command-line tools like `caffeinate`). macOS reads these without any permission (CoreAudio process objects, CoreMediaIO, IOKit assertions) and maps helper processes to their app. Windows and Linux: not yet (ADR-0008) |
+| Media / call | 3 s poll on macOS, on its own goroutine | a call: a regular app (with a Dock icon, so not a voice trigger or dictation utility) capturing audio (cameras are not queried, see ADR-0008); video: a display-sleep assertion from an app or a helper in its bundle (not command-line tools like `caffeinate`). macOS reads these without any permission (CoreAudio process objects, IOKit assertions) and maps helper processes to their app. Windows and Linux: not yet (ADR-0008) |
 
 Everything pauses when the screen is locked or the user is idle, and runs at
 half rate on battery. On macOS the sampling thread opts out of App Nap

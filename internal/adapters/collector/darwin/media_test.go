@@ -47,10 +47,9 @@ func TestMediaCalls(t *testing.T) {
 		{"covered call app still holds presence", mediaState{OK: true, PerProcessMic: true, MicPIDs: []int{400}}, true, nil},
 		{"call app on another Space", mediaState{OK: true, PerProcessMic: true, MicPIDs: []int{999}}, true, nil},
 		{"no app capturing audio", mediaState{OK: true, PerProcessMic: true}, false, nil},
-		{"camera on", mediaState{OK: true, PerProcessMic: true, CameraOn: true}, true, nil},
 		{"device fallback before macOS 14.2", mediaState{OK: true, MicAny: true}, true, nil},
 		{"device state ignored when per-app is known", mediaState{OK: true, PerProcessMic: true, MicAny: true}, false, nil},
-		{"media not read", mediaState{MicPIDs: []int{300}, CameraOn: true}, false, nil},
+		{"media not read", mediaState{MicPIDs: []int{300}}, false, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,8 +74,8 @@ func TestMediaVideo(t *testing.T) {
 }
 
 func TestMediaLimitations(t *testing.T) {
-	if got := mediaLimitations(mediaState{OK: true, PerProcessMic: true, Responsible: true}); len(got) != 1 || !strings.Contains(got[0], "camera") {
-		t.Fatalf("full support: limitations %v, want only the camera note", got)
+	if got := mediaLimitations(mediaState{OK: true, PerProcessMic: true, Responsible: true}); len(got) != 0 {
+		t.Fatalf("full support reported limitations: %v", got)
 	}
 	got := strings.Join(mediaLimitations(mediaState{OK: true}), "; ")
 	if !strings.Contains(got, "14.2") || !strings.Contains(got, "browser") {
@@ -161,5 +160,19 @@ func TestDisplayAsleepIsNotLocked(t *testing.T) {
 	snap := newTranslator(bundles(nil)).snapshot(at, st, inputCounts{})
 	if !snap.DisplayAsleep || snap.Locked {
 		t.Fatalf("DisplayAsleep=%v Locked=%v", snap.DisplayAsleep, snap.Locked)
+	}
+}
+
+// Another app chooses its own name: escape sequences or bidi overrides in it
+// must not reach anything we store or print.
+func TestCleanLabelDropsControls(t *testing.T) {
+	for in, want := range map[string]string{
+		"Evil\x1b[2J App\x07": "Evil[2J App",
+		"abc\u202eexe":        "abcexe",
+		"  Café  ":            "Café",
+	} {
+		if got := cleanLabel(in); got != want {
+			t.Errorf("cleanLabel(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

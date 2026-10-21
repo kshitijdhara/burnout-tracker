@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/geometry"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -37,15 +38,18 @@ type rawState struct {
 	Media         mediaState
 }
 
-// mediaState is which apps are in a call or keep the display awake, and
-// whether a camera is on, after resolveMedia has mapped processes to apps.
+// mediaState is which apps are in a call or keep the display awake, after
+// resolveMedia has mapped processes to apps. Cameras are deliberately not
+// read: CoreMediaIO loads third-party camera plugins into the calling
+// process on older macOS, and a camera can't be tied to an app. Call apps
+// typically keep the microphone open while muted, so the microphone
+// alone finds the call.
 type mediaState struct {
 	OK               bool // media was read at all
 	PerProcessMic    bool // MicPIDs is meaningful (macOS 14.2+)
 	Responsible      bool // helper processes are mapped to their app
 	MicPIDs          []int
-	MicAny           bool // fallback: the default input device is running
-	CameraOn         bool
+	MicAny           bool  // fallback: the default input device is running
 	DisplayAwakePIDs []int // apps keeping the display awake, e.g. playing video
 }
 
@@ -54,7 +58,6 @@ type rawMedia struct {
 	PerProcessMic, Responsible bool
 	MicPIDs                    []int // processes capturing audio input
 	MicAny                     bool
-	CameraOn                   bool
 	AwakePIDs                  []int // processes holding a display-awake assertion
 }
 
@@ -75,7 +78,7 @@ type processLookup interface {
 func resolveMedia(raw rawMedia, p processLookup) mediaState {
 	st := mediaState{
 		OK: true, PerProcessMic: raw.PerProcessMic, Responsible: raw.Responsible,
-		MicAny: raw.MicAny, CameraOn: raw.CameraOn,
+		MicAny: raw.MicAny,
 	}
 	for _, pid := range raw.MicPIDs {
 		if app := p.responsible(pid); p.regularApp(app) && !slices.Contains(st.MicPIDs, app) {
@@ -198,7 +201,7 @@ func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.
 }
 
 // applyMedia marks calls and video. A call is active while a regular app
-// captures audio, or a camera is on, even when the call's window is
+// captures audio, even when the call's window is
 // covered or on another Space. macOS doesn't say which of an app's windows
 // holds the call or the video, so they go to its most visible window in
 // the snapshot, if it has one there; the engine decides whether that
@@ -213,7 +216,7 @@ func applyMedia(snap *model.Snapshot, m mediaState) {
 			w.InCall = true
 		}
 	}
-	if (!m.PerProcessMic && m.MicAny) || m.CameraOn {
+	if !m.PerProcessMic && m.MicAny {
 		snap.CallActive = true
 	}
 	for _, pid := range m.DisplayAwakePIDs {
@@ -298,9 +301,17 @@ func counterDelta(prev, cur uint64) int {
 	return int(min(cur-prev, math.MaxInt32))
 }
 
-// cleanLabel repairs UTF-8 cut in half by fixed-size C buffers and caps length.
+// cleanLabel repairs UTF-8 cut in half by fixed-size C buffers, drops
+// control and invisible format characters (terminal escapes, bidi
+// overrides) that another app could put in its name, and caps length.
 func cleanLabel(s string) string {
-	s = strings.TrimSpace(strings.ToValidUTF8(s, ""))
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+	s = strings.TrimSpace(s)
 	if len(s) > maxLabelLen {
 		s = strings.ToValidUTF8(s[:maxLabelLen], "")
 	}
@@ -316,5 +327,5 @@ func mediaLimitations(m mediaState) []string {
 	if !m.Responsible {
 		out = append(out, "browser calls and video may not be matched to the browser's window")
 	}
-	return append(out, "any camera in use counts as a call, including apps like OBS that aren't calls")
+	return out
 }

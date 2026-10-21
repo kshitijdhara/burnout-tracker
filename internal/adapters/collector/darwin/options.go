@@ -1,7 +1,7 @@
 // Package darwin is the macOS desktop collector. It reads the on-screen
 // window list, display layout, pointer, idle time and lock state through
 // public CoreGraphics and AppKit APIs, and calls and video through
-// CoreAudio, CoreMediaIO and IOKit power assertions, and turns them into
+// CoreAudio and IOKit power assertions, and turns them into
 // model.Snapshot. None of it needs a permission or touches audio or video.
 //
 // Framework calls live in thin cgo layers (collector_darwin.go,

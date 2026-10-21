@@ -4,7 +4,7 @@ package darwin
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework CoreAudio -framework CoreMediaIO -framework IOKit -framework AppKit -framework Foundation
+#cgo LDFLAGS: -framework CoreAudio -framework IOKit -framework AppKit -framework Foundation
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -13,7 +13,6 @@ package darwin
 #include <dispatch/dispatch.h>
 #include <Availability.h>
 #include <CoreAudio/CoreAudio.h>
-#include <CoreMediaIO/CMIOHardware.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #import <AppKit/AppKit.h>
 
@@ -141,38 +140,6 @@ static int bt_default_input_running(void) {
 		return 0;
 	}
 	return running != 0;
-}
-
-// bt_camera_running reports whether any camera is in use by any process.
-static int bt_camera_running(void) {
-	CMIOObjectPropertyAddress a = {
-		kCMIOHardwarePropertyDevices, kCMIOObjectPropertyScopeGlobal, kCMIOObjectPropertyElementMain};
-	UInt32 size = 0;
-	if (CMIOObjectGetPropertyDataSize(kCMIOObjectSystemObject, &a, 0, NULL, &size) != kCMIOHardwareNoError || size == 0) {
-		return 0;
-	}
-	CMIOObjectID *ids = (CMIOObjectID *)malloc(size);
-	if (ids == NULL) {
-		return 0;
-	}
-	UInt32 used = 0;
-	if (CMIOObjectGetPropertyData(kCMIOObjectSystemObject, &a, 0, NULL, size, &used, ids) != kCMIOHardwareNoError) {
-		free(ids);
-		return 0;
-	}
-	int on = 0;
-	UInt32 n = used / sizeof(CMIOObjectID);
-	for (UInt32 i = 0; i < n && !on; i++) {
-		CMIOObjectPropertyAddress r = {
-			kCMIODevicePropertyDeviceIsRunningSomewhere, kCMIOObjectPropertyScopeWildcard, kCMIOObjectPropertyElementWildcard};
-		UInt32 running = 0;
-		UInt32 got = 0;
-		if (CMIOObjectGetPropertyData(ids[i], &r, 0, NULL, sizeof running, &got, &running) == kCMIOHardwareNoError && running) {
-			on = 1;
-		}
-	}
-	free(ids);
-	return on;
 }
 
 // bt_display_awake_pids writes the processes holding an assertion that
@@ -326,7 +293,6 @@ func (m *mediaPoller) readRaw() rawMedia {
 	if !raw.PerProcessMic {
 		raw.MicAny = C.bt_default_input_running() == 1
 	}
-	raw.CameraOn = C.bt_camera_running() == 1
 	raw.AwakePIDs = m.copyPIDs(int(C.bt_display_awake_pids(&m.pids[0], C.int(len(m.pids)))))
 	return raw
 }
