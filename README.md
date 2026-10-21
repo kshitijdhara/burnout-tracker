@@ -97,6 +97,17 @@ On macOS the data and config folders are the same folder. Before deleting
 it, note that `hook-backups/` inside holds copies of the files
 `install-hooks` changed.
 
+**Stopping things.**
+
+- The daemon: press Ctrl-C in its tab. If you've lost the tab, run
+  `pkill -INT -x burnout` from any terminal. Either way it saves what it
+  has and exits cleanly.
+- A stuck command (for example a test run that stopped printing): press
+  Ctrl-C. If it ignores that, run `pkill -f 'go-build.*\.test'` from another tab.
+  If the terminal looks garbled afterwards, type `reset`.
+- To check nothing is left running: `pgrep -lx burnout` should print
+  nothing.
+
 **Preview limits.** The daemon stops when its tab closes and does not start
 at login. There is no tray icon, and logs go to the terminal. Phase 0 needs
 no macOS privacy permissions, because window titles and input counts are
