@@ -88,9 +88,13 @@ func RuntimeDir() (string, error) {
 	return filepath.Join(data, "run"), nil
 }
 
-// EnsurePrivateDir creates dir (and parents) and forces mode 0700 on dir
-// itself. On Windows the mode bits are advisory; the directory inherits the
-// owner-only ACL of %LOCALAPPDATA%.
+// ErrUnverified means the platform's permission model (Windows ACLs) wasn't
+// checked. Callers report it as "unknown", never as "ok".
+var ErrUnverified = errors.New("paths: permissions not verified on this platform")
+
+// EnsurePrivateDir creates dir (and parents), forces mode 0700 on dir itself,
+// then checks it with CheckOwnedPrivateDir. On Windows the mode bits are
+// advisory; the directory inherits the owner-only ACL of %LOCALAPPDATA%.
 func EnsurePrivateDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("paths: create %s: %w", dir, err)
@@ -100,14 +104,32 @@ func EnsurePrivateDir(dir string) error {
 			return fmt.Errorf("paths: chmod %s: %w", dir, err)
 		}
 	}
-	return nil
+	return CheckOwnedPrivateDir(dir)
+}
+
+// CheckOwnedPrivateDir verifies dir is a real directory (not a symlink) and,
+// on unix, owned by the current user with mode 0700. This stops a shared or
+// pre-created location (say $XDG_RUNTIME_DIR=/tmp) from being used to
+// intercept the daemon's socket or keys.
+func CheckOwnedPrivateDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("paths: %w", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("paths: %s is a symlink; expected a real directory", dir)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("paths: %s is not a directory", dir)
+	}
+	return checkOwner(dir, fi)
 }
 
 // CheckPrivate reports whether path has no group or other permission bits.
-// It always returns nil on Windows, where ACLs apply instead.
+// On Windows it returns ErrUnverified, because ACLs apply instead.
 func CheckPrivate(path string) error {
 	if runtime.GOOS == "windows" {
-		return nil
+		return ErrUnverified
 	}
 	fi, err := os.Stat(path)
 	if err != nil {

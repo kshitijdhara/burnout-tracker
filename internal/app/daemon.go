@@ -1,7 +1,9 @@
 // Package app runs the daemon's main loop. It owns all domain state on a
-// single goroutine (collector ticks, hook messages and flushes are funnelled
+// single goroutine (collector ticks, hook events and flushes are funnelled
 // through one select loop), so the pure domain packages never need locks.
-// Adapters are reached only through the small interfaces declared here.
+// Hook messages arrive through Submit, which validates and enriches them on
+// the caller's goroutine, so slow work never stalls the loop. Adapters are
+// reached only through the small interfaces declared here.
 package app
 
 import (
@@ -9,6 +11,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
@@ -16,7 +19,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/timeline"
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
 
 // Sink persists what the daemon produces. The SQLite store implements it.
@@ -28,6 +30,7 @@ type Sink interface {
 }
 
 // Hasher produces keyed, non-reversible identities (privacy & security §4.5).
+// It must be safe for concurrent use: Submit calls it from ingest goroutines.
 type Hasher interface {
 	Key(parts ...string) string
 }
@@ -38,13 +41,32 @@ type AgentKind func(agent, event string) (model.AgentEventKind, bool)
 // Config holds the daemon's tunables.
 type Config struct {
 	TickInterval  time.Duration // collector sampling, 1 s
-	FlushInterval time.Duration // batched writes, 15 s
+	FlushInterval time.Duration // batched writes and timeline timeouts, 15 s
 	Rollover      time.Duration // logical-day rollover, 4 h
 	Attention     attention.Params
 	Timeline      timeline.Params
 	AggregateOnly bool // drop app ids from rollups (privacy & security §5.1)
-	MaxPending    int  // bound on unflushed intervals before dropping
-	// MaintenanceInterval spaces runs of Deps.Maintain, 24 h.
+
+	// Bounds on memory while the store is unavailable.
+	MaxPending        int // unflushed intervals
+	MaxPendingRollups int // unflushed minute rollups
+	QueueSize         int // hook events waiting for the loop
+
+	// Hook timestamps further than MaxSkew from the daemon's receipt time
+	// are rejected (system design §5), and commands longer than
+	// MaxCommandDuration are treated as bogus.
+	MaxSkew            time.Duration
+	MaxCommandDuration time.Duration
+
+	// While the screen is locked, sample only every IdleStride ticks
+	// (system design §4.1: sampling pauses when locked). Keep
+	// IdleStride × TickInterval below the attention engine's MaxGap.
+	IdleStride int
+
+	// Maintenance (retention, vacuum, recovery copies) runs on its own
+	// goroutine, first MaintenanceDelay after start, then every
+	// MaintenanceInterval.
+	MaintenanceDelay    time.Duration
 	MaintenanceInterval time.Duration
 }
 
@@ -56,8 +78,17 @@ func DefaultConfig() Config {
 		Rollover:      4 * time.Hour,
 		Attention:     attention.DefaultParams(),
 		Timeline:      timeline.DefaultParams(),
-		MaxPending:    50_000,
 
+		MaxPending:        50_000,
+		MaxPendingRollups: 20_000,
+		QueueSize:         4096,
+
+		MaxSkew:            5 * time.Minute,
+		MaxCommandDuration: 7 * 24 * time.Hour,
+
+		IdleStride: 4,
+
+		MaintenanceDelay:    2 * time.Minute,
 		MaintenanceInterval: 24 * time.Hour,
 	}
 }
@@ -65,36 +96,51 @@ func DefaultConfig() Config {
 // Deps are the adapters the daemon talks to. Collector may be nil on
 // platforms without one; the daemon then records hook data only.
 type Deps struct {
-	Clock       ports.Clock
-	Collector   ports.Collector
-	Sink        Sink
-	Hasher      Hasher
+	Clock     ports.Clock
+	Collector ports.Collector
+	Sink      Sink
+	Hasher    Hasher
+	// ProjectRoot maps a working directory to its project root. It is called
+	// from ingest goroutines and must bound its own latency (a hung network
+	// mount must not block the caller indefinitely).
 	ProjectRoot func(dir string) string
 	Procs       ports.ProcessInfo
 	Rules       *classify.Rules
 	AgentKind   AgentKind
-	Messages    <-chan wire.Message
 	Log         *slog.Logger
-	// Maintain runs retention, vacuum and recovery copies. It is called on
-	// the loop goroutine (the store has a single writer) at start and then
-	// every MaintenanceInterval. Optional.
-	Maintain func(ctx context.Context, now time.Time) error
+
+	// Optional.
+	Maintain    func(ctx context.Context, now time.Time) error // runs on its own goroutine
+	LoadHealth  func(ctx context.Context, logicalDay string) (string, error)
+	IngestStats func() map[string]uint64
 }
 
-// Daemon is the main loop. Create it with New and call Run once.
+// Daemon is the main loop. Create it with New, feed it with Submit, and
+// call Run once.
 type Daemon struct {
 	cfg  Config
 	deps Deps
 
-	engine  *attention.Engine
-	rollups *attention.Rollups
-	tracker *timeline.Tracker
-	windows *sessionWindows
-	health  *health
+	inbox    chan event
+	counters counters // updated by Submit on ingest goroutines
 
+	// Loop-owned state.
+	engine           *attention.Engine
+	rollups          *attention.Rollups
+	tracker          *timeline.Tracker
+	windows          *sessionWindows
+	health           *health
 	pendingRollups   []model.MinuteRollup
 	pendingIntervals []model.Interval
 	lastTopology     string
+	locked           bool
+	ticks            int
+}
+
+// event is a validated, enriched hook message, ready for the loop.
+type event struct {
+	shell *model.ShellCommand
+	agent *model.AgentEvent
 }
 
 // New wires a daemon. It does not start anything.
@@ -103,6 +149,7 @@ func New(cfg Config, deps Deps) *Daemon {
 	return &Daemon{
 		cfg:     cfg,
 		deps:    deps,
+		inbox:   make(chan event, cfg.QueueSize),
 		engine:  attention.New(cfg.Attention),
 		rollups: attention.NewRollups(cfg.Rollover),
 		tracker: timeline.New(cfg.Timeline),
@@ -113,14 +160,19 @@ func New(cfg Config, deps Deps) *Daemon {
 
 // Run blocks until ctx is cancelled, then flushes everything it holds.
 func (d *Daemon) Run(ctx context.Context) error {
+	d.seedHealth(ctx)
+
+	var wg sync.WaitGroup
+	if d.deps.Maintain != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); d.maintenanceLoop(ctx) }()
+	}
+	defer wg.Wait()
+
 	tick := time.NewTicker(d.cfg.TickInterval)
 	defer tick.Stop()
 	flush := time.NewTicker(d.cfg.FlushInterval)
 	defer flush.Stop()
-
-	maint := time.NewTicker(d.cfg.MaintenanceInterval)
-	defer maint.Stop()
-	d.maintain(ctx)
 
 	var ticks <-chan time.Time
 	if d.deps.Collector != nil {
@@ -132,27 +184,30 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return d.shutdown()
 		case <-ticks:
 			d.onTick(ctx)
-		case m, ok := <-d.deps.Messages:
-			if !ok {
-				d.deps.Messages = nil // ingest stopped; keep sampling
-				continue
-			}
-			d.onMessage(m)
+		case ev := <-d.inbox:
+			d.apply(ev)
 		case <-flush.C:
-			d.flush(ctx, d.deps.Clock.Now())
-		case <-maint.C:
-			d.maintain(ctx)
+			now := d.deps.Clock.Now()
+			// Timeouts run here, not on collector ticks, so they also fire
+			// on platforms without a collector.
+			d.tracker.Advance(now)
+			d.flush(ctx, now, now)
 		}
 	}
 }
 
 func (d *Daemon) onTick(ctx context.Context) {
+	d.ticks++
+	if d.locked && d.ticks%d.cfg.IdleStride != 0 {
+		return
+	}
 	snap, err := d.deps.Collector.Snapshot(ctx)
 	if err != nil {
 		d.health.collectorErrors++
 		d.deps.Log.Debug("collector snapshot failed", "err", err)
 		return
 	}
+	d.locked = snap.Locked
 	cats := make(map[model.WindowID]model.Category, len(snap.Windows))
 	for _, w := range snap.Windows {
 		cats[w.ID] = d.deps.Rules.App(w.AppID)
@@ -164,7 +219,6 @@ func (d *Daemon) onTick(ctx context.Context) {
 		FreshOutput: d.tracker.FreshOutput(snap.At, sessions),
 	})
 	d.rollups.Add(res, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
-	d.tracker.Advance(snap.At)
 	d.tracker.OnTick(res, sessions)
 	d.health.observe(res)
 	d.recordTopology(ctx, snap)
@@ -187,63 +241,29 @@ func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity
 }
 
 func (d *Daemon) recordTopology(ctx context.Context, snap model.Snapshot) {
-	topo := topology(snap)
+	topo := topology(snap.Monitors)
 	if topo == d.lastTopology {
 		return
 	}
-	d.lastTopology = topo
 	if err := d.deps.Sink.WriteMonitorSnapshot(ctx, snap.At, topo); err != nil {
 		d.deps.Log.Warn("monitor snapshot write failed", "err", err)
+		return // retried on the next tick
 	}
+	d.lastTopology = topo
 }
 
-func (d *Daemon) onMessage(m wire.Message) {
+func (d *Daemon) apply(ev event) {
 	switch {
-	case m.Shell != nil:
-		d.onShell(m.Shell)
-	case m.Agent != nil:
-		d.onAgent(m.Agent)
+	case ev.shell != nil:
+		d.health.shellEvents++
+		// An unresolved command (a typo or a pasted token) arrives with an
+		// empty argv0. It is kept as an unnamed failure, so failure loops
+		// still count, without recording anything the user typed.
+		d.queue(timeline.ShellInterval(*ev.shell, classify.Command(ev.shell.Argv0), d.cfg.Rollover)...)
+	case ev.agent != nil:
+		d.health.agentEvents++
+		d.tracker.OnAgent(*ev.agent)
 	}
-}
-
-func (d *Daemon) onShell(s *wire.ShellCommand) {
-	d.health.shellEvents++
-	cmd := model.ShellCommand{
-		Argv0:      s.Argv0,
-		Subcommand: classify.Subcommand(s.Argv0, s.Subcmd),
-		ExitCode:   s.Exit,
-		Start:      time.UnixMilli(s.StartMs),
-		End:        time.UnixMilli(s.EndMs),
-		ProjectKey: d.projectKey(s.Cwd),
-	}
-	// An unresolved command (a typo or a pasted token) arrives with an empty
-	// argv0. It is kept as an unnamed failure, so failure loops still count,
-	// without recording anything the user typed.
-	d.queue(timeline.ShellInterval(cmd, string(classify.Command(cmd.Argv0)), d.cfg.Rollover)...)
-}
-
-func (d *Daemon) onAgent(a *wire.AgentHook) {
-	d.health.agentEvents++
-	kind, ok := d.deps.AgentKind(a.Agent, a.Event)
-	if !ok || a.SessionID == "" {
-		return
-	}
-	d.tracker.OnAgent(model.AgentEvent{
-		Agent:      a.Agent,
-		Kind:       kind,
-		SessionKey: d.deps.Hasher.Key("session", a.Agent, a.SessionID),
-		ToolName:   a.ToolName,
-		At:         time.UnixMilli(a.AtMs),
-		ProjectKey: d.projectKey(a.Cwd),
-		AgentPID:   a.AgentPID,
-	})
-}
-
-func (d *Daemon) projectKey(cwd string) string {
-	if cwd == "" {
-		return ""
-	}
-	return d.deps.Hasher.Key("project", d.deps.ProjectRoot(cwd))
 }
 
 func (d *Daemon) queue(ivs ...model.Interval) {
@@ -254,10 +274,16 @@ func (d *Daemon) queue(ivs ...model.Interval) {
 	}
 }
 
-// flush writes completed minutes and closed intervals. On failure the data
-// stays queued (bounded) and is retried on the next flush.
-func (d *Daemon) flush(ctx context.Context, now time.Time) {
-	d.pendingRollups = append(d.pendingRollups, d.rollups.Flush(now)...)
+// flush writes the minutes that ended before horizon and every closed
+// interval. On failure the data stays queued (bounded, oldest dropped and
+// counted) and is retried on the next flush. Health is always written for
+// now's logical day.
+func (d *Daemon) flush(ctx context.Context, now, horizon time.Time) {
+	d.pendingRollups = append(d.pendingRollups, d.rollups.Flush(horizon)...)
+	if over := len(d.pendingRollups) - d.cfg.MaxPendingRollups; over > 0 {
+		d.pendingRollups = d.pendingRollups[over:]
+		d.health.dropped += over
+	}
 	d.queue(d.tracker.Drain()...)
 
 	var errs []error
@@ -275,31 +301,62 @@ func (d *Daemon) flush(ctx context.Context, now time.Time) {
 			d.pendingIntervals = d.pendingIntervals[:0]
 		}
 	}
-	day := model.LogicalDay(now, d.cfg.Rollover)
-	if err := d.deps.Sink.WriteHealth(ctx, day, d.health.json(day)); err != nil {
-		errs = append(errs, err)
-	}
 	if err := errors.Join(errs...); err != nil {
 		d.health.flushErrors++
 		d.deps.Log.Warn("flush failed; will retry", "err", err)
 	}
+	day := model.LogicalDay(now, d.cfg.Rollover)
+	if err := d.deps.Sink.WriteHealth(ctx, day, d.health.json(day, d.counters.snapshot(), d.ingestStats())); err != nil {
+		d.deps.Log.Warn("health write failed", "err", err)
+	}
 }
 
-func (d *Daemon) maintain(ctx context.Context) {
-	if d.deps.Maintain == nil {
+func (d *Daemon) ingestStats() map[string]uint64 {
+	if d.deps.IngestStats == nil {
+		return nil
+	}
+	return d.deps.IngestStats()
+}
+
+// seedHealth continues today's counters from the stored row, so a restart
+// doesn't reset the day's SLIs.
+func (d *Daemon) seedHealth(ctx context.Context) {
+	if d.deps.LoadHealth == nil {
 		return
 	}
-	if err := d.deps.Maintain(ctx, d.deps.Clock.Now()); err != nil {
-		d.deps.Log.Warn("maintenance failed", "err", err)
+	day := model.LogicalDay(d.deps.Clock.Now(), d.cfg.Rollover)
+	stored, err := d.deps.LoadHealth(ctx, day)
+	if err != nil {
+		d.deps.Log.Warn("could not load today's health; starting from zero", "err", err)
+		return
+	}
+	d.health.seed(day, stored)
+}
+
+func (d *Daemon) maintenanceLoop(ctx context.Context) {
+	wait := d.cfg.MaintenanceDelay
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		if err := d.deps.Maintain(ctx, d.deps.Clock.Now()); err != nil && ctx.Err() == nil {
+			d.deps.Log.Warn("maintenance failed", "err", err)
+		}
+		wait = d.cfg.MaintenanceInterval
 	}
 }
 
 func (d *Daemon) shutdown() error {
-	d.tracker.Flush()
+	now := d.deps.Clock.Now()
+	d.tracker.Flush(now)
 	// Use a fresh context: the run context is already cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	d.flush(ctx, d.deps.Clock.Now().Add(24*time.Hour))
+	// Rollups are flushed past the current minute so nothing is held back;
+	// health still goes to today's row.
+	d.flush(ctx, now, now.Add(time.Minute))
 	if len(d.pendingRollups)+len(d.pendingIntervals) > 0 {
 		return errors.New("app: unflushed data at shutdown")
 	}

@@ -4,6 +4,7 @@ package windows
 
 import (
 	"path/filepath"
+	"slices"
 	"unsafe"
 
 	w32 "golang.org/x/sys/windows"
@@ -45,8 +46,9 @@ var (
 )
 
 const (
-	gaRoot             = 2 // GetAncestor: root window
-	gwOwner            = 4 // GetWindow: owner window
+	gaRoot             = 2  // GetAncestor: root window
+	maxOwnerDepth      = 16 // bound on owner-chain walks; real chains are 1–3 deep
+	gwOwner            = 4  // GetWindow: owner window
 	gwlExStyle         = -20
 	wsExToolWindow     = 0x00000080
 	wsExAppWindow      = 0x00040000
@@ -102,12 +104,23 @@ func exStyle(h w32.HWND) uint32 {
 	return uint32(r) //nolint:gosec // G115: GetWindowLongW returns a 32-bit LONG
 }
 
-func rootOf(h w32.HWND) w32.HWND {
+// ownerChain returns h's root window followed by its owners, ending at the
+// root owner (what GetAncestor(GA_ROOTOWNER) returns). Walking the chain
+// rather than jumping to the root owner lets the caller stop at the first
+// window it tracks, even if the root owner itself is filtered out.
+func ownerChain(h w32.HWND) []uint64 {
 	if h == 0 {
-		return 0
+		return nil
 	}
 	r, _, _ := procGetAncestor.Call(uintptr(h), gaRoot)
-	return w32.HWND(r)
+	chain := make([]uint64, 0, 4)
+	for cur := w32.HWND(r); cur != 0 && len(chain) < maxOwnerDepth; cur = owner(cur) {
+		if slices.Contains(chain, uint64(cur)) {
+			break // defensive: owner cycles shouldn't exist
+		}
+		chain = append(chain, uint64(cur))
+	}
+	return chain
 }
 
 func cursorPos() (x, y int, ok bool) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -74,8 +75,12 @@ func TestMigrationsIdempotentAndTooNew(t *testing.T) {
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
-		if n != 1 {
-			t.Fatalf("schema_migrations rows = %d, want 1", n)
+		ms, err := loadMigrations()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != len(ms) {
+			t.Fatalf("schema_migrations rows = %d, want %d", n, len(ms))
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
@@ -240,9 +245,21 @@ func TestBackupRotationKeepsThree(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Same day again replaces, not duplicates.
+	// Same day again is a no-op: restarts never re-copy the database.
+	today := filepath.Join(s.dir, backupDir, "burnout-20261025.db")
+	before, err := os.Stat(today)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Backup(ctx, base.Add(4*day)); err != nil {
 		t.Fatal(err)
+	}
+	after, err := os.Stat(today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("same-day backup rewrote today's copy")
 	}
 	entries, err := os.ReadDir(filepath.Join(s.dir, backupDir))
 	if err != nil {
@@ -269,5 +286,107 @@ func TestBackupRotationKeepsThree(t *testing.T) {
 		if fi.Mode().Perm() != 0o600 {
 			t.Errorf("backup mode %v", fi.Mode().Perm())
 		}
+	}
+}
+
+func TestOpenReadOnly(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if _, err := OpenReadOnly(ctx, dir); !errors.Is(err, ErrNoDatabase) {
+		t.Fatalf("missing db: got %v, want ErrNoDatabase", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, FileName)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("OpenReadOnly created a database file")
+	}
+
+	w, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteHealth(ctx, "2026-10-21", `{"coverage":1}`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reads work while the writer is still open (the daemon is running).
+	r, err := OpenReadOnly(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := r.Health(ctx, "2026-10-21"); err != nil || h == "" {
+		t.Fatalf("Health = %q, %v", h, err)
+	}
+	if _, err := r.DaySummary(ctx, "2026-10-21"); err != nil {
+		t.Fatal(err)
+	}
+	for name, err := range map[string]error{
+		"WriteHealth":  r.WriteHealth(ctx, "2026-10-22", "{}"),
+		"WriteRollups": r.WriteRollups(ctx, nil),
+		"Backup":       r.Backup(ctx, base),
+	} {
+		if !errors.Is(err, ErrReadOnly) {
+			t.Errorf("%s on read-only store: got %v, want ErrReadOnly", name, err)
+		}
+	}
+	if _, err := r.RunRetention(ctx, base, DefaultRetention()); !errors.Is(err, ErrReadOnly) {
+		t.Errorf("RunRetention on read-only store: got %v", err)
+	}
+	_ = r.Close()
+
+	// A schema other than this build's is refused, never migrated.
+	if _, err := w.db.ExecContext(ctx, `INSERT INTO schema_migrations VALUES (999, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenReadOnly(ctx, dir); !errors.Is(err, ErrSchemaMismatch) {
+		t.Fatalf("got %v, want ErrSchemaMismatch", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPremigrateCopiesExpire(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	dir := filepath.Join(s.dir, backupDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := "burnout-premigrate-v1-20261001T120000.db"
+	recent := "burnout-premigrate-v1-20261020T120000.db"
+	for _, n := range []string{old, recent} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	if _, err := s.RunRetention(ctx, now, DefaultRetention()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, old)); !errors.Is(err, fs.ErrNotExist) {
+		t.Error("20-day-old pre-migration copy kept")
+	}
+	if _, err := os.Stat(filepath.Join(dir, recent)); err != nil {
+		t.Errorf("recent pre-migration copy removed: %v", err)
+	}
+}
+
+func TestRetentionDeletesInChunks(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	old := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	ivs := make([]model.Interval, deleteChunk*2+7)
+	for i := range ivs {
+		st := old.Add(time.Duration(i) * time.Second)
+		ivs[i] = model.Interval{Start: st, End: st.Add(time.Second), Kind: model.IntervalShellCmd, LogicalDay: "2025-01-01"}
+	}
+	if err := s.WriteIntervals(ctx, ivs); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.RunRetention(ctx, time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC), DefaultRetention())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(len(ivs)) {
+		t.Fatalf("deleted %d, want %d", n, len(ivs))
 	}
 }

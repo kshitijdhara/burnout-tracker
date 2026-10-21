@@ -130,7 +130,7 @@ func (c *Collector) readWindows(s *rawState) error {
 		s.windows = append(s.windows, w)
 	}
 	c.apps = live
-	s.foreground = uint64(rootOf(w32.GetForegroundWindow()))
+	s.foreground = ownerChain(w32.GetForegroundWindow())
 	return nil
 }
 
@@ -180,7 +180,7 @@ func (c *Collector) readPointer(s *rawState) {
 	}
 	s.pointerMoved = c.havePoint && (x != c.lastX || y != c.lastY)
 	c.lastX, c.lastY, c.havePoint = x, y, true
-	s.pointerRoot = uint64(rootOf(windowFromPoint(x, y)))
+	s.pointer = ownerChain(windowFromPoint(x, y))
 }
 
 func (c *Collector) readIdleAndLock(s *rawState) {
@@ -189,7 +189,10 @@ func (c *Collector) readIdleAndLock(s *rawState) {
 	}
 	var fgApp string
 	var pid uint32
-	if fg := w32.HWND(s.foreground); fg != 0 {
+	// The lock screen's window is unowned, so the chain's first entry (the
+	// foreground root) is the one to check.
+	if len(s.foreground) > 0 {
+		fg := w32.HWND(s.foreground[0])
 		_, _ = w32.GetWindowThreadProcessId(fg, &pid)
 		fgApp = c.apps[pid]
 		if fgApp == "" {

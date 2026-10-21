@@ -35,9 +35,12 @@ func NewRollups(rollover time.Duration) *Rollups {
 
 // Add records one tick. identify must return the identity of every window
 // in the snapshot; windows it reports with an empty key are skipped.
+// Nothing is recorded while the user is absent (presence 0): rows for
+// windows merely visible on a locked or idle screen would cost disk and say
+// nothing about the user (system design §4.1, §6).
 func (r *Rollups) Add(res Result, s model.Snapshot, identify func(model.Window) Identity) {
 	dt := res.Dt.Seconds()
-	if dt <= 0 {
+	if dt <= 0 || res.Presence == 0 {
 		return
 	}
 	minute := res.At.Truncate(time.Minute)

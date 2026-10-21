@@ -1,9 +1,12 @@
 // Package sqlite is the SQLite storage adapter. It owns the on-disk schema,
 // migrations, retention and recovery copies.
 //
-// Concurrency: one writer goroutine owns a Store and makes every write call.
-// Reads (DaySummary, QuickCheck) are safe to call concurrently from other
-// goroutines; WAL mode lets them run alongside the writer.
+// Concurrency: the daemon's loop goroutine makes the regular writes, and a
+// maintenance goroutine runs retention and recovery copies. SQLite
+// serialises the two writers; retention deletes in small chunks so neither
+// waits long, and busy_timeout covers the rest. Reads (DaySummary,
+// QuickCheck) are safe from any goroutine; WAL lets them run alongside the
+// writers. CLI commands that only read use OpenReadOnly.
 //
 // Nothing is encrypted by the app. At-rest protection is OS full-disk
 // encryption plus owner-only file permissions (ADR-0007).
@@ -36,6 +39,17 @@ const FileName = "burnout.db"
 // app. Opening it could lose data, so the store refuses.
 var ErrSchemaTooNew = errors.New("sqlite: database schema is newer than this build")
 
+// ErrSchemaMismatch means a read-only open found a schema version other than
+// the one this build writes. Read-only opens never migrate, so the caller
+// should ask the user to run the daemon (or the matching CLI) instead.
+var ErrSchemaMismatch = errors.New("sqlite: database schema doesn't match this build")
+
+// ErrReadOnly is returned by write methods on a store from OpenReadOnly.
+var ErrReadOnly = errors.New("sqlite: store is read-only")
+
+// ErrNoDatabase means OpenReadOnly found no database to read.
+var ErrNoDatabase = errors.New("sqlite: no database yet (has the daemon run?)")
+
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
@@ -52,9 +66,10 @@ var pragmas = []string{
 
 // Store is the SQLite-backed store.
 type Store struct {
-	db   *sql.DB
-	dir  string
-	path string
+	db       *sql.DB
+	dir      string
+	path     string
+	readOnly bool
 }
 
 // Open opens (creating if needed) the database in dir and applies pending
@@ -85,6 +100,54 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// OpenReadOnly opens an existing database for reading only. It never
+// creates files, never migrates and never sets pragmas that write, so it is
+// safe to run while the daemon writes (for example from `burnout status`
+// after a binary upgrade). It returns ErrNoDatabase if there is no database
+// and ErrSchemaMismatch if the schema version differs from this build's.
+func OpenReadOnly(ctx context.Context, dir string) (*Store, error) {
+	path := filepath.Join(dir, FileName)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrNoDatabase
+		}
+		return nil, fmt.Errorf("sqlite: open: %w", err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: open: %w", err)
+	}
+	s := &Store{db: db, dir: dir, path: path, readOnly: true}
+	if err := s.checkSchema(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *Store) checkSchema(ctx context.Context) error {
+	ms, err := loadMigrations()
+	if err != nil {
+		return err
+	}
+	var current int
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrSchemaMismatch, err)
+	}
+	if latest := ms[len(ms)-1].version; current != latest {
+		return fmt.Errorf("%w: database v%d, build v%d", ErrSchemaMismatch, current, latest)
+	}
+	return nil
+}
+
+func (s *Store) writable() error {
+	if s.readOnly {
+		return ErrReadOnly
+	}
+	return nil
 }
 
 // Close closes the database.

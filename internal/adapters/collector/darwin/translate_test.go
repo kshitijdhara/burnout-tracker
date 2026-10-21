@@ -28,7 +28,6 @@ func twoMonitorState() rawState {
 			{Number: 30, PID: 300, Layer: 0, Bounds: rect(100, 100, 500, 500), Owner: "Safari"},
 		},
 		Displays:  []model.Rect{rect(0, 0, 1000, 800), rect(1000, 0, 1000, 800)},
-		FrontPID:  100,
 		Pointer:   point{1500, 400},
 		PointerOK: true,
 	}
@@ -57,6 +56,9 @@ func TestSnapshotMultiMonitor(t *testing.T) {
 	if snap.Locked || snap.At != at {
 		t.Errorf("snapshot = %+v", snap)
 	}
+	if fmt.Sprint(snap.Monitors) != fmt.Sprint(twoMonitorState().Displays) {
+		t.Errorf("monitors = %v, want the display rectangles", snap.Monitors)
+	}
 }
 
 func TestSnapshotFiltersAndFocus(t *testing.T) {
@@ -69,34 +71,56 @@ func TestSnapshotFiltersAndFocus(t *testing.T) {
 			{Number: 4, PID: 8, Layer: 0, Bounds: rect(-500, -500, 100, 100), Owner: "Offscreen"},
 		},
 		Displays: []model.Rect{rect(0, 0, 100, 100)},
-		FrontPID: 8, // frontmost app's only window is off-screen: still reported as focused
 	}
 	snap := newTranslator(bundles(nil)).snapshot(at, st, inputCounts{})
 	var ids []model.WindowID
 	for _, w := range snap.Windows {
 		ids = append(ids, w.ID)
 	}
-	if fmt.Sprint(ids) != "[3 4]" {
-		t.Fatalf("windows = %v, want [3 4]", ids)
+	// The status item, numberless and empty windows are filtered out; the
+	// off-screen window is dropped because it is neither visible nor focused.
+	if fmt.Sprint(ids) != "[3]" {
+		t.Fatalf("windows = %v, want [3]", ids)
 	}
-	if snap.Windows[0].Focused || !snap.Windows[1].Focused {
-		t.Errorf("focus wrong: %+v", snap.Windows)
-	}
-	if snap.Windows[1].Monitor != -1 || snap.Windows[1].Visible != 0 {
-		t.Errorf("off-screen window = %+v", snap.Windows[1])
+	if !snap.Windows[0].Focused {
+		t.Errorf("topmost normal window should be focused: %+v", snap.Windows[0])
 	}
 	if snap.Windows[0].AppID != "Front" {
 		t.Errorf("owner-name fallback failed: %q", snap.Windows[0].AppID)
 	}
 }
 
-func TestSnapshotNoFrontmostApp(t *testing.T) {
+// Focus is read from z-order every tick, so it follows the user between
+// apps (NSWorkspace.frontmostApplication went stale off the main run loop).
+func TestFocusFollowsZOrder(t *testing.T) {
+	tr := newTranslator(bundles(nil))
 	st := twoMonitorState()
-	st.FrontPID = 0
-	for _, w := range newTranslator(bundles(nil)).snapshot(at, st, inputCounts{}).Windows {
-		if w.Focused {
-			t.Fatalf("no window may be focused when the frontmost app is unknown: %+v", w)
+	focused := func(s model.Snapshot) model.WindowID {
+		for _, w := range s.Windows {
+			if w.Focused {
+				return w.ID
+			}
 		}
+		return 0
+	}
+	if got := focused(tr.snapshot(at, st, inputCounts{})); got != 10 {
+		t.Fatalf("focused = %d, want the editor (10)", got)
+	}
+	// The user clicks the docs window: it moves to the front.
+	st.Windows[0], st.Windows[1] = st.Windows[1], st.Windows[0]
+	if got := focused(tr.snapshot(at.Add(time.Second), st, inputCounts{})); got != 20 {
+		t.Fatalf("focused = %d after z-order change, want the docs window (20)", got)
+	}
+}
+
+func TestNoNormalWindowsNothingFocused(t *testing.T) {
+	st := rawState{
+		Windows:  []rawWindow{{Number: 1, PID: 9, Layer: 25, Bounds: rect(0, 0, 100, 20), Owner: "Menu"}},
+		Displays: []model.Rect{rect(0, 0, 100, 100)},
+	}
+	snap := newTranslator(bundles(nil)).snapshot(at, st, inputCounts{})
+	if len(snap.Windows) != 0 {
+		t.Fatalf("windows = %+v, want none", snap.Windows)
 	}
 }
 

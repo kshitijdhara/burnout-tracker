@@ -14,10 +14,47 @@ type Info struct{}
 // ErrNoProcess means the process does not exist (or is not visible).
 var ErrNoProcess = errors.New("procinfo: no such process")
 
+// Proc is one process in a lineage.
+type Proc struct {
+	PID  int
+	Name string // executable base name; empty if it couldn't be read
+}
+
+// lookup answers parent and name queries. On Windows it is backed by one
+// process snapshot, so a whole lineage costs one snapshot; elsewhere each
+// query reads the live process table directly.
+type lookup interface {
+	parent(pid int) (int, error)
+	name(pid int) (string, error)
+}
+
 // Ancestors returns pid's ancestors, nearest first, stopping at pid 1 (or 0),
 // on a cycle, or after limit entries. pid itself is not included.
 func (Info) Ancestors(pid, limit int) ([]int, error) {
-	return ancestors(pid, limit, parentOf)
+	l, err := newLookup()
+	if err != nil {
+		return nil, err
+	}
+	return ancestors(pid, limit, l.parent)
+}
+
+// Lineage returns pid's ancestors with their names, nearest first, with the
+// same stopping rules as Ancestors, from a single view of the process table.
+func (Info) Lineage(pid, limit int) ([]Proc, error) {
+	l, err := newLookup()
+	if err != nil {
+		return nil, err
+	}
+	pids, err := ancestors(pid, limit, l.parent)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Proc, len(pids))
+	for i, p := range pids {
+		out[i].PID = p
+		out[i].Name, _ = l.name(p) // a process may exit mid-walk; keep the pid
+	}
+	return out, nil
 }
 
 // Name returns the executable base name of pid.
@@ -25,7 +62,11 @@ func (Info) Name(pid int) (string, error) {
 	if pid <= 0 {
 		return "", fmt.Errorf("%w: %d", ErrNoProcess, pid)
 	}
-	return nameOf(pid)
+	l, err := newLookup()
+	if err != nil {
+		return "", err
+	}
+	return l.name(pid)
 }
 
 func ancestors(pid, limit int, parent func(int) (int, error)) ([]int, error) {

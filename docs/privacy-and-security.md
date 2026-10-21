@@ -353,7 +353,8 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 `install-hooks` edits shell rc files and `~/.claude/settings.json`. It MUST:
 - merge and never overwrite;
 - use a marked block (`# >>> burnout >>>` … `# <<< burnout <<<`);
-- take a timestamped backup first;
+- take a backup first, into the app's data directory (`hook-backups/`,
+  `0600`, unique names), never next to the file;
 - validate JSON before writing, and write atomically (temp file + rename);
 - preserve existing hooks;
 - respect managed/enterprise and project-level Claude settings (never edit

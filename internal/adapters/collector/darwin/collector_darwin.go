@@ -124,14 +124,10 @@ static int bt_list_displays(bt_rect *out, int max) {
 	return count;
 }
 
-static int32_t bt_frontmost_pid(void) {
-	@autoreleasepool {
-		NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
-		return app != nil ? (int32_t)app.processIdentifier : -1;
-	}
-}
-
 // bt_bundle_id writes pid's bundle identifier into out; returns 0 if none.
+// Reading bundleIdentifier off the main thread is safe: it is fixed for the
+// life of the process and doesn't depend on the main run loop (unlike
+// NSWorkspace.frontmostApplication, which this collector no longer uses).
 static int bt_bundle_id(int32_t pid, char *out, int max) {
 	out[0] = '\0';
 	@autoreleasepool {
@@ -377,7 +373,13 @@ func New(opts Options) (*Collector, error) {
 		now:      now,
 		windows:  make([]C.bt_window, maxWindows),
 		displays: make([]C.bt_rect, maxDisplays),
-		caps:     ports.Capabilities{Name: "darwin", Windows: true, Pointer: true, Idle: true},
+		caps: ports.Capabilities{
+			Name: "darwin", Windows: true, Pointer: true, Idle: true,
+			Limitations: []string{
+				"video and call detection not implemented",
+				"focus is inferred from window z-order (no Accessibility permission)",
+			},
+		},
 	}
 	c.tr = newTranslator(c.bundleID)
 
@@ -401,13 +403,14 @@ func New(opts Options) (*Collector, error) {
 	return c, nil
 }
 
-// Capabilities reports what this collector can observe. Video and call
-// detection (HasVideo, InCall) are not implemented in Phase 0.
+// Capabilities reports what this collector can observe, including its
+// known Phase 0 limitations.
 func (c *Collector) Capabilities() ports.Capabilities {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	caps := c.caps
 	caps.MissingPermits = append([]string(nil), c.caps.MissingPermits...)
+	caps.Limitations = append([]string(nil), c.caps.Limitations...)
 	return caps
 }
 
@@ -475,7 +478,6 @@ func (c *Collector) readRaw() rawState {
 		st.Displays = append(st.Displays, toRect(float64(d.x), float64(d.y), float64(d.w), float64(d.h)))
 	}
 
-	st.FrontPID = int(C.bt_frontmost_pid())
 	var px, py C.double
 	if C.bt_pointer(&px, &py) == 1 {
 		st.Pointer = point{X: int(math.Floor(float64(px))), Y: int(math.Floor(float64(py)))}

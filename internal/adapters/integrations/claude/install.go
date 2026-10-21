@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
@@ -29,9 +30,11 @@ const hookTimeoutSeconds = 5
 // StopFailure is deliberately absent in Phase 0: we haven't verified which
 // version introduced it, and an unknown event name could make Claude Code
 // reject the settings file.
+// SubagentStop is not registered: the tracker has no use for it, and every
+// registered event costs a process spawn.
 var baseEvents = []string{
 	"SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-	"Notification", "Stop", "SubagentStop",
+	"Notification", "Stop",
 }
 
 // permissionRequestSince is the first Claude Code version with the
@@ -44,8 +47,9 @@ var toolEvents = map[string]bool{"PreToolUse": true, "PostToolUse": true}
 // InstallOptions says where and what to install.
 type InstallOptions struct {
 	SettingsPath string // user-level settings, see DefaultSettingsPath
-	Command      string // the hook command line, see CommandFor
+	Command      string // the hook command line, see CommandFor; unused by Uninstall
 	Version      string // Claude Code version from DetectVersion; "" if unknown
+	BackupDir    string // where the pre-edit copy goes (the app's private data dir)
 	Now          func() time.Time
 }
 
@@ -63,8 +67,62 @@ func DefaultSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// CommandFor returns the hook command for the given burnout binary.
-func CommandFor(binPath string) string { return fileedit.ShellQuote(binPath) + " hook claude" }
+// CommandFor returns the hook command for the given burnout binary. The
+// trailing `|| true` guarantees exit 0 even if the Go runtime itself crashes
+// (exit 2), which Claude Code would treat as blocking the user's action.
+func CommandFor(binPath string) string {
+	return fileedit.ShellQuote(binPath) + " " + hookSuffix + " " + orTrue
+}
+
+const (
+	hookSuffix = "hook claude"
+	orTrue     = "|| true"
+)
+
+// isOurs reports whether a hook command is one of ours, wherever the
+// binary lived when it was installed: `<burnout binary> hook claude`, with
+// an optional trailing `|| true`. Matching on the binary's base name rather
+// than its full path keeps install idempotent after the binary moves.
+func isOurs(command string) bool {
+	c := strings.TrimSpace(command)
+	c = strings.TrimSpace(strings.TrimSuffix(c, orTrue))
+	if !strings.HasSuffix(c, " "+hookSuffix) {
+		return false
+	}
+	bin, ok := firstShellWord(strings.TrimSuffix(c, " "+hookSuffix))
+	if !ok {
+		return false
+	}
+	base := strings.ToLower(bin[strings.LastIndexAny(bin, `/\`)+1:])
+	return base == "burnout" || base == "burnout.exe"
+}
+
+// firstShellWord unquotes a word written by fileedit.ShellQuote (single
+// quotes, with ' as '\”) or a bare word, and requires it to be the whole
+// string.
+func firstShellWord(s string) (string, bool) {
+	if !strings.HasPrefix(s, "'") {
+		return s, s != "" && !strings.ContainsAny(s, " '")
+	}
+	var b strings.Builder
+	for rest := s[1:]; ; {
+		i := strings.IndexByte(rest, '\'')
+		if i < 0 {
+			return "", false
+		}
+		b.WriteString(rest[:i])
+		rest = rest[i+1:]
+		switch {
+		case rest == "":
+			return b.String(), true
+		case strings.HasPrefix(rest, `\''`):
+			b.WriteByte('\'')
+			rest = rest[3:]
+		default:
+			return "", false
+		}
+	}
+}
 
 var reSemver = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
@@ -114,13 +172,16 @@ type matcherGroup struct {
 	Hooks   []hookEntry `json:"hooks"`
 }
 
-// Install adds our hook to each event in Events(o.Version), leaving every
-// other key and hook untouched. Running it again changes nothing.
+// Install makes each event in Events(o.Version) carry exactly one of our
+// hooks, with the current command, leaving every other key and hook
+// untouched. Entries left by an older install (another binary path) are
+// replaced, so running it again, even after the binary moved, never
+// duplicates hooks.
 func Install(o InstallOptions) error {
-	if o.SettingsPath == "" || o.Command == "" || o.Now == nil {
+	if o.SettingsPath == "" || o.Command == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("claude: incomplete install options")
 	}
-	return editSettings(o.SettingsPath, o.Now(), func(hooks *object) (bool, error) {
+	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), func(hooks *object) (bool, error) {
 		changed := false
 		for _, event := range Events(o.Version) {
 			var groups []json.RawMessage
@@ -130,8 +191,12 @@ func Install(o InstallOptions) error {
 					return false, fmt.Errorf("%w: hooks.%s is not an array", ErrInvalidSettings, event)
 				}
 			}
-			if containsCommand(groups, o.Command) {
+			if ours := ourCommands(groups); len(ours) == 1 && ours[0] == o.Command {
 				continue
+			}
+			groups, _, err := removeOurs(groups)
+			if err != nil {
+				return false, err
 			}
 			g := matcherGroup{Hooks: []hookEntry{{Type: "command", Command: o.Command, Timeout: hookTimeoutSeconds}}}
 			if toolEvents[event] {
@@ -152,23 +217,24 @@ func Install(o InstallOptions) error {
 	})
 }
 
-// Uninstall removes only hook entries whose command equals o.Command, then
-// any matcher groups, event arrays and hooks object that removal left empty.
+// Uninstall removes every hook entry of ours (whatever binary path it was
+// installed with), then any matcher groups, event arrays and hooks object
+// that removal left empty. Other hooks are untouched.
 func Uninstall(o InstallOptions) error {
-	if o.SettingsPath == "" || o.Command == "" || o.Now == nil {
+	if o.SettingsPath == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("claude: incomplete install options")
 	}
 	if _, err := os.Stat(o.SettingsPath); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return editSettings(o.SettingsPath, o.Now(), func(hooks *object) (bool, error) {
+	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), func(hooks *object) (bool, error) {
 		changed := false
 		for _, m := range append([]member(nil), hooks.members...) {
 			groups, err := decodeArray(m.val)
 			if err != nil {
 				continue // not ours to fix
 			}
-			kept, removed, err := removeCommand(groups, o.Command)
+			kept, removed, err := removeOurs(groups)
 			if err != nil || !removed {
 				continue
 			}
@@ -190,7 +256,7 @@ func Uninstall(o InstallOptions) error {
 // editSettings loads the settings file, lets edit change its "hooks"
 // object, and writes the result back (with a backup) only if edit reports a
 // change. An empty hooks object left behind by edit is removed.
-func editSettings(path string, now time.Time, edit func(hooks *object) (bool, error)) error {
+func editSettings(path, backupDir string, now time.Time, edit func(hooks *object) (bool, error)) error {
 	target, err := fileedit.ResolveTarget(path)
 	if err != nil {
 		return fmt.Errorf("claude: resolve %s: %w", path, err)
@@ -247,7 +313,7 @@ func editSettings(path string, now time.Time, edit func(hooks *object) (bool, er
 		return err
 	}
 	if existed {
-		if err := fileedit.Backup(target, old, now); err != nil {
+		if _, err := fileedit.Backup(backupDir, target, old, now); err != nil {
 			return err
 		}
 	}
@@ -257,24 +323,26 @@ func editSettings(path string, now time.Time, edit func(hooks *object) (bool, er
 	return nil
 }
 
-func containsCommand(groups []json.RawMessage, command string) bool {
+// ourCommands lists the commands of our hook entries in groups.
+func ourCommands(groups []json.RawMessage) []string {
+	var out []string
 	for _, raw := range groups {
 		var g matcherGroup
 		if json.Unmarshal(raw, &g) != nil {
 			continue
 		}
 		for _, h := range g.Hooks {
-			if h.Command == command {
-				return true
+			if isOurs(h.Command) {
+				out = append(out, h.Command)
 			}
 		}
 	}
-	return false
+	return out
 }
 
-// removeCommand drops our entries from each matcher group, and drops groups
+// removeOurs drops our entries from each matcher group, and drops groups
 // that end up empty because of it. Groups we can't parse are kept as-is.
-func removeCommand(groups []json.RawMessage, command string) (kept []json.RawMessage, removed bool, err error) {
+func removeOurs(groups []json.RawMessage) (kept []json.RawMessage, removed bool, err error) {
 	for _, raw := range groups {
 		g, err := decodeObject(raw)
 		if err != nil {
@@ -294,7 +362,7 @@ func removeCommand(groups []json.RawMessage, command string) (kept []json.RawMes
 		var rest []json.RawMessage
 		for _, e := range entries {
 			var h hookEntry
-			if json.Unmarshal(e, &h) == nil && h.Command == command {
+			if json.Unmarshal(e, &h) == nil && isOurs(h.Command) {
 				removed = true
 				continue
 			}

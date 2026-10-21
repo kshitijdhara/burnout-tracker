@@ -28,7 +28,6 @@ type point struct{ X, Y int }
 type rawState struct {
 	Windows     []rawWindow
 	Displays    []model.Rect
-	FrontPID    int // frontmost application, or <= 0 if unknown
 	Pointer     point
 	PointerOK   bool
 	IdleSeconds float64
@@ -67,13 +66,17 @@ func newTranslator(bundleID func(pid int) string) *translator {
 
 // snapshot builds a model.Snapshot from one tick's raw readings.
 //
-// Focus is approximated without the Accessibility permission: the focused
-// window is the frontmost on-screen normal window owned by the frontmost
-// application. That matches the key window in practice, except for apps
-// whose key window is a panel above layer 0.
+// Focus is inferred from z-order without the Accessibility permission: the
+// focused window is the frontmost on-screen normal (layer 0) window, which
+// belongs to the frontmost application. CGWindowList is read fresh every
+// tick, unlike NSWorkspace.frontmostApplication, which only updates when
+// the main AppKit run loop runs (this daemon never runs it). It differs
+// from the true key window only for apps whose key window is a panel above
+// layer 0.
 func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.Snapshot {
 	snap := model.Snapshot{
 		At:            at,
+		Monitors:      append([]model.Rect(nil), st.Displays...),
 		IdleFor:       idleDuration(st.IdleSeconds),
 		Locked:        st.Locked || len(st.Displays) == 0,
 		InputCountsOn: cnt.On,
@@ -97,13 +100,8 @@ func (t *translator) snapshot(at time.Time, st rawState, cnt inputCounts) model.
 		pointerIdx = geometry.TopmostAt(rects, st.Pointer.X, st.Pointer.Y)
 	}
 	focusedIdx := -1
-	if st.FrontPID > 0 {
-		for i, w := range wins {
-			if w.PID == st.FrontPID {
-				focusedIdx = i
-				break
-			}
-		}
+	if len(wins) > 0 {
+		focusedIdx = 0 // wins is front-to-back: the topmost normal window has focus
 	}
 
 	for i, w := range wins {

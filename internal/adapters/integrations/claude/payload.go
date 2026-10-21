@@ -6,15 +6,21 @@
 package claude
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
-// maxDrain bounds how much of an oversized payload we read and discard.
-const maxDrain = 64 << 20
+const (
+	maxKeyBytes   = 256  // longer keys can't be ours; they are skipped
+	maxValueBytes = 4096 // longest allowlisted value we keep
+)
+
+var errPayload = errors.New("claude: malformed payload")
 
 // Payload holds the only hook fields we ever keep.
 type Payload struct {
@@ -24,26 +30,20 @@ type Payload struct {
 	Cwd       model.Sensitive[string]
 }
 
-// ParsePayload reads a Claude Code hook payload and keeps only session_id,
-// hook_event_name, tool_name and cwd. Every other value (prompt, tool_input,
-// tool_response, transcript_path, …) is skipped token by token and never
-// stored. Afterwards the rest of r is drained, so Claude Code never sees a
-// broken pipe when it writes a large payload.
-func ParsePayload(r io.Reader) (Payload, error) {
-	lr := &io.LimitedReader{R: r, N: maxDrain}
-	defer func() { _, _ = io.Copy(io.Discard, lr) }()
+// Drain reads r to the end and discards it, so a writer (Claude Code)
+// never sees a broken pipe however large its payload.
+func Drain(r io.Reader) { _, _ = io.Copy(io.Discard, r) }
 
-	dec := json.NewDecoder(lr)
-	if err := expectDelim(dec, '{'); err != nil {
-		return Payload{}, err
-	}
+// ParsePayload reads a Claude Code hook payload and keeps only session_id,
+// hook_event_name, tool_name and cwd (string values up to 4 KiB). Every
+// other value (prompt, tool_input, tool_response, transcript_path, …) is
+// skipped byte by byte without ever being stored (privacy & security §4.3).
+// Afterwards the rest of r is drained.
+func ParsePayload(r io.Reader) (Payload, error) {
+	defer Drain(r)
+	s := scanner{r: bufio.NewReaderSize(r, 4096)}
 	var p Payload
-	for dec.More() {
-		tok, err := dec.Token()
-		if err != nil {
-			return Payload{}, fmt.Errorf("claude: payload key: %w", err)
-		}
-		key, _ := tok.(string)
+	if err := s.object(func(key string, first byte) error {
 		var dst *string
 		var cwd string
 		switch key {
@@ -56,81 +56,203 @@ func ParsePayload(r io.Reader) (Payload, error) {
 		case "cwd":
 			dst = &cwd
 		}
-		if dst == nil {
-			if err := skipValue(dec); err != nil {
-				return Payload{}, err
-			}
-			continue
+		if dst == nil || first != '"' {
+			return s.skipValue(first) // not ours, or not a string
 		}
-		s, err := readString(dec)
-		if err != nil {
-			return Payload{}, err
+		v, ok, err := s.stringValue(maxValueBytes)
+		if err != nil || !ok {
+			return err // too long: ignored
 		}
-		*dst = s
+		*dst = v
 		if key == "cwd" {
 			p.Cwd = model.NewSensitive(cwd)
 		}
-	}
-	if err := expectDelim(dec, '}'); err != nil {
+		return nil
+	}); err != nil {
 		return Payload{}, err
 	}
 	return p, nil
 }
 
-func expectDelim(dec *json.Decoder, want json.Delim) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return fmt.Errorf("claude: payload: %w", err)
-	}
-	if d, ok := tok.(json.Delim); !ok || d != want {
-		return fmt.Errorf("claude: payload: expected %q", want)
-	}
-	return nil
-}
+// scanner is a minimal JSON reader for one top-level object. It only ever
+// holds allowlisted keys and values (bounded); everything else streams past.
+type scanner struct{ r *bufio.Reader }
 
-// readString returns a string value, or "" (after skipping it) for any
-// other JSON type.
-func readString(dec *json.Decoder) (string, error) {
-	tok, err := dec.Token()
+// object walks a top-level object, calling field with each key and the
+// first byte of its value. field must consume the whole value.
+func (s scanner) object(field func(key string, first byte) error) error {
+	if c, err := s.next(); err != nil || c != '{' {
+		return fmt.Errorf("%w: expected object", errPayload)
+	}
+	c, err := s.next()
 	if err != nil {
-		return "", fmt.Errorf("claude: payload value: %w", err)
+		return err
 	}
-	switch t := tok.(type) {
-	case string:
-		return t, nil
-	case json.Delim:
-		return "", skipRest(dec, 1)
-	default:
-		return "", nil
+	if c == '}' {
+		return nil
 	}
-}
-
-// skipValue consumes one value of any type without keeping it.
-func skipValue(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return fmt.Errorf("claude: payload value: %w", err)
-	}
-	if d, ok := tok.(json.Delim); ok && (d == '{' || d == '[') {
-		return skipRest(dec, 1)
-	}
-	return nil
-}
-
-func skipRest(dec *json.Decoder, depth int) error {
-	for depth > 0 {
-		tok, err := dec.Token()
-		if err != nil {
-			return fmt.Errorf("claude: payload value: %w", err)
+	for {
+		if c != '"' {
+			return fmt.Errorf("%w: expected key", errPayload)
 		}
-		if d, ok := tok.(json.Delim); ok {
-			switch d {
-			case '{', '[':
-				depth++
-			case '}', ']':
-				depth--
+		key, _, err := s.stringValue(maxKeyBytes)
+		if err != nil {
+			return err
+		}
+		if c, err := s.next(); err != nil || c != ':' {
+			return fmt.Errorf("%w: expected ':'", errPayload)
+		}
+		first, err := s.next()
+		if err != nil {
+			return err
+		}
+		if err := field(key, first); err != nil {
+			return err
+		}
+		if c, err = s.next(); err != nil {
+			return err
+		}
+		switch c {
+		case '}':
+			return nil
+		case ',':
+			if c, err = s.next(); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("%w: expected ',' or '}'", errPayload)
+		}
+	}
+}
+
+// next returns the next non-whitespace byte.
+func (s scanner) next() (byte, error) {
+	for {
+		c, err := s.r.ReadByte()
+		if err != nil {
+			return 0, fmt.Errorf("%w: %w", errPayload, err)
+		}
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			continue
+		}
+		return c, nil
+	}
+}
+
+// stringValue reads the rest of a string whose opening quote was consumed.
+// It returns the unescaped value if the raw form fits in limit bytes;
+// longer strings are consumed and reported with ok == false.
+func (s scanner) stringValue(limit int) (v string, ok bool, err error) {
+	raw := make([]byte, 1, 64)
+	raw[0] = '"'
+	ok = true
+	for {
+		c, err := s.r.ReadByte()
+		if err != nil {
+			return "", false, fmt.Errorf("%w: %w", errPayload, err)
+		}
+		if c < 0x20 {
+			return "", false, fmt.Errorf("%w: control character in string", errPayload)
+		}
+		if ok && len(raw) > limit {
+			ok, raw = false, nil // too long: stop keeping bytes, keep consuming
+		}
+		if ok {
+			raw = append(raw, c)
+		}
+		switch c {
+		case '"':
+			if !ok {
+				return "", false, nil
+			}
+			if err := json.Unmarshal(raw, &v); err != nil {
+				return "", false, fmt.Errorf("%w: %w", errPayload, err)
+			}
+			return v, true, nil
+		case '\\':
+			e, err := s.r.ReadByte()
+			if err != nil {
+				return "", false, fmt.Errorf("%w: %w", errPayload, err)
+			}
+			if ok {
+				raw = append(raw, e)
 			}
 		}
 	}
+}
+
+// skipString consumes the rest of a string without keeping any of it.
+func (s scanner) skipString() error {
+	for {
+		c, err := s.r.ReadByte()
+		if err != nil {
+			return fmt.Errorf("%w: %w", errPayload, err)
+		}
+		if c < 0x20 {
+			return fmt.Errorf("%w: control character in string", errPayload)
+		}
+		switch c {
+		case '"':
+			return nil
+		case '\\':
+			if _, err := s.r.ReadByte(); err != nil {
+				return fmt.Errorf("%w: %w", errPayload, err)
+			}
+		}
+	}
+}
+
+// skipValue consumes one value whose first byte has been read, tracking
+// nesting and strings but storing nothing.
+func (s scanner) skipValue(first byte) error {
+	switch first {
+	case '"':
+		return s.skipString()
+	case '{', '[':
+		return s.skipNested()
+	default:
+		return s.skipLiteral(first)
+	}
+}
+
+func (s scanner) skipNested() error {
+	for depth := 1; depth > 0; {
+		c, err := s.r.ReadByte()
+		if err != nil {
+			return fmt.Errorf("%w: %w", errPayload, err)
+		}
+		switch c {
+		case '"':
+			if err := s.skipString(); err != nil {
+				return err
+			}
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		}
+	}
 	return nil
+}
+
+// skipLiteral consumes a number, true, false or null, leaving the following
+// delimiter unread.
+func (s scanner) skipLiteral(first byte) error {
+	if !isLiteralByte(first) {
+		return fmt.Errorf("%w: unexpected %q", errPayload, first)
+	}
+	for {
+		c, err := s.r.ReadByte()
+		if err != nil {
+			return fmt.Errorf("%w: %w", errPayload, err)
+		}
+		if !isLiteralByte(c) {
+			return s.r.UnreadByte()
+		}
+	}
+}
+
+func isLiteralByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c == '-' || c == '+' || c == '.' || c == 'E'
 }

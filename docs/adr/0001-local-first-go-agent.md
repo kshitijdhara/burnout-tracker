@@ -30,7 +30,7 @@ The main binary ships with **separately versioned components**:
 | `burnout-classify` | optional Laya sidecar (ADR-0006) | stdin/stdout JSON |
 | GNOME Shell extension | Wayland window/pointer bridge | private peer-to-peer socket |
 | KWin script | KDE bridge | private peer-to-peer socket |
-| Shell hook scripts | zsh/bash/fish/pwsh hooks (ADR-0003) | ingest datagram |
+| Shell hook scripts | zsh/bash/fish/pwsh hooks (ADR-0003) | ingest message |
 
 A **compatibility matrix** in the repo lists which component versions work
 with which daemon versions. `burnout doctor` reports what's installed and
@@ -49,7 +49,7 @@ flags mismatches.
   never calls `time.Now()`. Domain packages don't start goroutines.
   Concurrency lives in the adapters. That's what makes trace replay tests
   possible.
-- **Versioned contracts.** Every cross-process message (ingest datagrams,
+- **Versioned contracts.** Every cross-process message (ingest messages,
   sidecar protocol, desktop bridges) has a `v` field and a JSON Schema in
   `/schemas`. The daemon accepts the current and previous version (N-1),
   ignores unknown fields, and drops and counts malformed messages. Contract

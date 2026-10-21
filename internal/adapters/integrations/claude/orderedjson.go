@@ -149,3 +149,14 @@ func pretty(compact json.RawMessage) ([]byte, error) {
 	b.WriteByte('\n')
 	return b.Bytes(), nil
 }
+
+func expectDelim(dec *json.Decoder, want json.Delim) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return fmt.Errorf("claude: settings: %w", err)
+	}
+	if d, ok := tok.(json.Delim); !ok || d != want {
+		return fmt.Errorf("claude: settings: expected %q", want)
+	}
+	return nil
+}

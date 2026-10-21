@@ -77,10 +77,15 @@ func installZsh(bin string, install bool) error {
 	if err != nil {
 		return err
 	}
+	backups, err := hookBackupDir()
+	if err != nil {
+		return err
+	}
 	o := shell.InstallOptions{
 		RCPath:    filepath.Join(rcDir, ".zshrc"),
 		ScriptDir: filepath.Join(cfg, "hooks"),
 		BinPath:   bin,
+		BackupDir: backups,
 		Now:       time.Now,
 	}
 	if install {
@@ -94,10 +99,15 @@ func installClaude(ctx context.Context, bin string, install bool) error {
 	if err != nil {
 		return err
 	}
+	backups, err := hookBackupDir()
+	if err != nil {
+		return err
+	}
 	o := claude.InstallOptions{
 		SettingsPath: settings,
 		Command:      claude.CommandFor(bin),
 		Version:      claude.DetectVersion(ctx),
+		BackupDir:    backups,
 		Now:          time.Now,
 	}
 	if install {
@@ -106,13 +116,24 @@ func installClaude(ctx context.Context, bin string, install bool) error {
 	return claude.Uninstall(o)
 }
 
-// binaryPath is the absolute, symlink-resolved path hooks will call.
+// binaryPath is the absolute path hooks will call. Symlinks are kept, so a
+// stable link (for example ~/.local/bin/burnout) survives upgrades.
 func binaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	return filepath.EvalSymlinks(exe)
+	return filepath.Abs(exe)
+}
+
+// hookBackupDir is where installers back up files before editing them:
+// the app's own data directory, never next to the user's file.
+func hookBackupDir() (string, error) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "hook-backups"), nil
 }
 
 func report(what string, err error) error {

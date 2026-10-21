@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -18,7 +19,11 @@ func runStatus(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	store, err := sqlite.Open(ctx, dataDir)
+	store, err := sqlite.OpenReadOnly(ctx, dataDir)
+	if errors.Is(err, sqlite.ErrNoDatabase) {
+		fmt.Println("Nothing recorded yet. Run `burnout setup`, then start `burnout daemon`.")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -57,6 +62,13 @@ func printSummary(s sqlite.DaySummary) {
 	}
 	if s.ShellCommands > 0 {
 		fmt.Printf("Shell: %d commands, %d failed\n", s.ShellCommands, s.ShellFailures)
+		for _, c := range s.TopCommands {
+			name := c.Name
+			if name == "" {
+				name = "(unrecognised)"
+			}
+			fmt.Printf("  %-16s %d\n", name, c.Count)
+		}
 	}
 	if s.AgentSessions > 0 {
 		fmt.Printf("Agents: %d sessions\n", s.AgentSessions)

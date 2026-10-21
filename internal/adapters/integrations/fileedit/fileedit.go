@@ -4,6 +4,8 @@
 package fileedit
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -57,14 +59,33 @@ func ReadExisting(path string, defaultMode fs.FileMode) ([]byte, fs.FileMode, bo
 	return b, fi.Mode().Perm(), true, nil
 }
 
-// Backup copies content next to path before it is changed. Backups are
-// owner-only because rc files and settings can hold secrets.
-func Backup(path string, content []byte, now time.Time) error {
-	name := fmt.Sprintf("%s.burnout-backup-%s", path, now.UTC().Format("20060102T150405Z"))
-	if err := os.WriteFile(name, content, 0o600); err != nil { //nolint:gosec // path derives from the user's own file
-		return fmt.Errorf("fileedit: backup %s: %w", path, err)
+// Backup copies content into backupDir before path is changed and returns
+// the backup's path. Backups go to the app's private directory, never next
+// to the file: rc files and settings can hold secrets, and a file next to a
+// symlinked rc often lives in a dotfiles repository that gets pushed. Each
+// backup gets a unique name and is created exclusively, owner-only.
+func Backup(backupDir, path string, content []byte, now time.Time) (string, error) {
+	if err := os.MkdirAll(backupDir, 0o700); err != nil {
+		return "", fmt.Errorf("fileedit: backup dir: %w", err)
 	}
-	return nil
+	var suffix [4]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", fmt.Errorf("fileedit: backup name: %w", err)
+	}
+	name := filepath.Join(backupDir, fmt.Sprintf("%s.%s.%s.bak",
+		filepath.Base(path), now.UTC().Format("20060102T150405Z"), hex.EncodeToString(suffix[:])))
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // name is built from our own backup dir
+	if err != nil {
+		return "", fmt.Errorf("fileedit: backup %s: %w", path, err)
+	}
+	if _, err := f.Write(content); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("fileedit: backup %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("fileedit: backup %s: %w", path, err)
+	}
+	return name, nil
 }
 
 // WriteAtomic replaces path with content via a temp file in the same

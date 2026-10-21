@@ -75,31 +75,38 @@ func (s *sessionWindows) ancestry(pid int, now time.Time) map[int]bool {
 	return pids
 }
 
-// topology summarises the monitor layout seen in a snapshot. Collectors
-// report monitor indexes per window, so the count of distinct indexes is
-// what we have in Phase 0.
-func topology(snap model.Snapshot) string {
-	seen := map[int]bool{}
-	for _, w := range snap.Windows {
-		if w.Monitor >= 0 {
-			seen[w.Monitor] = true
-		}
+// topology summarises the active displays: their count and rectangles,
+// sorted so the same layout always yields the same string.
+func topology(monitors []model.Rect) string {
+	rects := make([]string, 0, len(monitors))
+	for _, m := range monitors {
+		rects = append(rects, fmt.Sprintf("[%d,%d,%d,%d]", m.X, m.Y, m.W, m.H))
 	}
-	idx := make([]string, 0, len(seen))
-	for m := range seen {
-		idx = append(idx, fmt.Sprint(m))
-	}
-	sort.Strings(idx)
-	return fmt.Sprintf(`{"monitors_in_use":[%s]}`, strings.Join(idx, ","))
+	sort.Strings(rects)
+	return fmt.Sprintf(`{"count":%d,"monitors":[%s]}`, len(monitors), strings.Join(rects, ","))
 }
 
 // health accumulates the local SLIs (system design §11.1) for the current
-// logical day.
+// logical day. Loop-owned.
 type health struct {
 	day                                   string
 	presentS, attributedS                 float64
 	shellEvents, agentEvents              int
 	collectorErrors, flushErrors, dropped int
+}
+
+// healthJSON is the stored shape of a day's SLIs.
+type healthJSON struct {
+	Coverage        float64           `json:"coverage"`
+	PresentS        float64           `json:"present_s"`
+	AttributedS     float64           `json:"attributed_s"`
+	ShellEvents     int               `json:"shell_events"`
+	AgentEvents     int               `json:"agent_events"`
+	CollectorErrors int               `json:"collector_errors"`
+	FlushErrors     int               `json:"flush_errors"`
+	Dropped         int               `json:"dropped"`
+	Hooks           map[string]uint64 `json:"hooks,omitempty"`  // this process: accepted, rejected, queue_full
+	Ingest          map[string]uint64 `json:"ingest,omitempty"` // this process: transport counters
 }
 
 func newHealth() *health { return &health{} }
@@ -110,9 +117,22 @@ func (h *health) observe(res attention.Result) {
 	h.attributedS += (res.Presence - res.Unattributed) * dt
 }
 
-// json renders today's SLIs. Counters start over when the logical day
+// seed continues from a stored row for day. Malformed rows are ignored.
+func (h *health) seed(day, stored string) {
+	var j healthJSON
+	if stored == "" || json.Unmarshal([]byte(stored), &j) != nil {
+		return
+	}
+	*h = health{
+		day: day, presentS: j.PresentS, attributedS: j.AttributedS,
+		shellEvents: j.ShellEvents, agentEvents: j.AgentEvents,
+		collectorErrors: j.CollectorErrors, flushErrors: j.FlushErrors, dropped: j.Dropped,
+	}
+}
+
+// json renders day's SLIs. Counters start over when the logical day
 // changes; the first call adopts the current day without resetting.
-func (h *health) json(day string) string {
+func (h *health) json(day string, hooks, ingest map[string]uint64) string {
 	switch h.day {
 	case "":
 		h.day = day
@@ -124,14 +144,11 @@ func (h *health) json(day string) string {
 	if h.presentS > 0 {
 		coverage = h.attributedS / h.presentS
 	}
-	b, _ := json.Marshal(map[string]any{
-		"coverage":         coverage,
-		"present_s":        h.presentS,
-		"shell_events":     h.shellEvents,
-		"agent_events":     h.agentEvents,
-		"collector_errors": h.collectorErrors,
-		"flush_errors":     h.flushErrors,
-		"dropped":          h.dropped,
+	b, _ := json.Marshal(healthJSON{
+		Coverage: coverage, PresentS: h.presentS, AttributedS: h.attributedS,
+		ShellEvents: h.shellEvents, AgentEvents: h.agentEvents,
+		CollectorErrors: h.collectorErrors, FlushErrors: h.flushErrors, Dropped: h.dropped,
+		Hooks: hooks, Ingest: ingest,
 	})
 	return string(b)
 }

@@ -22,8 +22,8 @@ func TestBuildSnapshot(t *testing.T) {
 			{handle: 3, pid: 30, appID: "slack.exe", bounds: rect(100, 100, 200, 200)},            // fully covered by 1
 			{handle: 4, pid: 40, appID: "WindowsTerminal.exe", bounds: rect(1000, 0, 1000, 1000)}, // monitor 1
 		},
-		foreground:    2,
-		pointerRoot:   4,
+		foreground:    []uint64{2},
+		pointer:       []uint64{4},
 		pointerMoved:  true,
 		idleFor:       3 * time.Second,
 		keys:          5,
@@ -67,7 +67,7 @@ func TestBuildSnapshotKeepsCoveredFocusedWindow(t *testing.T) {
 			{handle: 1, bounds: rect(0, 0, 100, 100)},
 			{handle: 2, bounds: rect(10, 10, 10, 10)},
 		},
-		foreground: 2,
+		foreground: []uint64{2},
 	}
 	got := buildSnapshot(s)
 	if len(got.Windows) != 2 || !got.Windows[1].Focused || got.Windows[1].Visible != 0 {
@@ -77,12 +77,58 @@ func TestBuildSnapshotKeepsCoveredFocusedWindow(t *testing.T) {
 
 func TestBuildSnapshotPointerOutsideKnownWindows(t *testing.T) {
 	s := rawState{
-		monitors:    []model.Rect{rect(0, 0, 100, 100)},
-		windows:     []rawWindow{{handle: 1, bounds: rect(0, 0, 50, 50)}},
-		pointerRoot: 99, // e.g. the taskbar, which isn't a candidate window
+		monitors: []model.Rect{rect(0, 0, 100, 100)},
+		windows:  []rawWindow{{handle: 1, bounds: rect(0, 0, 50, 50)}},
+		pointer:  []uint64{99}, // e.g. the taskbar, which isn't a candidate window
 	}
 	if got := buildSnapshot(s); got.PointerWindow != 0 {
 		t.Fatalf("PointerWindow = %d, want 0", got.PointerWindow)
+	}
+}
+
+// A modal dialog (Save As, Find) is an owned window and never a candidate
+// itself. Focus and pointer must land on the app window that owns it.
+func TestBuildSnapshotOwnedDialogMapsToOwner(t *testing.T) {
+	s := rawState{
+		monitors: []model.Rect{rect(0, 0, 1000, 1000)},
+		windows: []rawWindow{
+			{handle: 1, appID: "Code.exe", bounds: rect(0, 0, 800, 800)},
+			{handle: 2, appID: "chrome.exe", bounds: rect(0, 0, 1000, 1000)},
+		},
+		// The dialog (handle 50) is owned by VS Code (1).
+		foreground: []uint64{50, 1},
+		pointer:    []uint64{50, 1},
+	}
+	got := buildSnapshot(s)
+	if !got.Windows[0].Focused || got.Windows[1].Focused {
+		t.Fatalf("owner window should be focused: %+v", got.Windows)
+	}
+	if got.PointerWindow != 1 {
+		t.Fatalf("PointerWindow = %d, want the dialog's owner 1", got.PointerWindow)
+	}
+}
+
+func TestBuildSnapshotOwnerChainFirstListedWins(t *testing.T) {
+	s := rawState{
+		monitors: []model.Rect{rect(0, 0, 100, 100)},
+		windows:  []rawWindow{{handle: 7, bounds: rect(0, 0, 50, 50)}, {handle: 8, bounds: rect(50, 50, 50, 50)}},
+		// Nested owners: a dialog owned by a tool window owned by window 8.
+		foreground: []uint64{60, 61, 8},
+	}
+	got := buildSnapshot(s)
+	if got.Windows[0].Focused || !got.Windows[1].Focused {
+		t.Fatalf("window 8 should be focused: %+v", got.Windows)
+	}
+	if got.PointerWindow != 0 {
+		t.Fatalf("no pointer chain, PointerWindow = %d", got.PointerWindow)
+	}
+}
+
+func TestBuildSnapshotMonitors(t *testing.T) {
+	monitors := []model.Rect{rect(0, 0, 1920, 1080), rect(1920, -200, 2560, 1440)}
+	got := buildSnapshot(rawState{monitors: monitors})
+	if len(got.Monitors) != 2 || got.Monitors[1] != monitors[1] {
+		t.Fatalf("Monitors = %+v, want %+v", got.Monitors, monitors)
 	}
 }
 
@@ -178,5 +224,8 @@ func TestCapabilities(t *testing.T) {
 	}
 	if c := capabilities(Options{InputCounts: true}, true); !c.InputCounts || c.Titles {
 		t.Fatalf("unexpected capabilities: %+v", c)
+	}
+	if len(c.Limitations) == 0 {
+		t.Fatal("Phase 0 gaps (video/call detection) must be reported as limitations")
 	}
 }

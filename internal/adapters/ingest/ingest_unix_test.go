@@ -218,3 +218,47 @@ func TestSendFailsFastWithoutDaemon(t *testing.T) {
 		t.Fatalf("send took %v", d)
 	}
 }
+
+func TestPingIsCountedAsPing(t *testing.T) {
+	path := shortSocketPath(t)
+	srv, col := startServer(t, path)
+	ping := wire.Message{V: wire.Version, Kind: wire.KindPing, SentMs: 1}
+	if err := sendTo(context.Background(), path, ping); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return srv.Stats().Pings == 1 })
+	if st := srv.Stats(); st.Malformed != 0 || st.Accepted != 0 || col.len() != 0 {
+		t.Fatalf("ping must not reach the handler or count as an error: %+v", st)
+	}
+}
+
+func TestCheckPeerReportsPID(t *testing.T) {
+	path := shortSocketPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		c, err := net.Dial("unix", path)
+		if err == nil {
+			time.Sleep(50 * time.Millisecond)
+			_ = c.Close()
+		}
+	}()
+	c, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	pid, err := checkPeer(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid != os.Getpid() {
+		t.Fatalf("peer pid = %d, want %d", pid, os.Getpid())
+	}
+}

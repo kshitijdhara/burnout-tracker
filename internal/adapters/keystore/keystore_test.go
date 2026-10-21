@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -171,5 +172,83 @@ func TestBackendChoiceIsSticky(t *testing.T) {
 	}
 	if s3.Backend() != BackendFile {
 		t.Fatalf("backend = %s, want file", s3.Backend())
+	}
+}
+
+// A truncated or empty key file (say, a crash mid-write on an older build)
+// must never become a short HMAC key.
+func TestRejectsShortSecrets(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "short": "c2hvcnQ=", "not base64": "!!!"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := New(dir, WithFileOnly())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "keys", "hmac"), []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.GetOrCreate("hmac"); err == nil {
+				t.Fatal("accepted a bad secret")
+			}
+		})
+	}
+}
+
+func TestCorruptMarkerIsAnError(t *testing.T) {
+	for _, content := range []string{"", "osx", "FILE"} {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "keys"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "keys", backendMarker), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newStore(dir, options{}, func() bool { return true }); !errors.Is(err, ErrCorruptMarker) {
+			t.Fatalf("marker %q: got %v, want ErrCorruptMarker", content, err)
+		}
+	}
+}
+
+// Two processes on first run: the other one records "file" while we are
+// still probing, and our probe says the keyring works. We must adopt the
+// recorded choice, not our own.
+func TestFirstRunRaceUsesPersistedChoice(t *testing.T) {
+	dir := t.TempDir()
+	keyring.MockInit()
+	probe := func() bool {
+		other, err := newStore(dir, options{}, func() bool { return false })
+		if err != nil || other.Backend() != BackendFile {
+			t.Fatalf("other process: %v %v", other, err)
+		}
+		return true
+	}
+	s, err := newStore(dir, options{}, probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Backend() != BackendFile {
+		t.Fatalf("backend = %s, want the persisted file choice", s.Backend())
+	}
+}
+
+func TestStaleTempFilesRemoved(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := New(dir, WithFileOnly()); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "keys", tmpPrefix+"hmac-dead")
+	if err := os.WriteFile(stale, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(dir, WithFileOnly()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale temp file still present: %v", err)
 	}
 }

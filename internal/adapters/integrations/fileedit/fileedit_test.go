@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,13 +22,39 @@ func TestWriteAtomicAndBackup(t *testing.T) {
 	if runtime.GOOS != "windows" && mode != 0o640 {
 		t.Fatalf("mode = %v", mode)
 	}
-	if err := Backup(p, b, time.Date(2026, 10, 21, 1, 2, 3, 0, time.UTC)); err != nil {
+	backupDir := filepath.Join(t.TempDir(), "backups")
+	at := time.Date(2026, 10, 21, 1, 2, 3, 0, time.UTC)
+	first, err := Backup(backupDir, p, b, at)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(p + ".burnout-backup-20261021T010203Z"); err != nil {
+	// Two backups in the same second must not overwrite each other.
+	second, err := Backup(backupDir, p, []byte("b\n"), at)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if first == second || filepath.Dir(first) != backupDir {
+		t.Fatalf("backups %s and %s", first, second)
+	}
+	if !strings.HasPrefix(filepath.Base(first), "rc.20261021T010203Z.") || filepath.Ext(first) != ".bak" {
+		t.Fatalf("backup name %s", first)
+	}
+	if got, _ := os.ReadFile(first); string(got) != "a\n" {
+		t.Fatalf("first backup holds %q", got)
+	}
+	if runtime.GOOS != "windows" {
+		if fi, _ := os.Stat(first); fi.Mode().Perm() != 0o600 {
+			t.Fatalf("backup mode %v", fi.Mode().Perm())
+		}
+		if fi, _ := os.Stat(backupDir); fi.Mode().Perm() != 0o700 {
+			t.Fatalf("backup dir mode %v", fi.Mode().Perm())
+		}
+	}
+	// Nothing is written next to the original file.
 	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("files next to the original: %v", entries)
+	}
 	for _, e := range entries {
 		if filepath.Ext(e.Name()) == "" && e.Name() != "rc" && e.Name()[0] == '.' {
 			t.Fatalf("temp file left behind: %s", e.Name())

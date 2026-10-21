@@ -4,8 +4,8 @@ package ingest
 
 import "errors"
 
-// peerUID is unsupported on other Unix systems, so every peer is rejected
+// peerCred is unsupported on other Unix systems, so every peer is rejected
 // rather than trusted.
-func peerUID(int) (uint32, error) {
-	return 0, errors.New("ingest: peer credentials unsupported on this OS")
+func peerCred(int) (uint32, int, error) {
+	return 0, 0, errors.New("ingest: peer credentials unsupported on this OS")
 }

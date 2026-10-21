@@ -7,6 +7,7 @@ package keystore
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +38,7 @@ const probeName = "probe"
 
 var reName = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
-// Store implements ports.KeyStore.
+// Store holds named secrets in one backend, chosen once per install.
 type Store struct {
 	mu      sync.Mutex
 	backend backend
@@ -74,6 +76,11 @@ const (
 // headless session can block indefinitely waiting for a prompt.
 const probeTimeout = 3 * time.Second
 
+// ErrCorruptMarker means the recorded backend choice is unreadable. It is
+// never treated as a choice, because guessing could switch backends and
+// with them the HMAC key.
+var ErrCorruptMarker = errors.New("keystore: corrupt backend marker")
+
 // New returns a Store backed by the OS keyring if it works, otherwise by
 // files under <dir>/keys. The first choice is recorded and reused.
 func New(dir string, opts ...Option) (*Store, error) {
@@ -81,6 +88,10 @@ func New(dir string, opts ...Option) (*Store, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
+	return newStore(dir, o, func() bool { return probeKeyring(probeTimeout) })
+}
+
+func newStore(dir string, o options, probe func() bool) (*Store, error) {
 	fb, err := newFileBackend(filepath.Join(dir, "keys"))
 	if err != nil {
 		return nil, err
@@ -89,22 +100,29 @@ func New(dir string, opts ...Option) (*Store, error) {
 		return &Store{backend: fb}, nil
 	}
 	marker, err := fb.get(backendMarker)
-	switch {
-	case err == nil && marker == markerOS:
+	if errors.Is(err, errNotFound) {
+		choice := markerFile
+		if probe() {
+			choice = markerOS
+		}
+		// set keeps an existing marker, so when two processes race on first
+		// run both end up reading (and using) whichever choice won.
+		if err := fb.set(backendMarker, choice); err != nil {
+			return nil, err
+		}
+		marker, err = fb.get(backendMarker)
+	}
+	if err != nil {
+		return nil, err
+	}
+	switch marker {
+	case markerOS:
 		return &Store{backend: osKeyring{}}, nil
-	case err == nil:
+	case markerFile:
 		return &Store{backend: fb}, nil
-	case !errors.Is(err, errNotFound):
-		return nil, err
+	default:
+		return nil, ErrCorruptMarker
 	}
-	choice, be := markerFile, backend(fb)
-	if probeKeyring(probeTimeout) {
-		choice, be = markerOS, osKeyring{}
-	}
-	if err := fb.set(backendMarker, choice); err != nil {
-		return nil, err
-	}
-	return &Store{backend: be}, nil
 }
 
 // GetOrCreate returns the named secret, generating a random one on first use.
@@ -134,6 +152,11 @@ func (s *Store) GetOrCreate(name string) (model.Sensitive[[]byte], error) {
 	b, err := base64.StdEncoding.DecodeString(enc)
 	if err != nil {
 		return model.Sensitive[[]byte]{}, fmt.Errorf("keystore: decode %s: %w", name, err)
+	}
+	// Never hand out a short or empty key: an empty HMAC key turns every
+	// identity hash into a guessable plain hash (privacy & security §4.5).
+	if len(b) != SecretSize {
+		return model.Sensitive[[]byte]{}, fmt.Errorf("keystore: %s is %d bytes, want %d; refusing to use it", name, len(b), SecretSize)
 	}
 	return model.NewSensitive(b), nil
 }
@@ -234,7 +257,9 @@ func newFileBackend(dir string) (fileBackend, error) {
 	if err := paths.EnsurePrivateDir(dir); err != nil {
 		return fileBackend{}, err
 	}
-	return fileBackend{dir: dir}, nil
+	fb := fileBackend{dir: dir}
+	fb.removeStaleTemps(time.Now())
+	return fb, nil
 }
 
 func (f fileBackend) withRoot(fn func(*os.Root) error) error {
@@ -255,25 +280,32 @@ func (f fileBackend) get(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("keystore: read %s: %w", name, err)
 	}
-	if err := paths.CheckPrivate(filepath.Join(f.dir, name)); err != nil {
+	if err := paths.CheckPrivate(filepath.Join(f.dir, name)); err != nil && !errors.Is(err, paths.ErrUnverified) {
 		return "", fmt.Errorf("keystore: %w", err)
 	}
 	return string(b), nil
 }
 
-// set creates the file exclusively so two processes racing to create the
-// same secret can't overwrite each other; the loser reads the winner's value.
+// tmpPrefix marks in-progress writes. Names with it never match reName.
+const tmpPrefix = ".tmp-"
+
+// set writes the value to a private temp file, fsyncs it, then hard-links
+// it into place. The link fails if the name exists, so two processes racing
+// to create the same secret can't overwrite each other (the loser reads the
+// winner's value), and a crash never leaves a half-written secret under the
+// real name.
 func (f fileBackend) set(name, value string) error {
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return fmt.Errorf("keystore: write %s: %w", name, err)
+	}
+	tmp := tmpPrefix + name + "-" + hex.EncodeToString(suffix)
 	err := f.withRoot(func(r *os.Root) error {
-		fh, err := r.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err != nil {
+		defer func() { _ = r.Remove(tmp) }()
+		if err := writeSynced(r, tmp, value); err != nil {
 			return err
 		}
-		if _, err := fh.WriteString(value); err != nil {
-			_ = fh.Close()
-			return err
-		}
-		return fh.Close()
+		return r.Link(tmp, name)
 	})
 	if errors.Is(err, fs.ErrExist) {
 		return nil
@@ -281,7 +313,55 @@ func (f fileBackend) set(name, value string) error {
 	if err != nil {
 		return fmt.Errorf("keystore: write %s: %w", name, err)
 	}
+	syncDir(f.dir)
 	return nil
+}
+
+func writeSynced(r *os.Root, name, value string) error {
+	fh, err := r.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := fh.WriteString(value); err != nil {
+		_ = fh.Close()
+		return err
+	}
+	if err := fh.Sync(); err != nil {
+		_ = fh.Close()
+		return err
+	}
+	return fh.Close()
+}
+
+// syncDir makes the new directory entry durable. Best effort: Windows can't
+// open a directory for syncing, and NTFS journals the entry anyway.
+func syncDir(dir string) {
+	d, err := os.Open(dir) //nolint:gosec // our own private keys directory
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
+}
+
+// removeStaleTemps deletes temp files left by a crash mid-write. Only files
+// older than a minute go, so another process's in-flight write is safe.
+func (f fileBackend) removeStaleTemps(now time.Time) {
+	_ = f.withRoot(func(r *os.Root) error {
+		entries, err := fs.ReadDir(r.FS(), ".")
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), tmpPrefix) {
+				continue
+			}
+			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > time.Minute {
+				_ = r.Remove(e.Name())
+			}
+		}
+		return nil
+	})
 }
 
 func (f fileBackend) del(name string) error {

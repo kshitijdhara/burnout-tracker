@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"os"
 	"time"
 
@@ -12,9 +11,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
-
-// maxDrain bounds how much unread hook input we consume before exiting.
-const maxDrain = 64 << 20
 
 // sendBudget bounds how long a hook may spend talking to the daemon.
 const sendBudget = 50 * time.Millisecond
@@ -53,7 +49,7 @@ func runHook(args []string) {
 	defer hookGuard()()
 	if len(args) != 1 || args[0] != claude.AgentName {
 		// Unknown agent: drain stdin so the caller never sees a broken pipe.
-		_, _ = io.Copy(io.Discard, io.LimitReader(os.Stdin, maxDrain))
+		claude.Drain(os.Stdin)
 		return
 	}
 	claude.Run(os.Stdin, time.Now, send, procinfo.Info{})

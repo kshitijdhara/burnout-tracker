@@ -43,6 +43,10 @@ type Params struct {
 	FreshOutput time.Duration
 	// Minimum presence to count as present on the presence timeline.
 	PresentAt float64
+	// MaxSessions caps open agent sessions; the least recently active one is
+	// ended when a new session would exceed it. Bounds memory and per-tick
+	// work even if forged events invent session ids.
+	MaxSessions int
 }
 
 // DefaultParams returns the documented defaults.
@@ -54,6 +58,7 @@ func DefaultParams() Params {
 		StaleSession:   12 * time.Hour,
 		FreshOutput:    3 * time.Minute,
 		PresentAt:      0.5,
+		MaxSessions:    64,
 	}
 }
 
@@ -125,7 +130,9 @@ func (t *Tracker) OnAgent(e model.AgentEvent) {
 	}
 	switch e.Kind {
 	case model.AgentPromptSubmit:
-		t.transition(s, AgentWorking, e.At)
+		// A prompt always starts a new turn, even if the previous one never
+		// reported Stop (the user pressed Esc): close it here.
+		t.restart(s, AgentWorking, e.At)
 	case model.AgentToolStart:
 		t.transition(s, AgentWorking, e.At)
 		s.tools++
@@ -153,6 +160,7 @@ func (t *Tracker) OnAgent(e model.AgentEvent) {
 func (t *Tracker) session(e model.AgentEvent) *session {
 	s, ok := t.sessions[e.SessionKey]
 	if !ok {
+		t.evictIfFull()
 		s = &session{
 			Session: Session{Key: e.SessionKey, Agent: e.Agent, State: AgentIdle, LastEvent: e.At},
 			project: e.ProjectKey,
@@ -167,8 +175,30 @@ func (t *Tracker) transition(s *session, state string, at time.Time) {
 	if s.State == state {
 		return
 	}
+	t.restart(s, state, at)
+}
+
+// restart closes the current segment and opens a new one in state.
+func (t *Tracker) restart(s *session, state string, at time.Time) {
 	t.closeAgentSegment(s, at)
-	s.State, s.since, s.tools = state, at, 0
+	if at.After(s.since) {
+		s.since = at
+	}
+	s.State, s.tools = state, 0
+}
+
+// evictIfFull ends the least recently active session when the cap is hit.
+func (t *Tracker) evictIfFull() {
+	if t.p.MaxSessions <= 0 || len(t.sessions) < t.p.MaxSessions {
+		return
+	}
+	var oldest *session
+	for _, s := range t.sessions {
+		if oldest == nil || s.LastEvent.Before(oldest.LastEvent) {
+			oldest = s
+		}
+	}
+	t.endSession(oldest, oldest.LastEvent)
 }
 
 func (t *Tracker) closeAgentSegment(s *session, at time.Time) {
@@ -299,12 +329,17 @@ func (t *Tracker) closeSpan(sp *span, kind model.IntervalKind) {
 	t.emit(iv)
 }
 
-// Flush closes every open human and presence span at the current end
-// (on shutdown). Agent sessions stay open; their segments close on events.
-func (t *Tracker) Flush() {
+// Flush closes every open span at now (on shutdown), so nothing in
+// progress is lost: human and presence spans, and each agent session's
+// current segment. Sessions stay open; if the daemon keeps running, their
+// next segment starts at now.
+func (t *Tracker) Flush(now time.Time) {
 	t.closeSpan(t.human, model.IntervalHumanState)
 	t.closeSpan(t.presence, model.IntervalPresence)
 	t.human, t.presence = nil, nil
+	for _, s := range t.sessions {
+		t.restart(s, s.State, now)
+	}
 }
 
 func (t *Tracker) emit(iv model.Interval) {

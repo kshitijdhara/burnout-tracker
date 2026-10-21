@@ -3,7 +3,8 @@
 // the daemon accepts the current version and the one before it, ignores
 // unknown fields, and rejects anything oversized or malformed.
 //
-// The JSON Schema for each version lives in /schemas.
+// The JSON Schema for each version lives in schemas/v<N>/; a test keeps it
+// in step with the validation here.
 package wire
 
 import (
@@ -12,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 // Version is the message version this build sends.
@@ -23,6 +26,9 @@ const MinVersion = 1
 
 // MaxMessageBytes caps a single message. Larger input is rejected unread.
 const MaxMessageBytes = 4096
+
+// MaxPathBytes caps the cwd field.
+const MaxPathBytes = 2048
 
 // Kinds of message.
 const (
@@ -157,6 +163,18 @@ func (s *ShellCommand) validate() error {
 	if s.StartMs <= 0 || s.EndMs < s.StartMs {
 		return fmt.Errorf("%w: times", ErrInvalidData)
 	}
+	return validCwd(s.Cwd)
+}
+
+// validCwd accepts an empty or absolute, reasonably short path. Paths are
+// only ever turned into an HMAC'd project key, never stored.
+func validCwd(cwd string) error {
+	if cwd == "" {
+		return nil
+	}
+	if len(cwd) > MaxPathBytes || !filepath.IsAbs(cwd) || strings.ContainsRune(cwd, 0) {
+		return fmt.Errorf("%w: cwd", ErrInvalidData)
+	}
 	return nil
 }
 
@@ -173,5 +191,5 @@ func (a *AgentHook) validate() error {
 	case a.AtMs <= 0:
 		return fmt.Errorf("%w: at_ms", ErrInvalidData)
 	}
-	return nil
+	return validCwd(a.Cwd)
 }

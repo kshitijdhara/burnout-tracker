@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
@@ -87,5 +88,57 @@ func TestProjectRootCacheBounded(t *testing.T) {
 	}
 	if len(r.cache) > rootCacheSize {
 		t.Fatalf("cache grew to %d", len(r.cache))
+	}
+}
+
+func TestResolveNeverBlocksPastTimeout(t *testing.T) {
+	release := make(chan struct{})
+	r := NewRoots()
+	r.find = func(string) string { <-release; return "/slow-root" }
+	defer close(release)
+
+	dir := filepath.Join(string(filepath.Separator), "mnt", "hung", "x")
+	start := time.Now()
+	if got := r.Resolve(dir, 20*time.Millisecond); got != dir {
+		t.Fatalf("got %q, want the dir itself on timeout", got)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("Resolve blocked past its timeout")
+	}
+	// With every lookup slot stuck, further calls return at once.
+	for range maxLookups + 2 {
+		d := filepath.Join(dir, "more")
+		if got := r.Resolve(d, 10*time.Millisecond); got != d {
+			t.Fatalf("got %q", got)
+		}
+	}
+}
+
+func TestResolveRejectsBadInput(t *testing.T) {
+	r := NewRoots()
+	long := string(filepath.Separator) + strings.Repeat("a", maxDirLen)
+	for _, d := range []string{"relative/dir", "", long} {
+		if got := r.Resolve(d, time.Second); got != "" {
+			t.Errorf("Resolve(%.20q) = %q, want empty", d, got)
+		}
+	}
+}
+
+func TestResolveUsesCacheAndFindsRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRoots()
+	if got := r.Resolve(sub, time.Second); got != root {
+		t.Fatalf("got %q, want %q", got, root)
+	}
+	r.find = func(string) string { t.Fatal("cache miss"); return "" }
+	if got := r.Resolve(sub, time.Second); got != root {
+		t.Fatalf("cached: got %q", got)
 	}
 }

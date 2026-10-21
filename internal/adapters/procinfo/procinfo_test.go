@@ -62,3 +62,24 @@ func TestRealProcess(t *testing.T) {
 		t.Fatalf("Name(-1) = %v", err)
 	}
 }
+
+func TestLineage(t *testing.T) {
+	var info Info
+	lin, err := info.Lineage(os.Getpid(), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anc, err := info.Ancestors(os.Getpid(), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lin) == 0 || lin[0].PID != os.Getppid() || lin[0].Name == "" {
+		t.Fatalf("lineage = %+v", lin)
+	}
+	if len(lin) != len(anc) {
+		t.Fatalf("lineage %d entries, ancestors %d", len(lin), len(anc))
+	}
+	if _, err := info.Lineage(0, 4); !errors.Is(err, ErrNoProcess) {
+		t.Fatalf("Lineage(0) = %v", err)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
+
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
@@ -43,12 +45,12 @@ type fakeProcs struct {
 	names     map[int]string
 }
 
-func (f fakeProcs) Ancestors(int, int) ([]int, error) { return f.ancestors, nil }
-func (f fakeProcs) Name(pid int) (string, error) {
-	if n, ok := f.names[pid]; ok {
-		return n, nil
+func (f fakeProcs) Lineage(int, int) ([]procinfo.Proc, error) {
+	out := make([]procinfo.Proc, len(f.ancestors))
+	for i, pid := range f.ancestors {
+		out[i] = procinfo.Proc{PID: pid, Name: f.names[pid]}
 	}
-	return "", errors.New("no such process")
+	return out, nil
 }
 
 func TestParsePayloadAllowlist(t *testing.T) {
@@ -198,14 +200,16 @@ func TestKindFor(t *testing.T) {
 		"Notification":      model.AgentNotification,
 		"Stop":              model.AgentStop,
 		"StopFailure":       model.AgentStopFailure,
-		"SubagentStop":      model.AgentSubagentStop,
 	}
 	for in, want := range tests {
 		if got, ok := KindFor(in); !ok || got != want {
 			t.Errorf("KindFor(%q) = %q, %v", in, got, ok)
 		}
 	}
-	if _, ok := KindFor("PreCompact"); ok {
-		t.Error("unexpected kind for unmapped event")
+	// SubagentStop is ignored by the tracker, so it isn't mapped or registered.
+	for _, unmapped := range []string{"PreCompact", "SubagentStop"} {
+		if _, ok := KindFor(unmapped); ok {
+			t.Errorf("unexpected kind for unmapped event %q", unmapped)
+		}
 	}
 }

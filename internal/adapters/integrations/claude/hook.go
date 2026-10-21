@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
+
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
@@ -18,10 +20,11 @@ const AgentName = "claude"
 // (hook → shell → claude is typical).
 const ancestorLimit = 8
 
-// Procs answers the process-tree questions Run needs.
+// Procs answers the process-tree question Run needs: this hook's ancestors
+// with their names, from one view of the process table (one snapshot on
+// Windows, which keeps the hook within its time budget).
 type Procs interface {
-	Ancestors(pid, limit int) ([]int, error)
-	Name(pid int) (string, error)
+	Lineage(pid, limit int) ([]procinfo.Proc, error)
 }
 
 var kinds = map[string]model.AgentEventKind{
@@ -34,7 +37,6 @@ var kinds = map[string]model.AgentEventKind{
 	"Notification":      model.AgentNotification,
 	"Stop":              model.AgentStop,
 	"StopFailure":       model.AgentStopFailure,
-	"SubagentStop":      model.AgentSubagentStop,
 }
 
 // KindFor maps a Claude Code hook event name to the domain's event kind.
@@ -80,10 +82,10 @@ func Run(stdin io.Reader, now func() time.Time, send func(wire.Message) error, p
 // hook's parent.
 func agentPID(procs Procs) int {
 	if procs != nil {
-		if anc, err := procs.Ancestors(os.Getpid(), ancestorLimit); err == nil {
-			for _, pid := range anc {
-				if name, err := procs.Name(pid); err == nil && isClaude(name) {
-					return pid
+		if lineage, err := procs.Lineage(os.Getpid(), ancestorLimit); err == nil {
+			for _, p := range lineage {
+				if isClaude(p.Name) {
+					return p.PID
 				}
 			}
 		}

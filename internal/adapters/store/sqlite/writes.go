@@ -14,6 +14,9 @@ import (
 // window that already exists is added to, so partial minutes flushed in
 // separate batches sum correctly.
 func (s *Store) WriteRollups(ctx context.Context, rs []model.MinuteRollup) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if len(rs) == 0 {
 		return nil
 	}
@@ -43,6 +46,9 @@ func (s *Store) WriteRollups(ctx context.Context, rs []model.MinuteRollup) error
 
 // WriteIntervals stores timeline intervals.
 func (s *Store) WriteIntervals(ctx context.Context, is []model.Interval) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	if len(is) == 0 {
 		return nil
 	}
@@ -73,6 +79,9 @@ func (s *Store) WriteIntervals(ctx context.Context, is []model.Interval) error {
 // WriteMonitorSnapshot records the monitor topology (count, resolutions,
 // arrangement) as of at.
 func (s *Store) WriteMonitorSnapshot(ctx context.Context, at time.Time, topology string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO monitor_snapshots (ts_ms, topology) VALUES (?, ?)
 		 ON CONFLICT (ts_ms) DO UPDATE SET topology = excluded.topology`, at.UnixMilli(), topology)
@@ -84,6 +93,9 @@ func (s *Store) WriteMonitorSnapshot(ctx context.Context, at time.Time, topology
 
 // WriteHealth stores the day's health SLIs as JSON, replacing any earlier value.
 func (s *Store) WriteHealth(ctx context.Context, logicalDay, slisJSON string) error {
+	if err := s.writable(); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO health_daily (logical_day, slis) VALUES (?, ?)
 		 ON CONFLICT (logical_day) DO UPDATE SET slis = excluded.slis`, logicalDay, slisJSON)

@@ -15,8 +15,17 @@ func opts(t *testing.T, rc string) InstallOptions {
 		RCPath:    rc,
 		ScriptDir: filepath.Join(t.TempDir(), "hooks"),
 		BinPath:   "/opt/burn out/bin/burnout", // a space and nothing else exotic
+		BackupDir: backupDirFor(rc),
 		Now:       func() time.Time { return time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC) },
 	}
+}
+
+// backupDirFor keeps backups in their own directory, away from the rc file.
+func backupDirFor(rc string) string { return filepath.Join(filepath.Dir(rc), "backups") }
+
+func backupsOf(rc string) []string {
+	b, _ := filepath.Glob(filepath.Join(backupDirFor(rc), "*.bak"))
+	return b
 }
 
 func read(t *testing.T, path string) string {
@@ -99,7 +108,7 @@ func TestInstallPreservesModeAndBacksUp(t *testing.T) {
 	if fi.Mode().Perm() != 0o640 {
 		t.Fatalf("mode = %v, want 0640", fi.Mode().Perm())
 	}
-	backups, _ := filepath.Glob(rc + ".burnout-backup-*")
+	backups := backupsOf(rc)
 	if len(backups) != 1 || read(t, backups[0]) != "setopt autocd\n" {
 		t.Fatalf("backups = %v", backups)
 	}

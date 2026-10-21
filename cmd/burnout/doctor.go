@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -27,10 +28,13 @@ func runDoctor(ctx context.Context, _ []string) error {
 	}
 
 	check("consent recorded", hasConsent(), "run `burnout setup`")
-	if err := paths.CheckPrivate(dataDir); err != nil {
+	switch err := paths.CheckPrivate(dataDir); {
+	case errors.Is(err, paths.ErrUnverified):
+		fmt.Println("  ?  data dir is owner-only: not verified on this platform")
+	case err != nil:
 		check("data dir is owner-only", false, err.Error())
-	} else {
-		check("data dir is owner-only", true, dataDir)
+	default:
+		check("data dir is owner-only", true, "")
 	}
 
 	pctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -72,7 +76,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		}
 	}
 
-	if store, err := sqlite.Open(ctx, dataDir); err == nil {
+	if store, err := sqlite.OpenReadOnly(ctx, dataDir); err == nil {
 		defer func() { _ = store.Close() }()
 		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
 		if h, err := store.Health(ctx, day); err == nil && h != "" {

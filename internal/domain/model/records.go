@@ -55,6 +55,7 @@ type IntervalAttrs struct {
 	Reason     string `json:"reason,omitempty"` // presence reason: input | video | call
 	Tools      int    `json:"tools,omitempty"`  // tool calls during an agent working segment
 	Agent      string `json:"agent,omitempty"`
+	Group      string `json:"group,omitempty"` // shell command group: vcs, build, infra, …
 }
 
 // LogicalDay returns the local calendar day t belongs to, where a day starts

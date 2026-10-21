@@ -277,3 +277,12 @@ func BenchmarkTick20Windows(b *testing.B) {
 		e.Tick(Input{Snapshot: model.Snapshot{At: at, Windows: ws, PointerWindow: 3, Keys: 1, InputCountsOn: true}})
 	}
 }
+
+func TestRollupsSkipAbsence(t *testing.T) {
+	r := NewRollups(4 * time.Hour)
+	s := model.Snapshot{At: t0, Windows: []model.Window{win(1, true, 1)}, Locked: true}
+	r.Add(Result{At: t0, Dt: time.Second, Presence: 0}, s, func(model.Window) Identity { return Identity{Key: "k"} })
+	if rows := r.Flush(t0.Add(time.Hour)); len(rows) != 0 {
+		t.Fatalf("rows written while absent: %+v", rows)
+	}
+}

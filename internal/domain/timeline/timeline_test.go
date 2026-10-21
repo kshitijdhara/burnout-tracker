@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -143,7 +144,7 @@ func TestNoHumanTimelineWithoutSessions(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		tr.OnTick(result(i, 1, map[model.WindowID]float64{1: 1}, 1, true), nil)
 	}
-	tr.Flush()
+	tr.Flush(at(10))
 	if got := states(tr.Drain(), model.IntervalHumanState); len(got) != 0 {
 		t.Fatalf("human intervals without agent sessions: %v", got)
 	}
@@ -179,7 +180,7 @@ func TestOneHumanInvariant(t *testing.T) {
 		tr.Advance(at(sec))
 		all = append(all, tr.Drain()...)
 	}
-	tr.Flush()
+	tr.Flush(at(sec))
 	all = append(all, tr.Drain()...)
 
 	human := filter(all, model.IntervalHumanState)
@@ -273,12 +274,62 @@ func TestSplitAtRollover(t *testing.T) {
 }
 
 func TestShellInterval(t *testing.T) {
-	ivs := ShellInterval(model.ShellCommand{Argv0: "git", Subcommand: "push", ExitCode: 1, Start: at(0), End: at(3), ProjectKey: "p"}, "vcs", 4*time.Hour)
-	if len(ivs) != 1 || *ivs[0].Attrs.ExitCode != 1 || ivs[0].Category != "vcs" || ivs[0].Attrs.Argv0 != "git" {
+	ivs := ShellInterval(model.ShellCommand{Argv0: "git", Subcommand: "push", ExitCode: 1, Start: at(0), End: at(3), ProjectKey: "p"}, classify.CmdVCS, 4*time.Hour)
+	if len(ivs) != 1 || *ivs[0].Attrs.ExitCode != 1 || ivs[0].Attrs.Group != "vcs" || ivs[0].Category != "" || ivs[0].Attrs.Argv0 != "git" {
 		t.Fatalf("got %+v", ivs)
 	}
 	// Zero-duration commands still produce a (1 ms) interval.
-	if ivs := ShellInterval(model.ShellCommand{Argv0: "cd", Start: at(0), End: at(0)}, "other", 4*time.Hour); len(ivs) != 1 {
+	if ivs := ShellInterval(model.ShellCommand{Argv0: "cd", Start: at(0), End: at(0)}, classify.CmdOther, 4*time.Hour); len(ivs) != 1 {
 		t.Fatal("instant command dropped")
+	}
+}
+
+// Esc mid-turn means no Stop; the next prompt must still close the old turn.
+func TestPromptClosesInterruptedTurn(t *testing.T) {
+	tr := New(DefaultParams())
+	tr.OnAgent(ev(0, "s", model.AgentPromptSubmit))
+	tr.OnAgent(ev(5, "s", model.AgentToolStart))
+	tr.OnAgent(ev(120, "s", model.AgentPromptSubmit)) // user pressed Esc, then asked again
+	ivs := filter(tr.Drain(), model.IntervalAgentState)
+	if len(ivs) != 1 || !ivs[0].End.Equal(at(120)) || ivs[0].Attrs.Tools != 1 {
+		t.Fatalf("first turn not closed at the second prompt: %+v", ivs)
+	}
+	if s := tr.sessions["s"]; s.State != AgentWorking || !s.since.Equal(at(120)) || s.tools != 0 {
+		t.Fatalf("second turn not started fresh: %+v", s)
+	}
+}
+
+func TestFlushClosesOpenAgentSegments(t *testing.T) {
+	tr := New(DefaultParams())
+	tr.OnAgent(ev(0, "s", model.AgentPromptSubmit))
+	tr.Flush(at(600))
+	ivs := filter(tr.Drain(), model.IntervalAgentState)
+	if len(ivs) != 1 || ivs[0].Attrs.State != AgentWorking || ivs[0].End.Sub(ivs[0].Start) != 10*time.Minute {
+		t.Fatalf("open working segment lost on flush: %+v", ivs)
+	}
+	tr.OnAgent(ev(700, "s", model.AgentStop))
+	ivs = filter(tr.Drain(), model.IntervalAgentState)
+	if len(ivs) != 1 || !ivs[0].Start.Equal(at(600)) {
+		t.Fatalf("segment after flush should start at the flush: %+v", ivs)
+	}
+}
+
+func TestSessionCapEvictsLeastRecent(t *testing.T) {
+	p := DefaultParams()
+	p.MaxSessions = 3
+	tr := New(p)
+	for i, k := range []string{"a", "b", "c", "d"} {
+		tr.OnAgent(ev(i*10, k, model.AgentPromptSubmit))
+	}
+	if len(tr.sessions) != 3 || tr.sessions["a"] != nil {
+		t.Fatalf("expected a to be evicted, have %d sessions", len(tr.sessions))
+	}
+}
+
+func TestSplitAtRolloverIsBounded(t *testing.T) {
+	end := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	parts := SplitAtRollover(model.Interval{Start: time.UnixMilli(1), End: end, Kind: model.IntervalShellCmd}, 4*time.Hour)
+	if len(parts) > MaxSplitDays+1 {
+		t.Fatalf("1970→now split into %d pieces", len(parts))
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
@@ -52,15 +53,70 @@ var projectMarkers = []string{".git", ".hg", ".jj"}
 
 const rootCacheSize = 1024
 
+// maxDirLen bounds the directories Resolve accepts; anything longer is not
+// a real working directory.
+const maxDirLen = 4096
+
+// maxLookups bounds concurrent filesystem walks in Resolve, so a hung mount
+// can strand at most this many goroutines.
+const maxLookups = 4
+
 // Roots finds project roots, caching results because shell commands in the
 // same directory are frequent.
 type Roots struct {
 	mu    sync.Mutex
 	cache map[string]string
+
+	find    func(dir string) string // findRoot, replaceable in tests
+	lookups chan struct{}           // semaphore for Resolve
 }
 
 // NewRoots returns an empty project-root cache.
-func NewRoots() *Roots { return &Roots{cache: make(map[string]string)} }
+func NewRoots() *Roots {
+	return &Roots{cache: make(map[string]string), find: findRoot, lookups: make(chan struct{}, maxLookups)}
+}
+
+// Resolve is ProjectRoot for untrusted input on a latency-sensitive path:
+// it never blocks longer than timeout. A cache hit returns at once.
+// Otherwise the filesystem walk runs in a goroutine; if it doesn't finish in
+// time, or maxLookups walks are already in flight (say, a hung NFS mount),
+// Resolve returns the cleaned dir itself. The walk keeps running and fills
+// the cache when it completes. Relative or oversized dirs return "", which
+// callers treat as "no project".
+func (r *Roots) Resolve(dir string, timeout time.Duration) string {
+	if len(dir) > maxDirLen || !filepath.IsAbs(dir) {
+		return ""
+	}
+	dir = filepath.Clean(dir)
+	if root, ok := r.cached(dir); ok {
+		return root
+	}
+	select {
+	case r.lookups <- struct{}{}:
+	default:
+		return dir
+	}
+	done := make(chan string, 1)
+	go func() {
+		defer func() { <-r.lookups }()
+		done <- r.ProjectRoot(dir)
+	}()
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case root := <-done:
+		return root
+	case <-t.C:
+		return dir
+	}
+}
+
+func (r *Roots) cached(dir string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	root, ok := r.cache[dir]
+	return root, ok
+}
 
 // ProjectRoot returns the nearest ancestor of dir (including dir) that
 // contains .git, .hg or .jj, or dir itself when none does. The cache is
@@ -68,14 +124,11 @@ func NewRoots() *Roots { return &Roots{cache: make(map[string]string)} }
 // enough for a working set of a few projects.
 func (r *Roots) ProjectRoot(dir string) string {
 	dir = filepath.Clean(dir)
-	r.mu.Lock()
-	if root, ok := r.cache[dir]; ok {
-		r.mu.Unlock()
+	if root, ok := r.cached(dir); ok {
 		return root
 	}
-	r.mu.Unlock()
 
-	root := findRoot(dir)
+	root := r.find(dir)
 
 	r.mu.Lock()
 	if len(r.cache) >= rootCacheSize {

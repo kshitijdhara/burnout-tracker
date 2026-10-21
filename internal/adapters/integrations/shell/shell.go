@@ -45,8 +45,6 @@ func RenderZsh(binPath string) string {
 	return strings.Replace(s, subcmdsPlaceholder, zshSubcommandTable(), 1)
 }
 
-// quote single-quotes s for POSIX shells and zsh.
-
 // EmitFromEnv builds the wire message for one finished command from the
 // variables the hook set. cwd is the emitter's working directory, which it
 // inherits from the shell. Invalid command names are dropped rather than

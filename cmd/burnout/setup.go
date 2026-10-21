@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 )
 
@@ -33,12 +34,14 @@ Details: docs/privacy-and-security.md
 // runSetup is the interactive first run. Collection does not start until
 // the logged-in user has read the summary and typed "yes" (AC-3). There is
 // deliberately no flag to skip this (AC-2).
-func runSetup(_ context.Context, _ []string) error {
+func runSetup(ctx context.Context, _ []string) error {
 	fi, err := os.Stdin.Stat()
 	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return errors.New("setup must be run interactively in a terminal")
 	}
-	fmt.Print(summary, "\nType \"yes\" to consent and start collecting: ")
+	fmt.Print(summary)
+	warnIfUnencrypted(ctx)
+	fmt.Print("\nType \"yes\" to consent and start collecting: ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return err
@@ -69,4 +72,23 @@ func hasConsent() bool {
 	}
 	_, err = os.Stat(filepath.Join(dir, consentFile))
 	return err == nil
+}
+
+// warnIfUnencrypted explains the risk when disk encryption is off
+// (privacy & security §7.1: onboarding MUST check it). Install isn't blocked.
+func warnIfUnencrypted(ctx context.Context) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return
+	}
+	state, _, _ := fde.Status(ctx, filepath.Dir(dir))
+	switch state {
+	case fde.Disabled:
+		fmt.Println("\n⚠  Disk encryption is OFF. This app relies on FileVault, BitLocker or")
+		fmt.Println("   LUKS to protect your data if this device is lost or stolen. Please")
+		fmt.Println("   turn it on. You can continue, and `burnout doctor` will keep reminding you.")
+	case fde.Unknown:
+		fmt.Println("\nCouldn't tell whether disk encryption is on. Please check that FileVault,")
+		fmt.Println("BitLocker or LUKS is enabled; this app relies on it to protect your data.")
+	}
 }

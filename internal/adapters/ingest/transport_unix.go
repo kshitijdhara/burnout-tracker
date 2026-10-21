@@ -80,30 +80,41 @@ func clearStale(ctx context.Context, path string) error {
 	return nil
 }
 
+// checkAddress refuses to send to a socket whose directory another user
+// could control (for example a misconfigured XDG_RUNTIME_DIR=/tmp), so hook
+// data never reaches someone else's listener.
+func checkAddress(addr string) error {
+	return paths.CheckOwnedPrivateDir(filepath.Dir(addr))
+}
+
 func dial(ctx context.Context, addr string) (net.Conn, error) {
 	var d net.Dialer
 	return d.DialContext(ctx, "unix", addr)
 }
 
-// checkPeer rejects connections from any user other than the daemon's own.
-func checkPeer(c net.Conn) error {
+// checkPeer rejects connections from any user other than the daemon's own
+// and returns the peer's PID for per-source limits.
+func checkPeer(c net.Conn) (int, error) {
 	uc, ok := c.(*net.UnixConn)
 	if !ok {
-		return errPeerRejected
+		return 0, errPeerRejected
 	}
 	raw, err := uc.SyscallConn()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	var uid uint32
-	var credErr error
-	if err := raw.Control(func(fd uintptr) { uid, credErr = peerUID(int(fd)) }); err != nil {
-		return err
+	var (
+		uid     uint32
+		pid     int
+		credErr error
+	)
+	if err := raw.Control(func(fd uintptr) { uid, pid, credErr = peerCred(int(fd)) }); err != nil {
+		return 0, err
 	}
 	if credErr != nil {
-		return fmt.Errorf("%w: %w", errPeerRejected, credErr)
+		return 0, fmt.Errorf("%w: %w", errPeerRejected, credErr)
 	}
-	return sameUser(uid, os.Getuid())
+	return pid, sameUser(uid, os.Getuid())
 }
 
 func sameUser(peer uint32, self int) error {

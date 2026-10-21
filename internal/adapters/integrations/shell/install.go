@@ -23,6 +23,7 @@ type InstallOptions struct {
 	RCPath    string // e.g. ~/.zshrc; may be a symlink
 	ScriptDir string // where the rendered script is written, e.g. <config dir>/hooks
 	BinPath   string // absolute path of the burnout binary
+	BackupDir string // where the pre-edit copy of the rc file goes (the app's private data dir)
 	Now       func() time.Time
 }
 
@@ -33,14 +34,14 @@ func (o InstallOptions) ScriptPath() string { return filepath.Join(o.ScriptDir, 
 // in the rc file. Running it again is a no-op apart from refreshing the
 // script.
 func Install(o InstallOptions) error {
-	if o.RCPath == "" || o.ScriptDir == "" || o.BinPath == "" || o.Now == nil {
+	if o.RCPath == "" || o.ScriptDir == "" || o.BinPath == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("shell: incomplete install options")
 	}
 	// Owner-only: the user's own shell sources it, nobody else needs to read it.
 	if err := fileedit.WriteAtomic(o.ScriptPath(), []byte(RenderZsh(o.BinPath)), 0o600); err != nil {
 		return fmt.Errorf("shell: write hook script: %w", err)
 	}
-	return editRC(o.RCPath, o.Now(), func(content []byte) []byte {
+	return editRC(o.RCPath, o.BackupDir, o.Now(), func(content []byte) []byte {
 		return withBlock(content, block(o.ScriptPath()))
 	})
 }
@@ -48,10 +49,10 @@ func Install(o InstallOptions) error {
 // Uninstall removes exactly the marked block (and the blank line Install
 // added before it) and deletes the hook script.
 func Uninstall(o InstallOptions) error {
-	if o.RCPath == "" || o.Now == nil {
+	if o.RCPath == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("shell: incomplete install options")
 	}
-	if err := editRC(o.RCPath, o.Now(), withoutBlock); err != nil {
+	if err := editRC(o.RCPath, o.BackupDir, o.Now(), withoutBlock); err != nil {
 		return err
 	}
 	if o.ScriptDir != "" {
@@ -62,7 +63,7 @@ func Uninstall(o InstallOptions) error {
 	return nil
 }
 
-func editRC(rcPath string, now time.Time, edit func([]byte) []byte) error {
+func editRC(rcPath, backupDir string, now time.Time, edit func([]byte) []byte) error {
 	target, err := fileedit.ResolveTarget(rcPath)
 	if err != nil {
 		return fmt.Errorf("shell: resolve %s: %w", rcPath, err)
@@ -76,7 +77,7 @@ func editRC(rcPath string, now time.Time, edit func([]byte) []byte) error {
 		return nil
 	}
 	if existed {
-		if err := fileedit.Backup(target, old, now); err != nil {
+		if _, err := fileedit.Backup(backupDir, target, old, now); err != nil {
 			return err
 		}
 	}

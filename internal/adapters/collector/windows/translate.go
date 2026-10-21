@@ -44,11 +44,16 @@ type rawWindow struct {
 
 // rawState is everything read from Win32 for one snapshot.
 type rawState struct {
-	at            time.Time
-	windows       []rawWindow // z-order, topmost first
-	monitors      []model.Rect
-	foreground    uint64 // root window of the foreground window, 0 if none
-	pointerRoot   uint64 // root window under the pointer, 0 if none
+	at       time.Time
+	windows  []rawWindow // z-order, topmost first
+	monitors []model.Rect
+	// foreground and pointer are owner chains: the root of the foreground
+	// window (or the window under the pointer), then its owner, its owner's
+	// owner and so on, ending at the root owner. An owned window such as a
+	// Save As or Find dialog is never a candidate window itself, so focus and
+	// pointer go to the first window in the chain that is.
+	foreground    []uint64
+	pointer       []uint64
 	pointerMoved  bool
 	idleFor       time.Duration
 	locked        bool
@@ -64,10 +69,17 @@ func buildSnapshot(s rawState) model.Snapshot {
 		rects[i] = w.bounds
 	}
 	visible := geometry.VisibleFractions(rects, s.monitors)
+	listed := make(map[uint64]bool, len(s.windows))
+	for _, w := range s.windows {
+		listed[w.handle] = true
+	}
+	foreground := firstListed(s.foreground, listed)
+	pointer := firstListed(s.pointer, listed)
 
 	snap := model.Snapshot{
 		At:            s.at,
 		Windows:       make([]model.Window, 0, len(s.windows)),
+		Monitors:      s.monitors,
 		PointerMoved:  s.pointerMoved,
 		IdleFor:       s.idleFor,
 		Keys:          s.keys,
@@ -76,7 +88,7 @@ func buildSnapshot(s rawState) model.Snapshot {
 		InputCountsOn: s.inputCountsOn,
 	}
 	for i, w := range s.windows {
-		focused := w.handle != 0 && w.handle == s.foreground
+		focused := w.handle != 0 && w.handle == foreground
 		if visible[i] == 0 && !focused {
 			continue
 		}
@@ -90,11 +102,22 @@ func buildSnapshot(s rawState) model.Snapshot {
 			Focused: focused,
 			Title:   w.title,
 		})
-		if w.handle == s.pointerRoot {
+		if w.handle != 0 && w.handle == pointer {
 			snap.PointerWindow = model.WindowID(w.handle)
 		}
 	}
 	return snap
+}
+
+// firstListed returns the first handle in an owner chain that is one of
+// the snapshot's candidate windows, or 0.
+func firstListed(chain []uint64, listed map[uint64]bool) uint64 {
+	for _, h := range chain {
+		if h != 0 && listed[h] {
+			return h
+		}
+	}
+	return 0
 }
 
 // rectFromLTRB converts a Win32 RECT (left, top, right, bottom) to a
@@ -166,5 +189,8 @@ func capabilities(opts Options, inputCountsOn bool) ports.Capabilities {
 		Idle:        true,
 		InputCounts: opts.InputCounts && inputCountsOn,
 		Titles:      opts.Titles,
+		Limitations: []string{
+			"video and call detection not implemented (presence relies on input and idle time)",
+		},
 	}
 }

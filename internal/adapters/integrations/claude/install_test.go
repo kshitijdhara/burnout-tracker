@@ -19,6 +19,7 @@ func installOpts(path, version string) InstallOptions {
 		SettingsPath: path,
 		Command:      ourCmd,
 		Version:      version,
+		BackupDir:    filepath.Join(filepath.Dir(path), "backups"),
 		Now:          func() time.Time { return time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC) },
 	}
 }
@@ -121,7 +122,7 @@ func TestInstallUninstallExactRestore(t *testing.T) {
 			if again := readFile(t, path); again != installed {
 				t.Fatal("second install changed the file")
 			}
-			if backups, _ := filepath.Glob(path + ".burnout-backup-*"); len(backups) != 1 {
+			if backups, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "backups", "*.bak")); len(backups) != 1 {
 				t.Fatalf("backups = %v", backups)
 			}
 
@@ -221,7 +222,7 @@ func TestRefusesInvalidSettings(t *testing.T) {
 		if got := readFile(t, path); got != bad {
 			t.Fatalf("invalid file was modified: %q", got)
 		}
-		if backups, _ := filepath.Glob(path + ".burnout-backup-*"); len(backups) != 0 {
+		if backups, _ := filepath.Glob(filepath.Join(filepath.Dir(path), "backups", "*.bak")); len(backups) != 0 {
 			t.Fatal("backup written for a refused file")
 		}
 	}
@@ -265,8 +266,102 @@ func TestEventsVersionGating(t *testing.T) {
 }
 
 func TestCommandForQuotes(t *testing.T) {
-	if got := CommandFor("/a/it's/burnout"); got != `'/a/it'\''s/burnout' hook claude` {
+	got := CommandFor("/a/it's/burnout")
+	if got != `'/a/it'\''s/burnout' hook claude || true` {
 		t.Fatalf("got %s", got)
+	}
+	if !isOurs(got) {
+		t.Fatal("CommandFor output is not recognised as ours")
+	}
+}
+
+func TestIsOurs(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want bool
+	}{
+		{`'/opt/burnout/bin/burnout' hook claude`, true},
+		{`'/opt/burnout/bin/burnout' hook claude || true`, true},
+		{`'/Users/me/.local/bin/burnout' hook claude || true`, true},
+		{`'C:\Users\me\burnout.exe' hook claude || true`, true},
+		{`/usr/local/bin/burnout hook claude`, true},
+		{`'/a/it'\''s/burnout' hook claude`, true},
+		{`'/opt/other/notburnout' hook claude`, false},
+		{`'/opt/burnout/bin/burnout' hook codex`, false},
+		{`'/opt/burnout/bin/burnout' hook claude; rm -rf ~`, false},
+		{`echo hi`, false},
+		{`'/unterminated hook claude`, false},
+		{`'/a/burnout' '/b' hook claude`, false},
+	}
+	for _, tc := range tests {
+		if got := isOurs(tc.cmd); got != tc.want {
+			t.Errorf("isOurs(%q) = %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+// A binary that moved (rebuilt elsewhere, reinstalled) must replace the old
+// entry instead of adding a second one, and uninstall from the new path must
+// remove the old entry too. Other hooks stay untouched.
+func TestInstallAfterBinaryMoved(t *testing.T) {
+	path := writeFixture(t, `{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "notify-send done"
+          }
+        ]
+      }
+    ]
+  }
+}
+`)
+	old := installOpts(path, "")
+	old.Command = CommandFor("/old/place/burnout")
+	if err := Install(old); err != nil {
+		t.Fatal(err)
+	}
+	moved := installOpts(path, "")
+	moved.Command = CommandFor("/new/place/burnout")
+	if err := Install(moved); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, path)
+	if strings.Contains(got, "/old/place") {
+		t.Fatalf("old entry left behind:\n%s", got)
+	}
+	if n := strings.Count(got, "/new/place/burnout"); n != len(Events("")) {
+		t.Fatalf("%d entries for the new binary, want one per event (%d)", n, len(Events("")))
+	}
+	if !strings.Contains(got, "notify-send done") {
+		t.Fatal("unrelated user hook removed")
+	}
+
+	// Reinstall the old path again, then uninstall with only the new options:
+	// every entry of ours goes, whatever its path.
+	if err := Install(old); err != nil {
+		t.Fatal(err)
+	}
+	if err := Uninstall(moved); err != nil {
+		t.Fatal(err)
+	}
+	got = readFile(t, path)
+	if strings.Contains(got, "burnout") {
+		t.Fatalf("our entries left after uninstall:\n%s", got)
+	}
+	if !strings.Contains(got, "notify-send done") {
+		t.Fatal("unrelated user hook removed by uninstall")
+	}
+}
+
+func TestSubagentStopNotRegistered(t *testing.T) {
+	for _, v := range []string{"", "1.0.0", "2.0.45", "9.9.9"} {
+		if slices.Contains(Events(v), "SubagentStop") {
+			t.Fatalf("Events(%q) registers SubagentStop", v)
+		}
 	}
 }
 

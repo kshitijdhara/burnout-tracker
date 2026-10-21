@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/message.schema.json",
+  "title": "Hook-to-daemon message, version 1",
+  "description": "One message per connection on the daemon's socket or pipe, at most 4096 bytes. Unknown fields are ignored. Kept in step with internal/wire by TestSchemaMatchesValidation.",
+  "type": "object",
+  "required": ["v", "kind"],
+  "properties": {
+    "v": { "const": 1 },
+    "kind": { "enum": ["shell.cmd", "agent.hook", "ping"] },
+    "sent_ms": { "type": "integer" },
+    "shell": { "$ref": "#/$defs/shell" },
+    "agent": { "$ref": "#/$defs/agent" }
+  },
+  "oneOf": [
+    { "properties": { "kind": { "const": "shell.cmd" } }, "required": ["shell"], "not": { "required": ["agent"] } },
+    { "properties": { "kind": { "const": "agent.hook" } }, "required": ["agent"], "not": { "required": ["shell"] } },
+    { "properties": { "kind": { "const": "ping" } }, "not": { "anyOf": [{ "required": ["shell"] }, { "required": ["agent"] }] } }
+  ],
+  "$defs": {
+    "cwd": { "type": "string", "maxLength": 2048, "description": "Absolute path. Turned into an HMAC'd project key on receipt, never stored." },
+    "shell": {
+      "type": "object",
+      "required": ["argv0", "start_ms", "end_ms"],
+      "properties": {
+        "argv0": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$", "description": "Empty when the command did not resolve." },
+        "subcmd": { "type": "string", "pattern": "^[A-Za-z0-9._+-]{1,64}$" },
+        "exit": { "type": "integer" },
+        "start_ms": { "type": "integer", "minimum": 1 },
+        "end_ms": { "type": "integer", "minimum": 1 },
+        "cwd": { "$ref": "#/$defs/cwd" },
+        "tty": { "type": "string" },
+        "shell_pid": { "type": "integer" }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["agent", "event", "at_ms"],
+      "properties": {
+        "agent": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,31}$" },
+        "event": { "type": "string", "pattern": "^[A-Za-z]{1,40}$" },
+        "session_id": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,128}$" },
+        "tool_name": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,128}$" },
+        "cwd": { "$ref": "#/$defs/cwd" },
+        "agent_pid": { "type": "integer" },
+        "at_ms": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
