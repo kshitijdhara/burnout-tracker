@@ -49,11 +49,16 @@ __burnout_preexec() {
   (( i <= n )) || return 0
 
   local cmd=${(Q)w[i]}
+  # A leading ~/ is expanded by hand: ${~cmd} would also glob what was typed.
+  local file=$cmd
+  [[ $file == '~/'* ]] && file=$HOME${file#\~}
   # Keep the name only if it resolves to something runnable. A pasted token
   # that isn't a command must never become argv0. Hash lookups avoid forking.
-  if (( ${+aliases[$cmd]} || ${+functions[$cmd]} || ${+builtins[$cmd]} || ${+reswords[$cmd]} || ${+commands[$cmd]} )); then
+  # reswords is a plain array: (Ie) matches exactly, where a [$cmd]
+  # subscript would evaluate the typed word as arithmetic.
+  if (( ${+aliases[$cmd]} || ${+functions[$cmd]} || ${+builtins[$cmd]} || ${reswords[(Ie)$cmd]} || ${+commands[$cmd]} )); then
     __burnout_argv0=${cmd:t}
-  elif [[ $cmd == */* && -x $cmd && ! -d $cmd ]]; then
+  elif [[ $file == */* && -x $file && ! -d $file ]]; then
     __burnout_argv0=${cmd:t}
   else
     return 0
