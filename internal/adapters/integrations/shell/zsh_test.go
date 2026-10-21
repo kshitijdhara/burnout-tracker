@@ -31,11 +31,14 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	if err := os.Mkdir(out, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	// Each invocation writes its argv and environment to its own file, so
-	// concurrent background emitters don't interleave.
+	// Each invocation writes its argv and environment to its own temp file
+	// and renames it into place when complete, so concurrent background
+	// emitters don't interleave and the test never reads a half-written
+	// record (mktemp creates the file before its contents exist).
 	emitter := filepath.Join(dir, "fake-burnout")
-	script := "#!/bin/sh\nf=$(mktemp " + out + "/rec.XXXXXX)\n" +
-		"{ printf 'ARGS=%s\\n' \"$*\"; env; } > \"$f\"\n"
+	script := "#!/bin/sh\nf=$(mktemp " + out + "/tmp.XXXXXX)\n" +
+		"{ printf 'ARGS=%s\\n' \"$*\"; env; } > \"$f\"\n" +
+		"mv \"$f\" \"$f.rec\"\n"
 	if err := os.WriteFile(emitter, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +65,7 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	deadline := time.Now().Add(3 * time.Second)
 	var files []string
 	for {
-		files, _ = filepath.Glob(filepath.Join(out, "rec.*"))
+		files, _ = filepath.Glob(filepath.Join(out, "*.rec"))
 		if len(files) >= wantRecords || time.Now().After(deadline) {
 			break
 		}
@@ -70,7 +73,7 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	}
 	if wantRecords == 0 {
 		time.Sleep(300 * time.Millisecond) // give a wrongly fired emitter time to show up
-		files, _ = filepath.Glob(filepath.Join(out, "rec.*"))
+		files, _ = filepath.Glob(filepath.Join(out, "*.rec"))
 	}
 	var recs []record
 	for _, f := range files {
