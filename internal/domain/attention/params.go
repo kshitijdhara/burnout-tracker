@@ -38,10 +38,11 @@ type Params struct {
 	ActiveInput time.Duration
 	// After that, presence decays linearly to 0 over an app-aware grace window.
 	GraceDefault, GraceDocs, GraceAgentOutput time.Duration
-	// An idle stretch that ends with the user's input within this long of
-	// its start, with no lock or sleep in between, counts as present in
-	// full (reading, thinking). Longer or interrupted stretches keep the
-	// grace rule. App-aware like the grace windows.
+	// An idle stretch that the user's input ends while the OS idle time,
+	// past ActiveInput, is within this cap, with no lock or sleep in
+	// between, counts as present in full (reading, thinking; ADR-0008).
+	// Longer or interrupted stretches keep the grace rule. App-aware like
+	// the grace windows.
 	ReadingCapDefault, ReadingCapDocs, ReadingCapAgentOutput time.Duration
 
 	// Window of recent input used for the key/scroll signals.

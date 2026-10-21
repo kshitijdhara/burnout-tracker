@@ -286,3 +286,27 @@ func TestRollupsSkipAbsence(t *testing.T) {
 		t.Fatalf("rows written while absent: %+v", rows)
 	}
 }
+
+// A sleeping display means away, unless a call holds presence: listening
+// to a call needs no screen. A lock always means away.
+func TestDisplayAsleep(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		snap   model.Snapshot
+		want   float64
+		reason string
+	}{
+		{"asleep", model.Snapshot{DisplayAsleep: true}, 0, ""},
+		{"asleep in a call", model.Snapshot{DisplayAsleep: true, CallActive: true}, 1, ReasonCall},
+		{"asleep with video", model.Snapshot{DisplayAsleep: true, Windows: []model.Window{{ID: 1, Visible: 1, HasVideo: true}}}, 0, ""},
+		{"locked in a call", model.Snapshot{Locked: true, CallActive: true}, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.snap.At, tc.snap.IdleFor = t0, time.Hour
+			res := New(DefaultParams()).Tick(Input{Snapshot: tc.snap})
+			if res.Presence != tc.want || res.Reason != tc.reason || res.Idle {
+				t.Fatalf("got presence %v %q idle=%v", res.Presence, res.Reason, res.Idle)
+			}
+		})
+	}
+}

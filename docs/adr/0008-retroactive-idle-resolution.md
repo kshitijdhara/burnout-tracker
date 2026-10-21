@@ -27,38 +27,57 @@ How an idle stretch **ends** can tell them apart:
 ## Decision
 
 The engine still computes the grace-rule presence for every tick. Ticks in
-an idle stretch are also marked idle, carry the attention distribution the
-user would have if present, and carry a cap. A pure `attention.Resolver`
-holds idle ticks until the stretch ends, then releases them in order:
+an idle stretch are also marked idle. While the stretch can still be
+confirmed, they also carry the attention distribution the user would have
+if present. A pure `attention.Resolver` holds those ticks until the stretch
+ends, then releases them in order:
 
-- **Confirmed (reading):** the stretch ends with the user's own input, it
-  was contiguous (no sleep gap), and it ended within its cap. Every tick
-  counts as fully present, with reason `reading`.
-- **Unconfirmed:** a lock, display sleep or sleep gap ends the stretch, or
-  it outlasts its cap, or the daemon shuts down mid-stretch. The grace
-  rule's presence stands, exactly as before.
+- **Confirmed:** the user's own input ends the stretch, the stretch was
+  contiguous (no sleep gap), and it is still within its cap. Every tick
+  counts as fully present, with reason `confirmed_idle` (reading or
+  thinking).
+- **Unconfirmed:** the grace rule's presence stands, exactly as before.
+  This covers a lock, a sleeping display or a sleep gap ending the stretch,
+  the stretch outlasting its cap, or the daemon shutting down mid-stretch.
 
-A call or video starting on its own does not confirm a stretch: it isn't
-the user's input.
-
-Caps are app-aware like the grace windows, and scale with the input
-profile:
-- **Documents and browsers:** 8 min.
-- **Terminals with fresh agent output:** 8 min.
-- **Everything else:** 4 min.
+Details:
+- **What confirms:** the user's input, even when it starts a call or video
+  in the same tick (clicking Join or Play). A call or video starting on its
+  own does not confirm.
+- **The cap is measured by the OS idle time**, not by when the daemon first
+  saw the stretch. So a restart, or a display waking on its own after hours
+  idle, can't credit those hours.
+- **The cap is app-aware,** like the grace windows, and scales with the
+  input profile. It is set by the window the user was attending when the
+  stretch began, and grows if that window shows fresh agent output during
+  the stretch (waiting for an agent, then reading its output):
+  - documents and browsers: 8 min;
+  - terminals with fresh agent output: 8 min;
+  - everything else: 4 min.
 
 They are documented defaults, to be fitted from opt-in spot-labels in
 Phase 2.
 
-Calls and visible video still hold presence directly (ADR-0002). On macOS:
+Calls and visible video still hold presence directly (ADR-0002). A call
+holds it even while the display sleeps, since listening needs no screen; a
+lock always means away. On macOS:
 - **Calls:** a regular app (one with a Dock icon) capturing audio, even
-  when its window is covered or on another Space, or any camera in use.
-  Background agents that keep the microphone open, like voice triggers,
-  don't count.
-- **Video:** an app holding a display-sleep assertion.
+  when its window is covered or on another Space. Background agents that
+  keep the microphone open, like voice triggers, don't count. Any camera in
+  use also counts, which can't be tied to an app: an app like OBS keeps it
+  on without a call (a documented limitation). Before macOS 14.2 only the
+  default input device's state is known, and a device that also plays
+  audio (a headset) is ignored so music isn't mistaken for a call.
+- **Video:** a display-sleep assertion from an app or a helper inside its
+  bundle. Command-line tools are left out, so `caffeinate -d` in a terminal
+  doesn't count. A web page using the Screen Wake Lock API still counts as
+  its browser playing video.
 
 None of these signals needs a permission. Helper processes are mapped to
-the app that owns the windows.
+the app that owns the windows. macOS doesn't say which of an app's windows
+holds the call or video, so it goes to the app's most visible window. Media
+is polled every 3 s on its own goroutine, so a stalled system service only
+makes media state stale; it never blocks the daemon.
 
 ## Consequences
 
@@ -70,12 +89,20 @@ the app that owns the windows.
 - **Overcount remains possible:** leaving without locking and returning
   within the cap counts as present. The cap bounds this error.
 - **Results arrive late,** by up to the cap. Rollups are additive upserts,
-  so minutes written late merge correctly. Memory is bounded by the cap,
-  scaled for assistive profiles.
-- **Presence intervals record `reading` as `input`.** It is the tail of
-  input presence, so the data inventory's reason values are unchanged.
-  The daily health record counts seconds of call, video and confirmed
-  reading, so the effect can be measured.
+  so minutes written late merge correctly.
+- **Memory is bounded by the cap,** scaled for assistive profiles. Held
+  ticks keep compact window facts (no titles) and one distribution each.
+- **Held ticks keep their context.** Each carries the agent states from
+  when it was sampled, so a permission prompt or a session ending mid-
+  stretch doesn't rewrite the human timeline before it.
+- **A crash loses the held stretch,** up to the cap, where before it lost
+  at most the last flush interval. A clean shutdown releases it under the
+  grace rule.
+- **Presence intervals record `confirmed_idle` as `input`.** It is the
+  tail of input presence, so the data inventory's reason values are
+  unchanged. The daily health record counts seconds of call, video and
+  confirmed idle (`confirmed_idle_s`), so the effect can be measured.
+  Ticks released after the 04:00 rollover don't count toward the new day.
 - **`burnout timeline`** shows a day minute by minute, so the result can be
   checked against a hand-written log. That is the Phase 0 exit test.
 

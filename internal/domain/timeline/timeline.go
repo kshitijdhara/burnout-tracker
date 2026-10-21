@@ -245,21 +245,44 @@ func (t *Tracker) FreshOutput(now time.Time, sessionWindows map[model.WindowID]s
 	return out
 }
 
+// TickContext is the agent side of one tick, captured when the tick was
+// sampled. Ticks can reach OnTick minutes later (an idle stretch is held
+// until it ends, ADR-0008), and the human state must reflect the agents as
+// they were then, not as they are on release.
+type TickContext struct {
+	// Windows maps terminal windows to the agent session running in them;
+	// when several sessions share a window the caller picks one.
+	Windows map[model.WindowID]string
+	// States is each open session's agent state.
+	States map[string]string
+}
+
+// Context captures the current agent states for a tick sampled now.
+func (t *Tracker) Context(sessionWindows map[model.WindowID]string) TickContext {
+	c := TickContext{Windows: sessionWindows}
+	if len(t.sessions) > 0 {
+		c.States = make(map[string]string, len(t.sessions))
+		for k, s := range t.sessions {
+			c.States[k] = s.State
+		}
+	}
+	return c
+}
+
 // OnTick extends the human and presence timelines with one attention
-// result. sessionWindows maps terminal windows to the agent session running
-// in them; when several sessions share a window the caller picks one.
-func (t *Tracker) OnTick(res attention.Result, sessionWindows map[model.WindowID]string) {
+// result, sampled with the given context.
+func (t *Tracker) OnTick(res attention.Result, c TickContext) {
 	t.tickPresence(res)
-	if len(t.sessions) == 0 {
+	if len(c.States) == 0 {
 		t.closeSpan(t.human, model.IntervalHumanState)
 		t.human = nil
 		return
 	}
-	state, sess := t.humanState(res, sessionWindows)
+	state, sess := humanState(res, c)
 	t.human = t.extend(t.human, model.IntervalHumanState, res, span{state: state, session: sess})
 }
 
-func (t *Tracker) humanState(res attention.Result, sessionWindows map[model.WindowID]string) (state, sessionKey string) {
+func humanState(res attention.Result, c TickContext) (state, sessionKey string) {
 	if res.Presence == 0 {
 		return HumanAway, ""
 	}
@@ -267,13 +290,13 @@ func (t *Tracker) humanState(res attention.Result, sessionWindows map[model.Wind
 	if top == 0 {
 		return HumanUnattributed, ""
 	}
-	key, ok := sessionWindows[top]
-	s := t.sessions[key]
-	if !ok || s == nil {
+	key, ok := c.Windows[top]
+	agentState, open := c.States[key]
+	if !ok || !open {
 		return HumanElsewhere, ""
 	}
 	switch {
-	case s.State == AgentBlocked:
+	case agentState == AgentBlocked:
 		return HumanApproving, key
 	case res.KeyboardActive && res.Focused == top:
 		return HumanComposing, key
@@ -289,7 +312,7 @@ func (t *Tracker) tickPresence(res attention.Result) {
 		return
 	}
 	reason := res.Reason
-	if reason == attention.ReasonGrace || reason == attention.ReasonReading {
+	if reason == attention.ReasonGrace || reason == attention.ReasonConfirmedIdle {
 		reason = attention.ReasonInput // both are the tail of input presence
 	}
 	t.presence = t.extend(t.presence, model.IntervalPresence, res, span{state: "present", reason: reason})

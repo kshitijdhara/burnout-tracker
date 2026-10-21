@@ -15,6 +15,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -77,7 +78,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 			fmt.Printf("  -  limitation: %s\n", l)
 		}
 		if snapErr == nil {
-			fmt.Printf("  *  right now: %s\n", mediaNow(snap))
+			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(nil, nil)))
 		}
 	}
 
@@ -117,15 +118,20 @@ func checkFix(name string, ok bool, fix string) {
 }
 
 // mediaNow describes the calls and video the collector sees at this
-// moment, so detection can be checked during a meeting or a video.
-func mediaNow(snap model.Snapshot) string {
+// moment, so detection can be checked during a meeting or a video. Apps
+// classified as private are not named, as everywhere else.
+func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
 	var calls, video []string
 	for _, w := range snap.Windows {
-		if w.InCall && !slices.Contains(calls, w.AppID) {
-			calls = append(calls, w.AppID)
+		name := w.AppID
+		if rules.App(w.AppID) == model.CategoryPrivate {
+			name = "a private app"
 		}
-		if w.HasVideo && !slices.Contains(video, w.AppID) {
-			video = append(video, w.AppID)
+		if w.InCall && !slices.Contains(calls, name) {
+			calls = append(calls, name)
+		}
+		if w.HasVideo && !slices.Contains(video, name) {
+			video = append(video, name)
 		}
 	}
 	var parts []string

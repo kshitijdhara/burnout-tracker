@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
@@ -416,12 +417,17 @@ func TestDaemonResolvesIdleStretches(t *testing.T) {
 			if n == 0 {
 				n = len(tc.script.idle)
 			}
-			for range n {
+			for i := range n {
 				d.onTick(context.Background())
+				if i%40 == 0 { // the daemon flushes every 15 s, mid-stretch too
+					d.flush(context.Background(), clock.Now(), clock.Now())
+				}
 			}
 			if err := d.shutdown(); err != nil {
 				t.Fatal(err)
 			}
+			// Minutes written early and topped up late add up, as the
+			// store's additive upsert does.
 			attended := 0.0
 			for _, r := range sink.rollups {
 				attended += r.AttendedS
@@ -433,9 +439,23 @@ func TestDaemonResolvesIdleStretches(t *testing.T) {
 			if err := json.Unmarshal([]byte(sink.health), &h); err != nil {
 				t.Fatal(err)
 			}
-			if (h.ReadingS > 0) != tc.wantReadingS {
-				t.Fatalf("health reading_s = %.0f, want reading=%v", h.ReadingS, tc.wantReadingS)
+			if (h.ConfirmedIdleS > 0) != tc.wantReadingS {
+				t.Fatalf("health confirmed_idle_s = %.0f, want reading=%v", h.ConfirmedIdleS, tc.wantReadingS)
 			}
 		})
+	}
+}
+
+// Ticks held across the 04:00 rollover and released after it belong to the
+// previous day, whose counters are already written: they are not added to
+// the new day.
+func TestHealthSkipsTicksFromEarlierDays(t *testing.T) {
+	h := newHealth()
+	h.json("2026-10-22", nil, nil) // the new day has started
+	tick := attention.Result{Dt: time.Second, Presence: 1, Reason: attention.ReasonConfirmedIdle}
+	h.observe(tick, "2026-10-21")
+	h.observe(tick, "2026-10-22")
+	if h.presentS != 1 || h.confirmedIdleS != 1 {
+		t.Fatalf("present %v, confirmed idle %v: want only today's tick", h.presentS, h.confirmedIdleS)
 	}
 }

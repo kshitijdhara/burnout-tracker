@@ -3,11 +3,14 @@
 package darwin
 
 /*
-#cgo LDFLAGS: -framework CoreAudio -framework CoreMediaIO -framework IOKit
+#cgo CFLAGS: -x objective-c -fobjc-arc
+#cgo LDFLAGS: -framework CoreAudio -framework CoreMediaIO -framework IOKit -framework AppKit -framework Foundation
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <libproc.h>
+#include <dispatch/dispatch.h>
 #include <Availability.h>
 #include <CoreAudio/CoreAudio.h>
 #include <CoreMediaIO/CMIOHardware.h>
@@ -16,56 +19,67 @@ package darwin
 
 // Media state is read without any permission and without touching audio or
 // video: only whether a device or process is running, and which process
-// asked the system to keep the display awake.
+// asked the system to keep the display awake. Interpretation (which app,
+// whether it counts) happens in Go; see resolveMedia.
 
 typedef pid_t (*bt_responsible_fn)(pid_t);
 
-// bt_responsible maps a helper process (a browser's audio or GPU process,
-// WebKit's content processes) to the app responsible for it, which owns the
-// windows. The lookup is resolved at run time; without it the pid is kept.
-static pid_t bt_responsible(pid_t pid) {
+// bt_responsible_lookup resolves, once, the function that maps a helper
+// process (a browser's audio or GPU process, WebKit's content processes,
+// a command run in a terminal) to the app responsible for it.
+static bt_responsible_fn bt_responsible_lookup(void) {
 	static bt_responsible_fn fn = NULL;
-	static int looked = 0;
-	if (!looked) {
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
 		fn = (bt_responsible_fn)dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid");
-		looked = 1;
-	}
+	});
+	return fn;
+}
+
+static int32_t bt_responsible(int32_t pid) {
+	bt_responsible_fn fn = bt_responsible_lookup();
 	if (fn == NULL) {
 		return pid;
 	}
-	pid_t r = fn(pid);
-	return r > 0 ? r : pid;
+	pid_t r = fn((pid_t)pid);
+	return r > 0 ? (int32_t)r : pid;
 }
 
 // bt_regular_app reports whether pid is an ordinary app with a Dock icon,
 // as opposed to a background agent (a voice trigger, a menu-bar utility).
-static int bt_regular_app(pid_t pid) {
+static int bt_regular_app(int32_t pid) {
 	@autoreleasepool {
-		NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+		NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:(pid_t)pid];
 		return app != nil && app.activationPolicy == NSApplicationActivationPolicyRegular;
 	}
 }
 
-static int bt_has_responsible(void) {
-	return dlsym(RTLD_DEFAULT, "responsibility_get_pid_responsible_for_pid") != NULL;
+// bt_pid_path writes pid's executable path; returns 0 if unknown.
+static int bt_pid_path(int32_t pid, char *out, int max) {
+	out[0] = '\0';
+	return proc_pidpath((pid_t)pid, out, (uint32_t)max) > 0;
 }
 
-// bt_mic_pids writes the regular apps whose processes are capturing audio
-// input. Background agents that keep the microphone open (voice triggers,
-// dictation utilities) are left out: they are not calls.
-// *supported is 0 where macOS lacks per-process audio objects (before 14.2).
-static int bt_mic_pids(int32_t *out, int max, int *supported) {
-	*supported = 0;
+// bt_media_support reports, without any IPC, whether this Mac has
+// per-process audio objects (macOS 14.2+) and the responsibility lookup.
+static void bt_media_support(int *per_process, int *responsible) {
+	*per_process = 0;
+#if defined(__MAC_14_2) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_14_2
+	if (__builtin_available(macOS 14.2, *)) {
+		*per_process = 1;
+	}
+#endif
+	*responsible = bt_responsible_lookup() != NULL;
+}
+
+// bt_mic_pids writes the processes capturing audio input (macOS 14.2+).
+static int bt_mic_pids(int32_t *out, int max) {
 #if defined(__MAC_14_2) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_14_2
 	if (__builtin_available(macOS 14.2, *)) {
 		AudioObjectPropertyAddress list = {
 			kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 		UInt32 size = 0;
-		if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &list, 0, NULL, &size) != noErr) {
-			return 0;
-		}
-		*supported = 1;
-		if (size == 0) {
+		if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &list, 0, NULL, &size) != noErr || size == 0) {
 			return 0;
 		}
 		AudioObjectID *ids = (AudioObjectID *)malloc(size);
@@ -90,12 +104,8 @@ static int bt_mic_pids(int32_t *out, int max, int *supported) {
 				kAudioProcessPropertyPID, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 			pid_t pid = 0;
 			sz = sizeof pid;
-			if (AudioObjectGetPropertyData(ids[i], &pa, 0, NULL, &sz, &pid) != noErr || pid <= 0) {
-				continue;
-			}
-			pid_t app = bt_responsible(pid);
-			if (bt_regular_app(app)) {
-				out[count++] = (int32_t)app;
+			if (AudioObjectGetPropertyData(ids[i], &pa, 0, NULL, &sz, &pid) == noErr && pid > 0) {
+				out[count++] = (int32_t)pid;
 			}
 		}
 		free(ids);
@@ -106,14 +116,21 @@ static int bt_mic_pids(int32_t *out, int max, int *supported) {
 }
 
 // bt_default_input_running reports whether the default input device is
-// running for any process. A fallback before macOS 14.2: it cannot say
-// which app, and a headset's device also runs for playback.
+// running for any process: the fallback before macOS 14.2, which can't
+// say which app. A device that also plays audio (a headset) is skipped:
+// it runs for music too, which is not a call.
 static int bt_default_input_running(void) {
 	AudioObjectPropertyAddress a = {
 		kAudioHardwarePropertyDefaultInputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 	AudioDeviceID dev = kAudioObjectUnknown;
 	UInt32 sz = sizeof dev;
 	if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &sz, &dev) != noErr || dev == kAudioObjectUnknown) {
+		return 0;
+	}
+	AudioObjectPropertyAddress outStreams = {
+		kAudioDevicePropertyStreams, kAudioObjectPropertyScopeOutput, kAudioObjectPropertyElementMain};
+	UInt32 outSize = 0;
+	if (AudioObjectGetPropertyDataSize(dev, &outStreams, 0, NULL, &outSize) == noErr && outSize > 0) {
 		return 0;
 	}
 	AudioObjectPropertyAddress r = {
@@ -158,8 +175,9 @@ static int bt_camera_running(void) {
 	return on;
 }
 
-// bt_display_awake_pids writes the apps holding an assertion that keeps the
-// display awake, which browsers and players take while video plays.
+// bt_display_awake_pids writes the processes holding an assertion that
+// keeps the display awake, which browsers and players take while video
+// plays (and caffeinate -d takes on request; Go filters those out).
 static int bt_display_awake_pids(int32_t *out, int max) {
 	CFDictionaryRef byPID = NULL;
 	if (IOPMCopyAssertionsByProcess(&byPID) != kIOReturnSuccess || byPID == NULL) {
@@ -198,7 +216,7 @@ static int bt_display_awake_pids(int32_t *out, int max) {
 			CFTypeRef type = CFDictionaryGetValue((CFDictionaryRef)a, CFSTR("AssertType"));
 			if (type != NULL && CFGetTypeID(type) == CFStringGetTypeID() &&
 				(CFEqual(type, CFSTR("PreventUserIdleDisplaySleep")) || CFEqual(type, CFSTR("NoDisplaySleepAssertion")))) {
-				out[count++] = (int32_t)bt_responsible((pid_t)pid);
+				out[count++] = (int32_t)pid;
 				break;
 			}
 		}
@@ -208,34 +226,112 @@ static int bt_display_awake_pids(int32_t *out, int max) {
 	CFRelease(byPID);
 	return count;
 }
+
 */
 import "C"
+
+import (
+	"sync/atomic"
+	"time"
+)
 
 // maxMediaPIDs bounds the processes read per media poll.
 const maxMediaPIDs = 64
 
-// mediaReader polls media state. It reuses its buffers across polls.
-type mediaReader struct {
-	pids [maxMediaPIDs]C.int32_t
+// mediaInterval is how often media state is polled. Calls and video change
+// slowly; a few seconds of latency costs nothing.
+const mediaInterval = 3 * time.Second
+
+// mediaFirstWait bounds how long the first snapshot waits for the first
+// media poll, so `doctor` can show it without a slow audio service
+// stalling anything.
+const mediaFirstWait = time.Second
+
+// mediaSupport reports, without asking any system service, what media
+// detection can do on this Mac.
+func mediaSupport() (perProcessMic, responsible bool) {
+	var p, r C.int
+	C.bt_media_support(&p, &r)
+	return p == 1, r == 1
 }
 
-// read returns the current media state.
-func (m *mediaReader) read() mediaState {
-	st := mediaState{OK: true, Responsible: C.bt_has_responsible() == 1}
-	var supported C.int
-	n := int(C.bt_mic_pids(&m.pids[0], C.int(len(m.pids)), &supported))
-	st.PerProcessMic = supported == 1
-	st.MicPIDs = m.copyPIDs(n)
-	if !st.PerProcessMic {
-		st.MicAny = C.bt_default_input_running() == 1
+// maxPathLen sizes the executable-path buffer (PROC_PIDPATHINFO_MAXSIZE).
+const maxPathLen = 4096
+
+// mediaPoller reads media state on its own goroutine, so a stalled system
+// service (coreaudiod, powerd) only makes media state stale; it never
+// blocks a snapshot.
+type mediaPoller struct {
+	latest atomic.Pointer[mediaState]
+	ready  chan struct{} // closed after the first read
+	stop   chan struct{}
+	done   chan struct{}
+	pids   [maxMediaPIDs]C.int32_t
+	path   [maxPathLen]C.char
+}
+
+func startMediaPoller() *mediaPoller {
+	m := &mediaPoller{ready: make(chan struct{}), stop: make(chan struct{}), done: make(chan struct{})}
+	go m.run()
+	return m
+}
+
+func (m *mediaPoller) run() {
+	defer close(m.done)
+	t := time.NewTicker(mediaInterval)
+	defer t.Stop()
+	for first := true; ; first = false {
+		st := resolveMedia(m.readRaw(), m)
+		m.latest.Store(&st)
+		if first {
+			close(m.ready)
+		}
+		select {
+		case <-m.stop:
+			return
+		case <-t.C:
+		}
 	}
-	st.CameraOn = C.bt_camera_running() == 1
-	n = int(C.bt_display_awake_pids(&m.pids[0], C.int(len(m.pids))))
-	st.DisplayAwakePIDs = m.copyPIDs(n)
-	return st
 }
 
-func (m *mediaReader) copyPIDs(n int) []int {
+// current returns the latest media state, waiting up to mediaFirstWait for
+// the first poll when waitFirst is set.
+func (m *mediaPoller) current(waitFirst bool) mediaState {
+	if waitFirst {
+		select {
+		case <-m.ready:
+		case <-time.After(mediaFirstWait):
+		}
+	}
+	if st := m.latest.Load(); st != nil {
+		return *st
+	}
+	return mediaState{}
+}
+
+// close stops the poller. A poll stuck in a system call can't be
+// interrupted, so it waits only briefly.
+func (m *mediaPoller) close() {
+	close(m.stop)
+	select {
+	case <-m.done:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+func (m *mediaPoller) readRaw() rawMedia {
+	var raw rawMedia
+	raw.PerProcessMic, raw.Responsible = mediaSupport()
+	raw.MicPIDs = m.copyPIDs(int(C.bt_mic_pids(&m.pids[0], C.int(len(m.pids)))))
+	if !raw.PerProcessMic {
+		raw.MicAny = C.bt_default_input_running() == 1
+	}
+	raw.CameraOn = C.bt_camera_running() == 1
+	raw.AwakePIDs = m.copyPIDs(int(C.bt_display_awake_pids(&m.pids[0], C.int(len(m.pids)))))
+	return raw
+}
+
+func (m *mediaPoller) copyPIDs(n int) []int {
 	if n <= 0 {
 		return nil
 	}
@@ -244,4 +340,17 @@ func (m *mediaReader) copyPIDs(n int) []int {
 		out[i] = int(m.pids[i])
 	}
 	return out
+}
+
+// The processLookup methods, used by resolveMedia on the poller goroutine.
+
+func (m *mediaPoller) responsible(pid int) int { return int(C.bt_responsible(C.int32_t(pid))) }
+
+func (m *mediaPoller) regularApp(pid int) bool { return C.bt_regular_app(C.int32_t(pid)) == 1 }
+
+func (m *mediaPoller) executable(pid int) string {
+	if C.bt_pid_path(C.int32_t(pid), &m.path[0], C.int(len(m.path))) == 0 {
+		return ""
+	}
+	return C.GoString(&m.path[0])
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -63,8 +64,9 @@ func TestMediaNow(t *testing.T) {
 		{model.Snapshot{CallActive: true, Windows: []model.Window{w("com.google.Chrome", true, false), w("com.google.Chrome", true, true)}},
 			"in a call in com.google.Chrome; video playing in com.google.Chrome"},
 		{model.Snapshot{CallActive: true}, "in a call (its window isn't visible)"},
+		{model.Snapshot{Windows: []model.Window{w("com.1password.1password", false, true)}}, "video playing in a private app"},
 	} {
-		if got := mediaNow(tc.snap); got != tc.want {
+		if got := mediaNow(tc.snap, classify.New(nil, nil)); got != tc.want {
 			t.Errorf("mediaNow = %q, want %q", got, tc.want)
 		}
 	}

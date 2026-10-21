@@ -124,7 +124,7 @@ user's account and protected at rest by OS full-disk encryption
 | Field | Source | Default | Stored as | Retention | Leaves device? |
 |-------|--------|---------|-----------|-----------|----------------|
 | Logs | Agent | on | Structured `slog`, PII-free by construction (§10) | Size-capped rotation (default 3 × 10 MB) | Never |
-| Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed reading) | Agent | on | Counters per day | 180 d | Never |
+| Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed idle time) | Agent | on | Counters per day | 180 d | Never |
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
 | Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |

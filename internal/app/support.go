@@ -91,7 +91,7 @@ func topology(monitors []model.Rect) string {
 type health struct {
 	day                                   string
 	presentS, attributedS                 float64
-	callS, videoS, readingS               float64 // presence held by each signal
+	callS, videoS, confirmedIdleS         float64 // presence held by each signal
 	shellEvents, agentEvents              int
 	collectorErrors, flushErrors, dropped int
 }
@@ -103,7 +103,7 @@ type healthJSON struct {
 	AttributedS     float64           `json:"attributed_s"`
 	CallS           float64           `json:"call_s"`
 	VideoS          float64           `json:"video_s"`
-	ReadingS        float64           `json:"reading_s"`
+	ConfirmedIdleS  float64           `json:"confirmed_idle_s"`
 	ShellEvents     int               `json:"shell_events"`
 	AgentEvents     int               `json:"agent_events"`
 	CollectorErrors int               `json:"collector_errors"`
@@ -115,7 +115,13 @@ type healthJSON struct {
 
 func newHealth() *health { return &health{} }
 
-func (h *health) observe(res attention.Result) {
+// observe counts one tick that belongs to logical day. Ticks held across the
+// day rollover and released after it are skipped: they belong to an
+// earlier day whose counters have already been written.
+func (h *health) observe(res attention.Result, day string) {
+	if h.day != "" && day < h.day { // YYYY-MM-DD compares in date order
+		return
+	}
 	dt := res.Dt.Seconds()
 	h.presentS += res.Presence * dt
 	h.attributedS += (res.Presence - res.Unattributed) * dt
@@ -124,8 +130,8 @@ func (h *health) observe(res attention.Result) {
 		h.callS += dt
 	case attention.ReasonVideo:
 		h.videoS += dt
-	case attention.ReasonReading:
-		h.readingS += dt
+	case attention.ReasonConfirmedIdle:
+		h.confirmedIdleS += dt
 	}
 }
 
@@ -137,7 +143,7 @@ func (h *health) seed(day, stored string) {
 	}
 	*h = health{
 		day: day, presentS: j.PresentS, attributedS: j.AttributedS,
-		callS: j.CallS, videoS: j.VideoS, readingS: j.ReadingS,
+		callS: j.CallS, videoS: j.VideoS, confirmedIdleS: j.ConfirmedIdleS,
 		shellEvents: j.ShellEvents, agentEvents: j.AgentEvents,
 		collectorErrors: j.CollectorErrors, flushErrors: j.FlushErrors, dropped: j.Dropped,
 	}
@@ -159,7 +165,7 @@ func (h *health) json(day string, hooks, ingest map[string]uint64) string {
 	}
 	b, _ := json.Marshal(healthJSON{
 		Coverage: coverage, PresentS: h.presentS, AttributedS: h.attributedS,
-		CallS: h.callS, VideoS: h.videoS, ReadingS: h.readingS,
+		CallS: h.callS, VideoS: h.videoS, ConfirmedIdleS: h.confirmedIdleS,
 		ShellEvents: h.shellEvents, AgentEvents: h.agentEvents,
 		CollectorErrors: h.collectorErrors, FlushErrors: h.flushErrors, Dropped: h.dropped,
 		Hooks: hooks, Ingest: ingest,

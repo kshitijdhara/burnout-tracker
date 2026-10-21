@@ -200,7 +200,7 @@ static int bt_screen_locked(void) {
 }
 
 // bt_display_asleep reports whether the main display is asleep, which
-// counts as away even before the screen locks.
+// counts as away even before the screen locks, unless a call is on.
 static int bt_display_asleep(void) {
 	return CGDisplayIsAsleep(CGMainDisplayID()) ? 1 : 0;
 }
@@ -348,11 +348,6 @@ const (
 	maxDisplays = 32
 )
 
-// mediaEvery is how often, in snapshots, media state is polled. Calls and
-// video change slowly; polling every few seconds keeps the per-tick cost
-// to the window list.
-const mediaEvery = 3
-
 var errClosed = errors.New("darwin: collector is closed")
 
 // Collector reads desktop state through CoreGraphics and AppKit.
@@ -368,9 +363,8 @@ type Collector struct {
 	windows  []C.bt_window
 	displays []C.bt_rect
 	activity unsafe.Pointer // C-owned NSProcessInfo activity token
-	media    mediaReader
-	lastMed  mediaState
-	reads    int
+	media    *mediaPoller
+	sampled  bool // a snapshot has been taken (the first waits for media)
 	closed   bool
 }
 
@@ -395,7 +389,10 @@ func New(opts Options) (*Collector, error) {
 		},
 	}
 	c.tr = newTranslator(c.bundleID)
-	c.caps.Limitations = append(c.caps.Limitations, mediaLimitations(c.media.read())...)
+	perProcess, responsible := mediaSupport()
+	c.caps.Limitations = append(c.caps.Limitations,
+		mediaLimitations(mediaState{PerProcessMic: perProcess, Responsible: responsible})...)
+	c.media = startMediaPoller()
 
 	if opts.Titles {
 		if C.bt_preflight_screen_capture() == 1 {
@@ -462,6 +459,7 @@ func (c *Collector) Close() error {
 	}
 	C.bt_end_activity(c.activity)
 	c.activity = nil
+	c.media.close()
 	return nil
 }
 
@@ -498,12 +496,10 @@ func (c *Collector) readRaw() rawState {
 		st.PointerOK = true
 	}
 	st.IdleSeconds = float64(C.bt_idle_seconds())
-	st.Locked = C.bt_screen_locked() == 1 || C.bt_display_asleep() == 1
-	if c.reads%mediaEvery == 0 {
-		c.lastMed = c.media.read()
-	}
-	c.reads++
-	st.Media = c.lastMed
+	st.Locked = C.bt_screen_locked() == 1
+	st.DisplayAsleep = C.bt_display_asleep() == 1
+	st.Media = c.media.current(!c.sampled)
+	c.sampled = true
 	return st
 }
 
