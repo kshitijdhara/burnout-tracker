@@ -25,7 +25,8 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"setup", "interactive first-run: review what is collected and consent", runSetup},
-		{"daemon", "run the collector daemon (normally started by the OS service)", runDaemon},
+		{"daemon", "run the collector daemon in this terminal (the service runs it in the background)", runDaemon},
+		{"service", "run the daemon in the background from login: service install|uninstall|status", runService},
 		{"status", "show today's summary", runStatus},
 		{"timeline", "show a day minute by minute: timeline [YYYY-MM-DD]", runTimeline},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},

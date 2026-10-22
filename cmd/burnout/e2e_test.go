@@ -28,7 +28,17 @@ func TestEndToEnd(t *testing.T) {
 	}
 	const canary = "CANARYe2eQ7"
 	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "burnout")
+	// Not in tmp: install-hooks refuses a binary in a folder everyone can
+	// write to, such as /tmp.
+	binDir, err := os.MkdirTemp(".", "e2e-bin-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(binDir) })
+	bin, err := filepath.Abs(filepath.Join(binDir, "burnout"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
@@ -65,9 +75,16 @@ func TestEndToEnd(t *testing.T) {
 		return o.String(), e.String(), err
 	}
 
-	// Consent is required before the daemon starts (AC-3).
+	// Consent is required before the daemon starts (AC-3). The service's
+	// daemon exits cleanly instead, so it isn't restarted every 30 s.
 	if _, _, err := run("", "daemon"); err == nil {
 		t.Fatal("daemon started without consent")
+	}
+	if _, _, err := run("", daemonServiceArgs...); err != nil {
+		t.Fatalf("service daemon without consent: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dataDir, "logs", "daemon.log")); !strings.Contains(string(b), "no consent") { //nolint:gosec // test file
+		t.Fatalf("service daemon didn't log why it stopped:\n%s", b)
 	}
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -77,7 +94,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	var daemonLog bytes.Buffer
-	daemon := exec.Command(bin, "daemon")
+	daemon := exec.Command(bin, daemonServiceArgs...) // as the background service runs it
 	daemon.Env, daemon.Stdout, daemon.Stderr = env, &daemonLog, &daemonLog
 	if err := daemon.Start(); err != nil {
 		t.Fatal(err)
@@ -152,6 +169,15 @@ func TestEndToEnd(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("daemon did not stop")
+	}
+
+	// The service's log goes to a rotating, owner-only file in the data folder.
+	logPath := filepath.Join(dataDir, "logs", "daemon.log")
+	if b, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(b), "daemon started") {
+		t.Fatalf("daemon log %s: %v\n%s", logPath, err, b)
+	}
+	if fi, err := os.Stat(logPath); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("daemon log mode: %v %v", fi, err)
 	}
 
 	status, _, err := run("", "status")

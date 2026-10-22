@@ -21,6 +21,15 @@ const (
 	EnvRuntimeDir = "BURNOUT_RUNTIME_DIR"
 )
 
+// Log file names, inside LogDir.
+const (
+	DaemonLogFile = "daemon.log" // the daemon's own rotating log
+	CrashLogFile  = "stderr.log" // what launchd captures: panics, failed starts
+)
+
+// LogDir returns where the background service keeps its logs.
+func LogDir(dataDir string) string { return filepath.Join(dataDir, "logs") }
+
 // DataDir returns the directory for the database, recovery copies and logs.
 //
 //	macOS:   ~/Library/Application Support/burnout

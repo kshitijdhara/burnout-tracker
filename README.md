@@ -32,8 +32,9 @@ Claude Code hooks are recorded for now.
 You need Go 1.26.10 or newer and the Xcode command-line tools (the macOS
 collector uses cgo).
 
-**1. Build and install to a stable path.** The hooks record the binary's
-absolute path, so copy it somewhere it will stay before installing them.
+**1. Build and install to a stable path.** The hooks and the service record
+the binary's absolute path, so install it somewhere it will stay, in a
+folder only you can write to.
 
 ```sh
 xcode-select --install          # skip if already installed
@@ -41,23 +42,33 @@ git clone https://github.com/kshitijdhara/burnout-tracker
 cd burnout-tracker
 go test ./...
 go build -o bin/burnout ./cmd/burnout
-mkdir -p ~/.local/bin && cp bin/burnout ~/.local/bin/
+mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 ```
 
 **2. Set up and start.**
 
 ```sh
-~/.local/bin/burnout setup          # shows what is collected, asks for consent
-~/.local/bin/burnout install-hooks  # zsh hook + Claude Code hooks (backs up files first)
-~/.local/bin/burnout daemon         # in its own terminal tab; leave it running
+~/.local/bin/burnout setup            # shows what is collected, asks for consent
+~/.local/bin/burnout install-hooks    # zsh hook + Claude Code hooks (backs up files first)
+~/.local/bin/burnout doctor           # first run: answer the keychain prompt (below)
+~/.local/bin/burnout service install  # runs the daemon in the background, from login
 ```
 
 `setup` must run in an interactive terminal. burnout keeps its key in your
-keychain through macOS's own `security` tool, so the first `daemon` (or
-`doctor`) run may show a keychain prompt that names `security` rather than
-burnout. Choose **Always Allow**, and answer within a few seconds: if the
-keychain doesn't respond in about 3 s, burnout keeps its key in an
-owner-only file in the data folder instead, and stays on that choice.
+keychain through macOS's own `security` tool, so the first `doctor` run may
+show a keychain prompt that names `security` rather than burnout. Choose
+**Always Allow**, and answer within a few seconds: if the keychain doesn't
+respond in about 3 s, burnout keeps its key in an owner-only file in the
+data folder instead, and stays on that choice. Running `doctor` before
+`service install` makes the prompt appear while you're looking.
+
+The service starts the daemon at every login and restarts it if it
+crashes. Its log is `logs/daemon.log` in the data folder (three files of at
+most 10 MB); crash output goes to `logs/stderr.log`. To update, rebuild,
+run the same `install -m 0755` line (it replaces the file, so the running
+daemon isn't disturbed), then `service install` again to restart on the
+new binary. To watch the daemon's log in a terminal instead,
+skip the service and run `~/.local/bin/burnout daemon`.
 
 **3. Pick up the hooks.** Open a new terminal tab so zsh loads the hook, and
 start a new Claude Code session (`/hooks` inside Claude Code lists them).
@@ -106,8 +117,8 @@ folder. Deleting it also deletes `hook-backups/`, the copies of the files
 `install-hooks` changed; copy that folder out first if you want to keep them.
 
 ```sh
-~/.local/bin/burnout uninstall-hooks   # removes exactly what install-hooks added
-# stop the daemon with Ctrl-C in its tab, then:
+~/.local/bin/burnout uninstall-hooks     # removes exactly what install-hooks added
+~/.local/bin/burnout service uninstall   # stops the daemon and removes the service
 rm -rf ~/Library/Application\ Support/burnout
 security delete-generic-password -s burnout -a hmac   # if the keychain was used
 rm ~/.local/bin/burnout
@@ -115,9 +126,10 @@ rm ~/.local/bin/burnout
 
 **Stopping things.**
 
-- The daemon: press Ctrl-C in its tab. If you've lost the tab, run
-  `pkill -INT -x burnout` from any terminal. Either way it saves what it
-  has and exits cleanly.
+- The daemon: `burnout service uninstall` stops it for good;
+  `pkill -INT -x burnout` stops it until the next login. If you run it in
+  a terminal instead, press Ctrl-C. Either way it saves what it has and
+  exits cleanly.
 - A stuck test run: press Ctrl-C. If it ignores that, run
   `pkill -f 'go-build.*/(burnout|shell)\.test'` from another tab; the pattern
   matches only this project's tests that start a shell, not other Go test
@@ -125,30 +137,35 @@ rm ~/.local/bin/burnout
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
-**Preview limits.** The daemon stops when its tab closes and does not start
-at login. There is no tray icon, and logs go to the terminal. Phase 0 needs
-no macOS privacy permissions, because window titles and input counts are
-off. Call and video detection is macOS-only for now.
+**Preview limits.** There is no installer or tray icon yet, and the
+background service is macOS and Linux only (on Windows, run `burnout
+daemon` in a terminal). Phase 0 needs no macOS privacy permissions,
+because window titles and input counts are off. Call and video detection
+is macOS-only for now.
 
 ### Windows and Linux
 
-Steps 2–5 are the same as on macOS. Building and removing differ:
+Steps 2–5 are the same as on macOS, except as noted below. Building and removing differ:
 
 - **Linux:** there is no desktop collector yet, so only shell and Claude
-  Code hooks are recorded. Build as on macOS without `xcode-select`. To
-  remove everything:
+  Code hooks are recorded. Build as on macOS without `xcode-select`.
+  The background service is a systemd user unit. Its log is
+  `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
+  burnout.service` shows only startup errors and crashes. To remove
+  everything:
 
   ```sh
   ~/.local/bin/burnout uninstall-hooks
-  # stop the daemon with Ctrl-C, then:
+  ~/.local/bin/burnout service uninstall
   rm -rf ~/.local/share/burnout ~/.config/burnout   # data (incl. hook-backups/) and config
   secret-tool clear service burnout username hmac    # if a keyring was used
   rm ~/.local/bin/burnout
   ```
 
 - **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
-  install hooks with `burnout install-hooks --zsh=false`. Stop the daemon
-  with Ctrl-C in its window (`pkill` and `pgrep` don't exist on Windows).
+  install hooks with `burnout install-hooks --zsh=false`. There is no
+  background service on Windows yet: run `burnout daemon` in a terminal and
+  stop it with Ctrl-C (`pkill` and `pgrep` don't exist on Windows).
   To remove everything, in Command Prompt:
 
   ```bat
@@ -177,6 +194,7 @@ Phase 0 (spike). Design docs:
   - [0006 Laya/Jev for classification](docs/adr/0006-decision-model-for-classification.md)
   - [0007 data protection at rest](docs/adr/0007-data-protection-at-rest.md)
   - [0008 deciding idle stretches after they end](docs/adr/0008-retroactive-idle-resolution.md)
+  - [0009 deferring the Laya spike to Phase 2](docs/adr/0009-defer-laya-spike.md)
 - [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md):
   findings and how v0.2 resolves them.
 

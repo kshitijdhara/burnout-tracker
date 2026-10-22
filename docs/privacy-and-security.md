@@ -123,7 +123,7 @@ user's account and protected at rest by OS full-disk encryption
 
 | Field | Source | Default | Stored as | Retention | Leaves device? |
 |-------|--------|---------|-----------|-----------|----------------|
-| Logs | Agent | on | Structured `slog`, PII-free by construction (§10) | Size-capped rotation (default 3 × 10 MB) | Never |
+| Logs | Agent | on | Structured `slog`, PII-free by construction (§10); the home folder is shown as `~`. Crash output (panics, failed starts) goes to `logs/stderr.log` on macOS and the user journal on Linux | Size-capped rotation (default 3 × 10 MB); `stderr.log` rotated at 1 MB on each start; the journal follows the system's settings | Never |
 | Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed idle time) | Agent | on | Counters per day | 180 d | Never |
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
@@ -444,7 +444,8 @@ The APIs we use to count input are the same ones keyloggers use. So:
   `LogValue()` return `[redacted]`. Code that needs the raw value calls
   `.Reveal()`, which is greppable and flagged in review.
 - Never logged: window titles, command lines, paths, ICS URLs, keystore
-  material, check-in content.
+  material, check-in content. The app's own file locations can appear in
+  error messages, with the home folder shown as `~`.
 - `burnout doctor --bundle` builds a redacted diagnostics archive: versions,
   component compatibility, collector and permission states, SLIs, config
   with secrets removed, and the last N log lines. It **shows the user a full
