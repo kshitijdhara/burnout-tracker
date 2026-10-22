@@ -83,10 +83,12 @@ func TestRecoversAfterAFailedReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	if _, err := w.Write([]byte("first\n")); err != nil {
+	// A rotation closed the file and couldn't reopen it (the folder was
+	// replaced by a file).
+	if err := w.f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// The log folder is replaced by a file: rotation can't reopen.
+	w.f = nil
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
