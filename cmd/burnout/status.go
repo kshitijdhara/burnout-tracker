@@ -23,7 +23,7 @@ func runStatus(ctx context.Context, _ []string) error {
 	}
 	store, err := sqlite.OpenReadOnly(ctx, dataDir)
 	if errors.Is(err, sqlite.ErrNoDatabase) {
-		fmt.Println("Nothing recorded yet. Run `burnout setup`, then start `burnout daemon`.")
+		fmt.Println("Nothing recorded yet. Run `burnout setup`, then `burnout service install` (or `burnout daemon` in a terminal).")
 		return nil
 	}
 	if err != nil {

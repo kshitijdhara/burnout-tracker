@@ -32,8 +32,9 @@ Claude Code hooks are recorded for now.
 You need Go 1.26.10 or newer and the Xcode command-line tools (the macOS
 collector uses cgo).
 
-**1. Build and install to a stable path.** The hooks record the binary's
-absolute path, so copy it somewhere it will stay before installing them.
+**1. Build and install to a stable path.** The hooks and the service record
+the binary's absolute path, so install it somewhere it will stay, in a
+folder only you can write to.
 
 ```sh
 xcode-select --install          # skip if already installed
@@ -41,7 +42,7 @@ git clone https://github.com/kshitijdhara/burnout-tracker
 cd burnout-tracker
 go test ./...
 go build -o bin/burnout ./cmd/burnout
-mkdir -p ~/.local/bin && cp bin/burnout ~/.local/bin/
+mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 ```
 
 **2. Set up and start.**
@@ -63,8 +64,10 @@ data folder instead, and stays on that choice. Running `doctor` before
 
 The service starts the daemon at every login and restarts it if it
 crashes. Its log is `logs/daemon.log` in the data folder (three files of at
-most 10 MB). After updating the binary, run `service install` again to
-restart it on the new one. To watch the daemon's log in a terminal instead,
+most 10 MB); crash output goes to `logs/stderr.log`. To update, rebuild,
+run the same `install -m 0755` line (it replaces the file, so the running
+daemon isn't disturbed), then `service install` again to restart on the
+new binary. To watch the daemon's log in a terminal instead,
 skip the service and run `~/.local/bin/burnout daemon`.
 
 **3. Pick up the hooks.** Open a new terminal tab so zsh loads the hook, and
@@ -146,8 +149,9 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
 
 - **Linux:** there is no desktop collector yet, so only shell and Claude
   Code hooks are recorded. Build as on macOS without `xcode-select`.
-  The background service is a systemd user unit
-  (`journalctl --user -u burnout.service` shows its output). To remove
+  The background service is a systemd user unit. Its log is
+  `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
+  burnout.service` shows only startup errors and crashes. To remove
   everything:
 
   ```sh

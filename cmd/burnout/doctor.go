@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
@@ -39,10 +38,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("data dir is owner-only", true, "")
 	}
 
-	pctx, cancel := context.WithTimeout(ctx, time.Second)
-	err = ingest.Ping(pctx)
-	cancel()
-	checkFix("daemon is running", err == nil, "start it with `burnout service install`, or `burnout daemon` in a terminal")
+	checkFix("daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
 	reportService()
 
 	state, detail, _ := fde.Status(ctx, dataDir)

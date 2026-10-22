@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
@@ -33,6 +35,9 @@ func runInstallHooks(ctx context.Context, args []string) error {
 	}
 	bin, err := binaryPath()
 	if err != nil {
+		return err
+	}
+	if err := paths.CheckTrustedExecutable(bin); err != nil {
 		return err
 	}
 	var errs []error
@@ -116,14 +121,41 @@ func installClaude(ctx context.Context, bin string, install bool) error {
 	return claude.Uninstall(o)
 }
 
-// binaryPath is the absolute path hooks will call. Symlinks are kept, so a
-// stable link (for example ~/.local/bin/burnout) survives upgrades.
+// binaryPath is the absolute path hooks and the service will run. It is
+// the path burnout was started by, symlinks kept, so a stable link (for
+// example one a package manager updates) survives upgrades; on Linux,
+// os.Executable alone would resolve the link.
 func binaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
+	if p, err := invokedPath(); err == nil && sameFile(p, exe) {
+		return p, nil
+	}
 	return filepath.Abs(exe)
+}
+
+// invokedPath is os.Args[0] made absolute, looked up on PATH when it was
+// run by name.
+func invokedPath() (string, error) {
+	p := os.Args[0]
+	if !strings.ContainsAny(p, `/\`) {
+		var err error
+		if p, err = exec.LookPath(p); err != nil {
+			return "", err
+		}
+	}
+	return filepath.Abs(p)
+}
+
+func sameFile(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
 }
 
 // hookBackupDir is where installers back up files before editing them:

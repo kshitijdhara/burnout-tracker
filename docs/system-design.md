@@ -829,9 +829,9 @@ Days below the coverage threshold aren't scored (§7.1).
 
 | Failure | Behaviour |
 |---------|-----------|
-| Crash | launchd `KeepAlive` + `ThrottleInterval`; systemd `Restart=on-failure` + `StartLimitBurst`; Windows task restart |
-| Crash loop (3 in 10 min) | Start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray |
-| Hang | systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
+| Crash | launchd `KeepAlive` (on failure only) + `ThrottleInterval` 30 s; systemd `Restart=on-failure` + `RestartSec=30`, no start limit. Conditions a restart can't fix (no consent, a newer schema, an unusable data folder) exit 0 and stay down. Windows task restart: not yet |
+| Crash loop (3 in 10 min) | Not yet: start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray. Phase 0 keeps restarting every 30 s |
+| Hang | Not yet: systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
 | DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |
 | Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |
@@ -991,7 +991,7 @@ burnout-tracker/
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
 | **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green (Laya spike deferred to Phase 2, ADR-0009) |
-| **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
+| **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; window-title opt-in + redactor; opt-in classification labels (input to the Laya spike, ADR-0009); privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
 | **2: Personalised** | Trend forecast; per-user model; Laya spike on the alpha's labelled samples, then the optional Laya classifier if it beats rules/kNN (ADR-0009); KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
 | **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |

@@ -1,6 +1,7 @@
 package logfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -71,5 +72,41 @@ func TestOversizedLineStillWritten(t *testing.T) {
 	defer func() { _ = w.Close() }()
 	if n, err := w.Write([]byte(strings.Repeat("y", 50))); err != nil || n != 50 {
 		t.Fatalf("wrote %d, %v", n, err)
+	}
+}
+
+func TestRecoversAfterAFailedReopen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "logs")
+	path := filepath.Join(dir, "daemon.log")
+	w, err := Open(path, 10, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	if _, err := w.Write([]byte("first\n")); err != nil {
+		t.Fatal(err)
+	}
+	// The log folder is replaced by a file: rotation can't reopen.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("lost line\n")); err == nil {
+		t.Fatal("write succeeded with no log folder")
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("back\n")); err != nil {
+		t.Fatalf("write after the folder came back: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "back\n" { //nolint:gosec // test file
+		t.Fatalf("log = %q", b)
+	}
+	_ = w.Close()
+	if _, err := w.Write([]byte("x")); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("write after close: %v", err)
 	}
 }

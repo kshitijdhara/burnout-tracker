@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/identity"
@@ -26,9 +28,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
-
-// logDir is where the daemon's log files go when it runs as a service.
-func logDir(dataDir string) string { return filepath.Join(dataDir, "logs") }
 
 // hmacKeyName is the keystore entry for identity hashing.
 const hmacKeyName = "hmac"
@@ -56,19 +55,40 @@ const projectRootTimeout = 200 * time.Millisecond
 // RSS) unless GOMEMLIMIT is set in the environment.
 const defaultMemoryLimit = 48 << 20
 
+// serviceFlag makes the daemon run as the background service does.
+const serviceFlag = "service"
+
+// daemonServiceArgs are the arguments the background service starts the
+// binary with.
+var daemonServiceArgs = []string{"daemon", "--" + serviceFlag}
+
+// lockRetry is how often a service daemon checks whether a daemon running
+// in a terminal has stopped.
+const lockRetry = 30 * time.Second
+
+// crashLogMax caps launchd's crash log (stderr.log) between starts.
+const crashLogMax = 1 << 20
+
 func runDaemon(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
-	toFile := fs.Bool("log-file", false, "log to a rotating file in the data folder (the background service does)")
+	asService := fs.Bool(serviceFlag, false, "run as the background service: log to a rotating file in the data folder, "+
+		"wait for a daemon running in a terminal to stop, and exit cleanly when restarting can't help")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
-	}
-	if !hasConsent() {
-		return errors.New("no consent recorded: run `burnout setup` first")
 	}
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(defaultMemoryLimit)
 	}
+	if *asService {
+		return runServiceDaemon(ctx)
+	}
 
+	if !hasConsent() {
+		return errors.New("no consent recorded: run `burnout setup` first")
+	}
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return err
@@ -76,16 +96,7 @@ func runDaemon(ctx context.Context, args []string) error {
 	if err := paths.EnsurePrivateDir(dataDir); err != nil {
 		return err
 	}
-	var logOut io.Writer = os.Stderr
-	if *toFile {
-		w, err := logfile.Open(filepath.Join(logDir(dataDir), "daemon.log"), logfile.DefaultMaxBytes, logfile.DefaultFiles)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = w.Close() }()
-		logOut = w
-	}
-	log := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	release, err := lock.Acquire(dataDir)
 	if errors.Is(err, lock.ErrLocked) {
 		return errors.New("another burnout daemon is already running")
@@ -94,6 +105,114 @@ func runDaemon(ctx context.Context, args []string) error {
 		return err
 	}
 	defer func() { _ = release() }()
+	return serveDaemon(ctx, log, dataDir)
+}
+
+// runServiceDaemon is the daemon as launchd or systemd runs it. A failure
+// a restart may fix returns an error, so the service manager retries in
+// 30 s. One it can't fix (no consent, a database from a newer version, an
+// unusable data folder) is logged and exits 0, which the service treats as
+// done until the next login, instead of failing every 30 s forever. What
+// it writes shows the home folder as ~ (privacy & security §10).
+func runServiceDaemon(ctx context.Context) error {
+	home, _ := os.UserHomeDir()
+	stderr := homeRedactor{w: os.Stderr, home: home}
+	dataDir, err := paths.DataDir()
+	if err == nil {
+		err = paths.EnsurePrivateDir(dataDir)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "burnout: not starting: the data folder is unusable: %v\n", err)
+		return nil
+	}
+	capCrashLog(paths.LogDir(dataDir))
+	w, err := logfile.Open(filepath.Join(paths.LogDir(dataDir), paths.DaemonLogFile), logfile.DefaultMaxBytes, logfile.DefaultFiles)
+	if err != nil {
+		return stderr.redactErr(err)
+	}
+	defer func() { _ = w.Close() }()
+	log := slog.New(slog.NewTextHandler(homeRedactor{w: w, home: home}, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if !hasConsent() {
+		log.Error("not starting: no consent recorded; run `burnout setup`, then `burnout service install`")
+		return nil
+	}
+	release, err := waitForLock(ctx, log, dataDir)
+	if err != nil || release == nil {
+		return stderr.redactErr(err)
+	}
+	defer func() { _ = release() }()
+	err = serveDaemon(ctx, log, dataDir)
+	if errors.Is(err, sqlite.ErrSchemaTooNew) {
+		log.Error("not starting: the database was written by a newer burnout; install that version again", "err", err)
+		return nil
+	}
+	if err != nil {
+		log.Error("daemon stopped", "err", err)
+	}
+	return stderr.redactErr(err)
+}
+
+// waitForLock takes the daemon lock, waiting while a daemon started in a
+// terminal holds it. It returns a nil release when ctx ends first.
+func waitForLock(ctx context.Context, log *slog.Logger, dataDir string) (func() error, error) {
+	for waiting := false; ; waiting = true {
+		release, err := lock.Acquire(dataDir)
+		if !errors.Is(err, lock.ErrLocked) {
+			return release, err
+		}
+		if !waiting {
+			log.Info("another daemon is running, probably in a terminal; taking over when it stops")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil
+		case <-time.After(lockRetry):
+		}
+	}
+}
+
+// capCrashLog keeps launchd's crash log small across restarts: past
+// crashLogMax it becomes stderr.log.1, replacing the older one, and an
+// empty owner-only stderr.log waits for launchd's next start. This run's
+// own crash output still goes to the renamed file.
+func capCrashLog(logDir string) {
+	path := filepath.Join(logDir, paths.CrashLogFile)
+	if fi, err := os.Stat(path); err != nil || fi.Size() <= crashLogMax {
+		return
+	}
+	if err := os.Rename(path, path+".1"); err != nil {
+		return
+	}
+	if f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil { //nolint:gosec // our own log directory
+		_ = f.Close()
+	}
+}
+
+// homeRedactor writes through to w with the home folder shown as ~.
+type homeRedactor struct {
+	w    io.Writer
+	home string
+}
+
+func (h homeRedactor) Write(p []byte) (int, error) {
+	if len(h.home) > 1 {
+		if _, err := h.w.Write(bytes.ReplaceAll(p, []byte(h.home), []byte("~"))); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	}
+	return h.w.Write(p)
+}
+
+func (h homeRedactor) redactErr(err error) error {
+	if err == nil || len(h.home) <= 1 {
+		return err
+	}
+	return errors.New(strings.ReplaceAll(err.Error(), h.home, "~"))
+}
+
+// serveDaemon runs the daemon once it holds the lock.
+func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 	if err := paths.ExcludeFromBackups(dataDir); err != nil {
 		log.Warn("could not exclude the data directory from backups", "err", err)
 	}

@@ -4,6 +4,13 @@
 **Date:** 2026-10-20
 **Deciders:** Project maintainers
 
+> **Update 2026-10-22 (Phase 0):** `burnout service install|uninstall|status`
+> exists for macOS (launchd) and Linux (systemd `--user`). The binary
+> renders the definitions itself, so there are no templates in `packaging/`.
+> The service is per user and pins the folders the installing shell
+> resolves, so a `.deb`/`.rpm` running as root can't call it; packages will
+> tell the user to run it instead. The Windows logon task is deferred.
+
 ## Context
 
 The agent ships to macOS, Windows and Linux. It needs OS permissions (macOS
@@ -86,8 +93,9 @@ keyless signing, and GitHub artifact attestations.
 ### What the app does instead of a package manager
 
 - **`burnout service install|uninstall`** sets up the launchd LaunchAgent,
-  the systemd `--user` unit or the Windows logon task. It's idempotent, and
-  the `.deb`/`.rpm`/`.msi` call it on install.
+  the systemd `--user` unit or the Windows logon task. It's idempotent and
+  per user, so the user runs it after installing a package (see the
+  update at the top).
 - **`burnout install-hooks`** installs the shell and Claude Code hooks
   (ADR-0003).
 - **`burnout update`** is manual, or an opt-in weekly check (local-first: no
@@ -222,7 +230,7 @@ authenticity. The OS-level gates are handled like this:
 3. [ ] Generate the ECDSA P-256 *current* and *next* keys; embed both public keys; document rotation.
 4. [ ] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
 5. [ ] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only.
-6. [ ] `burnout service`, `uninstall` subcommands; launchd plist, systemd user unit, Windows logon task templates in `packaging/`.
+6. [x] `burnout service install|uninstall|status` for launchd and systemd `--user`, definitions rendered by the binary. [ ] Windows logon task.
 7. [ ] `burnout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
 8. [ ] Apply to SignPath Foundation for Windows.
 9. [ ] CI matrix for the supported platforms (ADR-0001 compatibility matrix).

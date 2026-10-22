@@ -61,7 +61,7 @@ func runSetup(ctx context.Context, _ []string) error {
 	if err := os.WriteFile(filepath.Join(dir, consentFile), []byte(stamp), 0o600); err != nil {
 		return err
 	}
-	fmt.Println("Thanks. Next: `burnout install-hooks`, then start the daemon (`burnout daemon`).")
+	fmt.Println("Thanks. Next: `burnout install-hooks`, then `burnout service install` to run the daemon in the background (or `burnout daemon` in a terminal).")
 	return nil
 }
 

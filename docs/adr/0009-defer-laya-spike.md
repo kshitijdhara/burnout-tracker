@@ -11,8 +11,9 @@ the classification cascade, never the scorer. Rules plus a small embedding
 kNN (its Option D) are the fallback and the benchmark baseline. The
 roadmap ships the optional Laya classifier in Phase 2, but it put a **Laya
 spike** in Phase 0, with "Laya go/no-go" as an exit criterion. The spike
-would hand-label about 500 samples across four roles and compare rules,
-kNN and Laya on accuracy, CPU latency and memory.
+would hand-label about 500 samples across ADR-0006's four roles
+(developer, student, researcher, PM) and compare rules, kNN and Laya on
+accuracy, CPU latency and memory.
 
 Phase 0 is now otherwise done, and the spike doesn't fit it:
 
@@ -43,11 +44,10 @@ Phase 0 is now otherwise done, and the spike doesn't fit it:
 
 - **Phase 0's Laya go/no-go is "not now."** The spike moves to Phase 2 and
   stops being a Phase 0 exit criterion.
-- **Phase 1 builds what the spike needs**, as part of work it already
-  plans:
+- **Phase 1 builds what the spike needs.** Its roadmap row now lists:
   - role profiles and rules;
-  - the redactor (ADR-0006 action item 5);
-  - opt-in spot labels from alpha users.
+  - the window-title opt-in and the redactor (ADR-0006 action item 5);
+  - opt-in classification labels from alpha users.
 - **Phase 2 runs the spike** against that labelled set: rules vs kNN vs
   Laya. Laya ships only if it is clearly better than Option D, as ADR-0006
   already says.
@@ -65,7 +65,7 @@ Phase 0 is now otherwise done, and the spike doesn't fit it:
 
 ## Revisit when
 
-- A labelled set of at least 500 samples across at least three roles
+- A labelled set of at least 500 samples across ADR-0006's four roles
   exists.
 - Alpha users report that their work is poorly classified, notably in the
   browser.

@@ -24,17 +24,15 @@ type Writer struct {
 	path     string
 	maxBytes int64
 	files    int
-	f        *os.File
+	f        *os.File // nil after a failed reopen; the next Write retries
 	size     int64
+	closed   bool
 }
 
 // Open creates the directory (owner-only) and opens path for appending.
 func Open(path string, maxBytes int64, files int) (*Writer, error) {
 	if maxBytes <= 0 || files < 1 {
 		return nil, fmt.Errorf("logfile: invalid limits %d bytes × %d files", maxBytes, files)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("logfile: %w", err)
 	}
 	w := &Writer{path: path, maxBytes: maxBytes, files: files}
 	if err := w.open(); err != nil {
@@ -43,7 +41,12 @@ func Open(path string, maxBytes int64, files int) (*Writer, error) {
 	return w, nil
 }
 
+// open creates the directory (owner-only) if it is missing and opens path
+// for appending.
 func (w *Writer) open() error {
+	if err := os.MkdirAll(filepath.Dir(w.path), 0o700); err != nil {
+		return fmt.Errorf("logfile: %w", err)
+	}
 	f, err := os.OpenFile(w.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
 	if err != nil {
 		return fmt.Errorf("logfile: %w", err)
@@ -58,16 +61,21 @@ func (w *Writer) open() error {
 }
 
 // Write appends p, rotating first if p would take the file past the cap.
-// A failed rotation keeps appending to the current file: losing the size
-// cap briefly beats losing log lines.
+// If the file can't be reopened after a rotation (the folder was removed,
+// say), the line is dropped and the next Write tries again.
 func (w *Writer) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.f == nil {
+	if w.closed {
 		return 0, os.ErrClosed
 	}
-	if w.size > 0 && w.size+int64(len(p)) > w.maxBytes {
+	if w.f != nil && w.size > 0 && w.size+int64(len(p)) > w.maxBytes {
 		_ = w.rotate()
+	}
+	if w.f == nil {
+		if err := w.open(); err != nil {
+			return 0, err
+		}
 	}
 	n, err := w.f.Write(p)
 	w.size += int64(n)
@@ -76,9 +84,7 @@ func (w *Writer) Write(p []byte) (int, error) {
 
 // rotate shifts path.N-1 → path.N … path → path.1 and starts a new path.
 func (w *Writer) rotate() error {
-	if err := w.f.Close(); err != nil {
-		return err
-	}
+	_ = w.f.Close()
 	w.f = nil
 	for i := w.files - 1; i >= 1; i-- {
 		from := w.path
@@ -99,6 +105,7 @@ func (w *Writer) rotate() error {
 func (w *Writer) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.closed = true
 	if w.f == nil {
 		return nil
 	}

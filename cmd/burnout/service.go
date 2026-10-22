@@ -19,6 +19,10 @@ import (
 // answer before reporting.
 const serviceStartWait = 5 * time.Second
 
+// serviceStopWait bounds how long uninstall waits for the daemon to stop
+// answering before warning that one still runs.
+const serviceStopWait = 3 * time.Second
+
 func runService(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return errors.New("usage: burnout service install|uninstall|status")
@@ -29,23 +33,21 @@ func runService(ctx context.Context, args []string) error {
 	}
 	switch args[0] {
 	case "install":
-		return installService(ctx, m, dataDir)
+		err = installService(ctx, m, dataDir)
 	case "uninstall":
-		if err := m.Uninstall(); err != nil {
-			return err
-		}
-		fmt.Println("Background service removed. Your data is untouched; `burnout daemon` still runs it in a terminal.")
-		return nil
+		err = uninstallService(ctx, m)
 	case "status":
-		st, err := m.Status()
-		if err != nil {
-			return err
+		var st service.Status
+		if st, err = m.Status(); err == nil {
+			fmt.Println(describeService(st, m.LogHint()))
 		}
-		fmt.Println(describeService(st, m.LogHint()))
-		return nil
 	default:
 		return fmt.Errorf("unknown service command %q: want install, uninstall or status", args[0])
 	}
+	if errors.Is(err, service.ErrUnsupported) {
+		return fmt.Errorf("%w; run `burnout daemon` in a terminal instead", err)
+	}
+	return err
 }
 
 func serviceManager() (service.Manager, string, error) {
@@ -63,14 +65,38 @@ func serviceManager() (service.Manager, string, error) {
 	if err != nil {
 		return service.Manager{}, "", err
 	}
-	dataDir, err := paths.DataDir()
+	env, err := serviceEnv()
 	if err != nil {
 		return service.Manager{}, "", err
 	}
+	dataDir := env[paths.EnvDataDir]
 	return service.Manager{
-		GOOS: runtime.GOOS, Bin: bin, Home: home, Config: cfg, LogDir: logDir(dataDir),
+		GOOS: runtime.GOOS, Bin: bin, Args: daemonServiceArgs, Env: env,
+		Home: home, Config: cfg, LogDir: paths.LogDir(dataDir),
 		UID: os.Getuid(), Run: service.ExecRunner{},
 	}, dataDir, nil
+}
+
+// serviceEnv pins the service to the folders this shell resolves, so the
+// daemon finds the same consent, database and socket as the CLI even when
+// overrides or XDG variables aren't set in the login session.
+func serviceEnv() (map[string]string, error) {
+	env := map[string]string{}
+	for name, dir := range map[string]func() (string, error){
+		paths.EnvDataDir: paths.DataDir, paths.EnvConfigDir: paths.ConfigDir, paths.EnvRuntimeDir: paths.RuntimeDir,
+	} {
+		d, err := dir()
+		if err != nil {
+			return nil, err
+		}
+		if env[name], err = filepath.Abs(d); err != nil {
+			return nil, err
+		}
+	}
+	if v := os.Getenv(envKeystore); v != "" {
+		env[envKeystore] = v
+	}
+	return env, nil
 }
 
 func installService(ctx context.Context, m service.Manager, dataDir string) error {
@@ -80,6 +106,9 @@ func installService(ctx context.Context, m service.Manager, dataDir string) erro
 	if unstableBinary(m.Bin) {
 		return fmt.Errorf("the service would run %s, which is a temporary build; copy the binary somewhere stable first (for example ~/.local/bin) and run service install from there", m.Bin)
 	}
+	if err := paths.CheckTrustedExecutable(m.Bin); err != nil {
+		return err
+	}
 	st, err := m.Status()
 	if err != nil {
 		return err
@@ -87,23 +116,45 @@ func installService(ctx context.Context, m service.Manager, dataDir string) erro
 	if !st.Running && daemonAnswers(ctx) {
 		return errors.New("a daemon is already running, probably in a terminal: stop it with Ctrl-C, then run `burnout service install` again")
 	}
-	for _, env := range []string{"BURNOUT_DATA_DIR", "BURNOUT_CONFIG_DIR", "BURNOUT_RUNTIME_DIR", envKeystore} {
-		if os.Getenv(env) != "" {
-			fmt.Printf("Note: %s is set in this shell, but the service doesn't see it and uses the default location.\n", env)
-		}
-	}
 	if err := m.Install(); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(serviceStartWait)
-	for !daemonAnswers(ctx) {
+	daemonLog := filepath.Join(paths.LogDir(dataDir), paths.DaemonLogFile)
+	wctx, cancel := context.WithTimeout(ctx, serviceStartWait)
+	defer cancel()
+	for !daemonAnswers(wctx) {
+		select {
+		case <-wctx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// Slow to open its socket (a keychain prompt, a migration),
+			// or not running at all.
+			if st, err := m.Status(); err == nil && st.Running {
+				fmt.Printf("Background service started (%s) and still starting up; check it with `burnout doctor` in a minute.\nLogs: %s\n", st.Detail, daemonLog)
+				return nil
+			}
+			return fmt.Errorf("the service is installed but the daemon isn't running; see %s and %s, and run `burnout doctor`", daemonLog, m.LogHint())
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	fmt.Printf("Background service running: it starts at login and restarts if it crashes.\nLogs: %s\n", daemonLog)
+	return nil
+}
+
+func uninstallService(ctx context.Context, m service.Manager) error {
+	if err := m.Uninstall(); err != nil {
+		return err
+	}
+	fmt.Println("Background service removed. Your data is untouched; `burnout daemon` still runs it in a terminal.")
+	deadline := time.Now().Add(serviceStopWait)
+	for daemonAnswers(ctx) {
 		if time.Now().After(deadline) {
-			return fmt.Errorf("the service is installed but the daemon isn't answering; see %s and run `burnout doctor`", m.LogHint())
+			fmt.Println("A daemon is still running, probably one started in a terminal: stop it with Ctrl-C or `pkill -INT -x burnout`.")
+			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	fmt.Printf("Background service running: it starts at login and restarts if it crashes.\nLogs: %s\n",
-		filepath.Join(logDir(dataDir), "daemon.log"))
 	return nil
 }
 
