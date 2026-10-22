@@ -10,7 +10,8 @@ ADRs [0001](adr/0001-local-first-go-agent.md) ·
 [0005](adr/0005-packaging-and-distribution.md) ·
 [0006](adr/0006-decision-model-for-classification.md) ·
 [0007](adr/0007-data-protection-at-rest.md) ·
-[0008](adr/0008-retroactive-idle-resolution.md)
+[0008](adr/0008-retroactive-idle-resolution.md) ·
+[0009](adr/0009-defer-laya-spike.md)
 
 ---
 
@@ -989,9 +990,9 @@ burnout-tracker/
 
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
-| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. **Laya spike** in parallel (accuracy on ~500 labelled samples vs. rules/kNN, CPU latency, RAM) | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green; Laya go/no-go |
+| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green (Laya spike deferred to Phase 2, ADR-0009) |
 | **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
-| **2: Personalised** | Trend forecast; per-user model; optional Laya classifier; KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
+| **2: Personalised** | Trend forecast; per-user model; Laya spike on the alpha's labelled samples, then the optional Laya classifier if it beats rules/kNN (ADR-0009); KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
 | **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |
 

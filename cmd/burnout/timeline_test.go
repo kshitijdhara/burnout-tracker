@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/service"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -81,6 +84,34 @@ func TestPrintableEscapesTerminalControls(t *testing.T) {
 	} {
 		if got := printable(in); got != want {
 			t.Errorf("printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestUnstableBinary(t *testing.T) {
+	sep := string(filepath.Separator)
+	for bin, want := range map[string]bool{
+		filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "burnout"): true,
+		filepath.Join(os.TempDir(), "burnout"):                               true,
+		sep + filepath.Join("home", "me", ".local", "bin", "burnout"):        false,
+	} {
+		if got := unstableBinary(bin); got != want {
+			t.Errorf("unstableBinary(%q) = %v, want %v", bin, got, want)
+		}
+	}
+}
+
+func TestDescribeService(t *testing.T) {
+	for _, tc := range []struct {
+		st   service.Status
+		want string
+	}{
+		{service.Status{Installed: true, Running: true, Detail: "pid 812"}, "running (pid 812)"},
+		{service.Status{Installed: true}, "installed but not running"},
+		{service.Status{}, "not installed"},
+	} {
+		if got := describeService(tc.st, "journalctl --user -u burnout.service"); !strings.Contains(got, tc.want) {
+			t.Errorf("describeService(%+v) = %q, want it to mention %q", tc.st, got, tc.want)
 		}
 	}
 }

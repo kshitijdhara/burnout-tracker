@@ -77,7 +77,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	var daemonLog bytes.Buffer
-	daemon := exec.Command(bin, "daemon")
+	daemon := exec.Command(bin, "daemon", "--log-file") // as the background service runs it
 	daemon.Env, daemon.Stdout, daemon.Stderr = env, &daemonLog, &daemonLog
 	if err := daemon.Start(); err != nil {
 		t.Fatal(err)
@@ -152,6 +152,15 @@ func TestEndToEnd(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("daemon did not stop")
+	}
+
+	// The service's log goes to a rotating, owner-only file in the data folder.
+	logPath := filepath.Join(dataDir, "logs", "daemon.log")
+	if b, err := os.ReadFile(logPath); err != nil || !strings.Contains(string(b), "daemon started") {
+		t.Fatalf("daemon log %s: %v\n%s", logPath, err, b)
+	}
+	if fi, err := os.Stat(logPath); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("daemon log mode: %v %v", fi, err)
 	}
 
 	status, _, err := run("", "status")

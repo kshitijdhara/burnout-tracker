@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/lock"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/logfile"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
@@ -22,6 +26,9 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
+
+// logDir is where the daemon's log files go when it runs as a service.
+func logDir(dataDir string) string { return filepath.Join(dataDir, "logs") }
 
 // hmacKeyName is the keystore entry for identity hashing.
 const hmacKeyName = "hmac"
@@ -49,14 +56,18 @@ const projectRootTimeout = 200 * time.Millisecond
 // RSS) unless GOMEMLIMIT is set in the environment.
 const defaultMemoryLimit = 48 << 20
 
-func runDaemon(ctx context.Context, _ []string) error {
+func runDaemon(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("daemon", flag.ContinueOnError)
+	toFile := fs.Bool("log-file", false, "log to a rotating file in the data folder (the background service does)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if !hasConsent() {
 		return errors.New("no consent recorded: run `burnout setup` first")
 	}
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(defaultMemoryLimit)
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	dataDir, err := paths.DataDir()
 	if err != nil {
@@ -65,6 +76,16 @@ func runDaemon(ctx context.Context, _ []string) error {
 	if err := paths.EnsurePrivateDir(dataDir); err != nil {
 		return err
 	}
+	var logOut io.Writer = os.Stderr
+	if *toFile {
+		w, err := logfile.Open(filepath.Join(logDir(dataDir), "daemon.log"), logfile.DefaultMaxBytes, logfile.DefaultFiles)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = w.Close() }()
+		logOut = w
+	}
+	log := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	release, err := lock.Acquire(dataDir)
 	if errors.Is(err, lock.ErrLocked) {
 		return errors.New("another burnout daemon is already running")

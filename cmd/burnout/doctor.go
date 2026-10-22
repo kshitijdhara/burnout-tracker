@@ -42,7 +42,8 @@ func runDoctor(ctx context.Context, _ []string) error {
 	pctx, cancel := context.WithTimeout(ctx, time.Second)
 	err = ingest.Ping(pctx)
 	cancel()
-	checkFix("daemon is running", err == nil, "start it with `burnout daemon`")
+	checkFix("daemon is running", err == nil, "start it with `burnout service install`, or `burnout daemon` in a terminal")
+	reportService()
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
@@ -148,4 +149,24 @@ func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
 		return "no call or video detected"
 	}
 	return strings.Join(parts, "; ")
+}
+
+// reportService shows whether the background service is set up. Platforms
+// without one yet say nothing.
+func reportService() {
+	m, _, err := serviceManager()
+	if err != nil {
+		return
+	}
+	st, err := m.Status()
+	switch {
+	case err != nil:
+		return
+	case st.Running:
+		check("background service", true, st.Detail)
+	case st.Installed:
+		check("background service", false, describeService(st, m.LogHint()))
+	default:
+		fmt.Printf("  -  background service: %s\n", describeService(st, m.LogHint()))
+	}
 }
