@@ -340,8 +340,8 @@ PowerShell `$PROFILE`. The rules for that block:
 | Shell | Mechanism |
 |-------|-----------|
 | zsh | `add-zsh-hook preexec/precmd` |
-| bash (3.2+) | vendored `bash-preexec` |
-| fish | `fish_preexec` / `fish_postexec` |
+| bash (3.2+) | vendored `bash-preexec` (loaded only if no other tool has; `HISTCONTROL` left as the user set it; the command comes from `$BASH_COMMAND`, not history) |
+| fish | `fish_preexec` / `fish_postexec`, in a file in `conf.d`, so `config.fish` isn't edited |
 | PowerShell 7 | `prompt` wrapper + PSReadLine; writes to the pipe **in-process** (`NamedPipeClientStream`), never spawns |
 
 **Hook rules:**
@@ -354,7 +354,9 @@ PowerShell `$PROFILE`. The rules for that block:
    `ps`/`/proc` or process auditing. A CI test checks `ps` during hooked
    commands.
 3. On zsh/bash/fish the emitter runs in the background (`&!` / `disown`)
-   with a 50 ms socket timeout, and always exits 0.
+   with a 50 ms socket timeout, and always exits 0. Shells without a
+   millisecond clock (bash before 5, fish) send the command's duration
+   instead of its start and end, and the emitter takes the end as now.
 4. A command that doesn't resolve (a typo or a pasted token) is sent with
    an empty name and its exit code, so failure loops still count without
    recording anything the user typed.

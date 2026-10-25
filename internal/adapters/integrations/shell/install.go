@@ -15,48 +15,104 @@ import (
 const (
 	blockBegin = "# >>> burnout >>>\n"
 	blockEnd   = "# <<< burnout <<<\n"
-	scriptName = "burnout.zsh"
+	// preexecName is the bash-preexec copy written next to the bash hook.
+	preexecName = "bash-preexec.sh"
+)
+
+// Kind is a supported shell.
+type Kind string
+
+// Supported shells.
+const (
+	Zsh  Kind = "zsh"
+	Bash Kind = "bash"
+	Fish Kind = "fish"
 )
 
 // InstallOptions says where the hook goes.
 type InstallOptions struct {
-	RCPath    string // e.g. ~/.zshrc; may be a symlink
-	ScriptDir string // where the rendered script is written, e.g. <config dir>/hooks
+	Shell Kind // zsh when empty
+	// RCPath is the file that sources the hook, e.g. ~/.zshrc or ~/.bashrc;
+	// it may be a symlink. Empty for fish, which loads its conf.d by itself.
+	RCPath    string
+	ScriptDir string // where the rendered script goes: <config dir>/hooks, or fish's conf.d
 	BinPath   string // absolute path of the burnout binary
 	BackupDir string // where the pre-edit copy of the rc file goes (the app's private data dir)
 	Now       func() time.Time
 }
 
+func (o InstallOptions) kind() Kind {
+	if o.Shell == "" {
+		return Zsh
+	}
+	return o.Shell
+}
+
 // ScriptPath is where Install writes the rendered hook script.
-func (o InstallOptions) ScriptPath() string { return filepath.Join(o.ScriptDir, scriptName) }
+func (o InstallOptions) ScriptPath() string {
+	return filepath.Join(o.ScriptDir, "burnout."+string(o.kind()))
+}
+
+// scripts returns every file Install writes, with its content.
+func (o InstallOptions) scripts() (map[string]string, error) {
+	switch o.kind() {
+	case Zsh:
+		return map[string]string{o.ScriptPath(): RenderZsh(o.BinPath)}, nil
+	case Bash:
+		preexec := filepath.Join(o.ScriptDir, preexecName)
+		return map[string]string{o.ScriptPath(): RenderBash(o.BinPath, preexec), preexec: BashPreexec}, nil
+	case Fish:
+		return map[string]string{o.ScriptPath(): RenderFish(o.BinPath)}, nil
+	default:
+		return nil, fmt.Errorf("shell: unsupported shell %q", o.Shell)
+	}
+}
 
 // Install writes the hook script and adds (or refreshes) the marked block
 // in the rc file. Running it again is a no-op apart from refreshing the
 // script.
 func Install(o InstallOptions) error {
-	if o.RCPath == "" || o.ScriptDir == "" || o.BinPath == "" || o.BackupDir == "" || o.Now == nil {
+	if (o.RCPath == "" && o.kind() != Fish) || o.ScriptDir == "" || o.BinPath == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("shell: incomplete install options")
 	}
-	// Owner-only: the user's own shell sources it, nobody else needs to read it.
-	if err := fileedit.WriteAtomic(o.ScriptPath(), []byte(RenderZsh(o.BinPath)), 0o600); err != nil {
-		return fmt.Errorf("shell: write hook script: %w", err)
+	files, err := o.scripts()
+	if err != nil {
+		return err
+	}
+	for path, content := range files {
+		// Owner-only: the user's own shell sources it, nobody else needs to read it.
+		if err := fileedit.WriteAtomic(path, []byte(content), 0o600); err != nil {
+			return fmt.Errorf("shell: write hook script: %w", err)
+		}
+	}
+	if o.RCPath == "" {
+		return nil
 	}
 	return editRC(o.RCPath, o.BackupDir, o.Now(), func(content []byte) []byte {
-		return withBlock(content, block(o.ScriptPath()))
+		return withBlock(content, block(o.kind(), o.ScriptPath()))
 	})
 }
 
 // Uninstall removes exactly the marked block (and the blank line Install
-// added before it) and deletes the hook script.
+// added before it) and deletes the hook scripts.
 func Uninstall(o InstallOptions) error {
-	if o.RCPath == "" || o.BackupDir == "" || o.Now == nil {
+	if (o.RCPath == "" && o.kind() != Fish) || o.BackupDir == "" || o.Now == nil {
 		return errors.New("shell: incomplete install options")
 	}
-	if err := editRC(o.RCPath, o.BackupDir, o.Now(), withoutBlock); err != nil {
+	if o.RCPath != "" {
+		if err := editRC(o.RCPath, o.BackupDir, o.Now(), withoutBlock); err != nil {
+			return err
+		}
+	}
+	if o.ScriptDir == "" {
+		return nil
+	}
+	files, err := o.scripts()
+	if err != nil {
 		return err
 	}
-	if o.ScriptDir != "" {
-		if err := os.Remove(o.ScriptPath()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	for path := range files {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("shell: remove hook script: %w", err)
 		}
 	}
@@ -87,9 +143,15 @@ func editRC(rcPath, backupDir string, now time.Time, edit func([]byte) []byte) e
 	return nil
 }
 
-func block(scriptPath string) []byte {
+// block is the marked block for an rc file: it sources the hook in
+// interactive shells only.
+func block(k Kind, scriptPath string) []byte {
 	q := fileedit.ShellQuote(scriptPath)
-	return []byte(blockBegin + "[[ -o interactive ]] && [[ -r " + q + " ]] && source " + q + "\n" + blockEnd)
+	interactive := "[[ -o interactive ]]"
+	if k == Bash {
+		interactive = "[[ $- == *i* ]]"
+	}
+	return []byte(blockBegin + interactive + " && [[ -r " + q + " ]] && source " + q + "\n" + blockEnd)
 }
 
 // findBlock returns the byte range of our block, including a missing final

@@ -491,7 +491,7 @@ The privacy guarantees above are only as good as their tests. CI MUST run:
 | Test | What it proves |
 |------|----------------|
 | **Canary test** | Secret-looking canary strings are injected into window titles, argv, cwd, Claude Code payloads (prompt, tool input), ICS fields and check-in free text. After a full trace replay, the DB file bytes, WAL, logs, exports, backups and spool are grepped. **Any hit fails the build** |
-| **ps-leak test** | While a hooked command with a canary in its arguments runs, process listings (`ps`, `/proc/*/cmdline`, Windows process command lines) contain no canary. `TestPSLeak` runs the real binary, daemon, zsh hook and Claude Code hook on Linux (`/proc` command lines and environments) and macOS (`ps -E`), and fails unless it saw the hook processes. Windows: not yet |
+| **ps-leak test** | While a hooked command with a canary in its arguments runs, process listings (`ps`, `/proc/*/cmdline`, Windows process command lines) contain no canary. `TestPSLeak` runs the real binary, daemon, zsh, bash and fish hooks, and Claude Code hook on Linux (`/proc` command lines and environments) and macOS (`ps -E`), and fails unless it saw the hook processes. Windows: not yet |
 | **Hook stdout test** | `burnout hook claude` produces zero bytes on stdout for every event type and for malformed input |
 | **Fuzzing** | Ingest parser, hook payload parser, ICS parser and the bridge protocol (`go test -fuzz`, run continuously) |
 | **Contract tests** | Recorded payloads per Claude Code version, per shell and per extension version parse correctly. The allowlisted fields are the only ones decoded |

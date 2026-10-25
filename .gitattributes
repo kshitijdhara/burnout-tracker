@@ -1,0 +1,8 @@
+# Files embedded into the binary keep LF line endings on every checkout,
+# including Windows: shells reject a \r in scripts, and the vendored
+# bash-preexec's checksum is pinned (hooks/README.md).
+*.zsh  text eol=lf
+*.bash text eol=lf
+*.fish text eol=lf
+*.sh   text eol=lf
+*.sql  text eol=lf

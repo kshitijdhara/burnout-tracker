@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/testsupport"
 )
 
 // psCanary is planted in typed commands and hook payloads. It must never
@@ -63,7 +65,7 @@ func TestPSLeak(t *testing.T) {
 		"BURNOUT_RUNTIME_DIR=" + runtimeDir, "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"),
 		envKeystore + "=file",
 	}
-	if out, err := runWith(env, bin, "install-hooks", "--claude=false"); err != nil {
+	if out, err := runWith(env, bin, "install-hooks", "--claude=false", "--bash", "--fish"); err != nil {
 		t.Fatalf("install-hooks: %v\n%s", err, out)
 	}
 
@@ -134,6 +136,49 @@ func TestPSLeak(t *testing.T) {
 		t.Fatalf("zsh still running after 60s: %s", out)
 	} else if err != nil {
 		t.Logf("zsh exited: %v (%s)", err, out)
+	}
+
+	// bash and fish, through what install-hooks wrote to ~/.bashrc and
+	// fish's conf.d, typed into a terminal as their hooks need.
+	for _, sh := range []struct {
+		argv  []string
+		diag  []string // typed first; their output is shown if no emitter is seen
+		lines []string
+	}{
+		{[]string{"bash", "-i"}, []string{
+			`echo "PC=[${PROMPT_COMMAND[*]}] BP=[${bash_preexec_imported:-}] HOOK=[$(type -t __burnout_preexec)]"`,
+			`trap -p DEBUG`, `grep -n -i -e PROMPT_COMMAND -e trap -e preexec /etc/bash.bashrc 2>/dev/null | head -20`,
+		}, []string{": " + psCanary, "x=" + psCanary, "( : " + psCanary + " )"}},
+		{[]string{"fish", "-i"}, nil, []string{"set x " + psCanary, "echo " + psCanary + " >/dev/null", "true " + psCanary}},
+	} {
+		python, err := exec.LookPath("python3")
+		if err != nil {
+			t.Log("python3 not installed: bash and fish not checked")
+			break
+		}
+		if _, err := exec.LookPath(sh.argv[0]); err != nil {
+			t.Logf("%s not installed: not checked", sh.argv[0])
+			continue
+		}
+		before := s.count("emit shell")
+		// As many commands as zsh gets: each emitter lives a few
+		// milliseconds, and a slow CI runner catches only some of them.
+		typed := append([]string(nil), sh.diag...)
+		for i := range 150 {
+			typed = append(typed, sh.lines[i%len(sh.lines)])
+		}
+		typed = append(typed, "exit")
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		cmd := exec.CommandContext(ctx, python, append([]string{"-c", testsupport.PTYType}, sh.argv...)...) //nolint:gosec // test tools
+		cmd.Env, cmd.Dir = append(env, "BT_TYPE_DELAY=0.05"), home
+		cmd.Stdin = strings.NewReader(strings.Join(typed, "\n") + "\n")
+		out, _ := cmd.CombinedOutput()
+		cancel()
+		if n := s.count("emit shell") - before; n == 0 && runtime.GOOS == "linux" {
+			t.Fatalf("the sampler never saw a %s emitter, so it checked nothing:\n%s", sh.argv[0], out)
+		} else {
+			t.Logf("%s: saw its emitter %d times", sh.argv[0], n)
+		}
 	}
 
 	leaks, seen, scans := s.stop()
@@ -209,6 +254,12 @@ func (s *sampler) record(procs []process) {
 			}
 		}
 	}
+}
+
+func (s *sampler) count(what string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seen[what]
 }
 
 func (s *sampler) waitSeen(t *testing.T, what string, timeout time.Duration) {

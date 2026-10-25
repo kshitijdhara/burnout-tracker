@@ -49,7 +49,7 @@ mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 
 ```sh
 ~/.local/bin/burnout setup            # shows what is collected, asks for consent
-~/.local/bin/burnout install-hooks    # zsh hook + Claude Code hooks (backs up files first)
+~/.local/bin/burnout install-hooks    # shell hooks + Claude Code hooks (backs up files first)
 ~/.local/bin/burnout doctor           # first run: answer the keychain prompt (below)
 ~/.local/bin/burnout service install  # runs the daemon in the background, from login
 ```
@@ -70,9 +70,22 @@ daemon isn't disturbed), then `service install` again to restart on the
 new binary. To watch the daemon's log in a terminal instead,
 skip the service and run `~/.local/bin/burnout daemon`.
 
-**3. Pick up the hooks.** Open a new terminal tab so zsh loads the hook, and
-start a new Claude Code session (`/hooks` inside Claude Code lists them).
-Sessions that were already open are not tracked.
+**3. Pick up the hooks.** Open a new terminal tab so your shell loads the
+hook, and start a new Claude Code session (`/hooks` inside Claude Code
+lists them). Sessions that were already open are not tracked.
+
+`install-hooks` sets up zsh, plus bash and fish if you use them (their
+config exists, or one is your login shell). Force either with `--bash` or
+`--fish`, or skip one with `--zsh=false`.
+- **bash:** a block in `~/.bashrc`. It loads bash-preexec, the library
+  starship, atuin and iTerm2 also use, unless one of them already has. It
+  keeps your `HISTCONTROL` as it is.
+- **fish:** a file in `~/.config/fish/conf.d`, so your `config.fish` isn't
+  touched.
+
+On macOS, Terminal starts bash as a login shell, which reads
+`~/.bash_profile`. If yours doesn't already source `~/.bashrc`, add
+`[ -r ~/.bashrc ] && . ~/.bashrc` to it. PowerShell isn't supported yet.
 
 **4. Check it works.**
 
@@ -181,7 +194,8 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
   ```
 
 - **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
-  install hooks with `burnout install-hooks --zsh=false`. There is no
+  install hooks with `burnout install-hooks --zsh=false` (Git Bash works
+  with `--bash`). There is no
   background service on Windows yet: run `burnout daemon` in a terminal and
   stop it with Ctrl-C (`pkill` and `pgrep` don't exist on Windows).
   To remove everything, in Command Prompt:

@@ -27,3 +27,33 @@ func zshSubcommandTable() string {
 	}
 	return b.String()
 }
+
+// bashSubcommandFuncs renders ToolSubcommands as two bash functions that
+// work on bash 3.2, which has no associative arrays:
+// __burnout_has_subcmds TOOL and __burnout_allowed TOOL WORD.
+func bashSubcommandFuncs() string {
+	tools := slices.Sorted(maps.Keys(ToolSubcommands))
+	var b strings.Builder
+	b.WriteString("__burnout_has_subcmds() {\n  case $1 in\n    " + strings.Join(tools, "|") + ") return 0 ;;\n  esac\n  return 1\n}\n")
+	b.WriteString("__burnout_allowed() {\n  case $1 in\n")
+	for _, tool := range tools {
+		b.WriteString("    " + tool + ") case $2 in " + strings.Join(ToolSubcommands[tool], "|") + ") return 0 ;; esac ;;\n")
+	}
+	b.WriteString("  esac\n  return 1\n}")
+	return b.String()
+}
+
+// fishSubcommandFuncs renders ToolSubcommands as the same two functions
+// in fish.
+func fishSubcommandFuncs() string {
+	tools := slices.Sorted(maps.Keys(ToolSubcommands))
+	var b strings.Builder
+	b.WriteString("    function __burnout_has_subcmds\n        switch $argv[1]\n            case " + strings.Join(tools, " ") +
+		"\n                return 0\n        end\n        return 1\n    end\n")
+	b.WriteString("    function __burnout_allowed\n        switch $argv[1]\n")
+	for _, tool := range tools {
+		b.WriteString("            case " + tool + "\n                contains -- $argv[2] " + strings.Join(ToolSubcommands[tool], " ") + "; and return 0\n")
+	}
+	b.WriteString("        end\n        return 1\n    end")
+	return b.String()
+}

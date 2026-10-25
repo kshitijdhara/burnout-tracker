@@ -1,8 +1,11 @@
 package shell
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -184,5 +187,90 @@ func TestRenderQuotesBinary(t *testing.T) {
 	}
 	if !strings.Contains(got, "  git ' add am ") {
 		t.Fatal("subcommand table not rendered")
+	}
+}
+
+func TestInstallBashAndFish(t *testing.T) {
+	// bash: a block in ~/.bashrc with bash's interactive test, the hook and
+	// the bash-preexec copy next to it.
+	rc := filepath.Join(t.TempDir(), ".bashrc")
+	orig := "export EDITOR=vim\n"
+	if err := os.WriteFile(rc, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := opts(t, rc)
+	o.Shell = Bash
+	if err := Install(o); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, rc)
+	if !strings.Contains(got, "[[ $- == *i* ]] && [[ -r '"+o.ScriptPath()+"' ]] && source '"+o.ScriptPath()+"'") {
+		t.Fatalf(".bashrc:\n%s", got)
+	}
+	if !strings.HasSuffix(o.ScriptPath(), "burnout.bash") || read(t, filepath.Join(o.ScriptDir, preexecName)) != BashPreexec {
+		t.Fatalf("bash scripts not written to %s", o.ScriptDir)
+	}
+	if script := read(t, o.ScriptPath()); !strings.Contains(script, "source '"+filepath.Join(o.ScriptDir, preexecName)+"'") ||
+		!strings.Contains(script, "__burnout_bin='/opt/burn out/bin/burnout'") || strings.Contains(script, "__BURNOUT_") {
+		t.Fatalf("bash hook not rendered:\n%s", script)
+	}
+	if err := Uninstall(o); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, rc) != orig {
+		t.Fatal(".bashrc not restored")
+	}
+	for _, f := range []string{o.ScriptPath(), filepath.Join(o.ScriptDir, preexecName)} {
+		if _, err := os.Stat(f); !os.IsNotExist(err) {
+			t.Fatalf("%s left behind", f)
+		}
+	}
+
+	// fish: one file in conf.d, no rc file edited.
+	f := InstallOptions{
+		Shell: Fish, ScriptDir: filepath.Join(t.TempDir(), "fish", "conf.d"), BinPath: "/opt/it's/burnout",
+		BackupDir: t.TempDir(), Now: time.Now,
+	}
+	if err := Install(f); err != nil {
+		t.Fatal(err)
+	}
+	if script := read(t, f.ScriptPath()); !strings.Contains(script, `set -g __burnout_bin '/opt/it\'s/burnout'`) ||
+		strings.Contains(script, "__BURNOUT_") || !strings.HasSuffix(f.ScriptPath(), filepath.Join("conf.d", "burnout.fish")) {
+		t.Fatalf("fish hook at %s:\n%s", f.ScriptPath(), script)
+	}
+	if err := Uninstall(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.ScriptPath()); !os.IsNotExist(err) {
+		t.Fatal("fish hook left behind")
+	}
+	if err := Install(InstallOptions{Shell: "tcsh", RCPath: rc, ScriptDir: t.TempDir(), BinPath: "/x", BackupDir: t.TempDir(), Now: time.Now}); err == nil {
+		t.Error("installed for an unsupported shell")
+	}
+}
+
+// The vendored bash-preexec is reviewed at a fixed version; a change to
+// it must update hooks/README.md (version, review, checksum).
+func TestVendoredBashPreexec(t *testing.T) {
+	sum := sha256.Sum256([]byte(BashPreexec))
+	const want = "6ef95f16012bdfec0ab6ee853e8892d51eee295c8639944f9b983b3d40e0e9f7"
+	if got := hex.EncodeToString(sum[:]); got != want {
+		t.Fatalf("hooks/bash-preexec.sh changed (sha256 %s): review it and update hooks/README.md", got)
+	}
+	if !strings.Contains(read(t, filepath.Join("hooks", "README.md")), want) {
+		t.Fatal("hooks/README.md does not record the bash-preexec checksum")
+	}
+}
+
+// Every allowlist entry is a plain word, so it can be rendered unquoted
+// into the bash case patterns and fish's switch and contains.
+func TestSubcommandNamesArePlainWords(t *testing.T) {
+	plain := regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+	for tool, subs := range ToolSubcommands {
+		for _, w := range append([]string{tool}, subs...) {
+			if !plain.MatchString(w) {
+				t.Errorf("%q (tool %s) can't be rendered unquoted", w, tool)
+			}
+		}
 	}
 }
