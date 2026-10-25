@@ -6,15 +6,17 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
 
@@ -127,7 +129,6 @@ func TestDaemonEndToEnd(t *testing.T) {
 		Hasher:      fakeHasher{},
 		ProjectRoot: func(dir string) string { return dir },
 		Procs:       fakeProcs{},
-		Rules:       classify.New(nil, nil),
 		AgentKind:   agentKind,
 		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -220,8 +221,8 @@ func newTestDaemon(t *testing.T, clock *fakeClock, sink Sink, collector ports.Co
 	deps := Deps{
 		Clock: clock, Collector: collector, Sink: sink, Hasher: fakeHasher{},
 		ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
-		Rules: classify.New(nil, nil), AgentKind: agentKind,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		AgentKind: agentKind,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if mutate != nil {
 		mutate(&cfg, &deps)
@@ -410,8 +411,8 @@ func TestDaemonResolvesIdleStretches(t *testing.T) {
 			d := New(DefaultConfig(), Deps{
 				Clock: clock, Collector: tc.script, Sink: sink, Hasher: fakeHasher{},
 				ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
-				Rules: classify.New(nil, nil), AgentKind: agentKind,
-				Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+				AgentKind: agentKind,
+				Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 			})
 			n := tc.ticks
 			if n == 0 {
@@ -602,5 +603,102 @@ func TestForgetSettlesThenDeletes(t *testing.T) {
 	}
 	if len(d.pendingIntervals)+len(d.pendingRollups) != 0 {
 		t.Fatal("data still held in memory after forgetting")
+	}
+}
+
+// Private hours pause collection like a pause does, with or without the
+// pause controls, and collection resumes when they end.
+func TestPrivateHours(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	// t0 is a Wednesday at 10:00 UTC.
+	private := schedule.Window{Start: 10*time.Hour + time.Minute, End: 10*time.Hour + 31*time.Minute}
+	private.Days[time.Wednesday] = true
+	d := newTestDaemon(t, clock, sink, nil, func(c *Config, _ *Deps) {
+		c.Settings.PrivateHours = schedule.Schedule{private}
+	})
+	ctx := context.Background()
+	shell := func(at time.Time) wire.Message {
+		return wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+			Argv0: "ls", StartMs: at.Add(-time.Second).UnixMilli(), EndMs: at.UnixMilli(),
+		}}
+	}
+	for _, step := range []struct {
+		at      time.Duration
+		private bool
+	}{{0, false}, {time.Minute, true}, {20 * time.Minute, true}, {31 * time.Minute, false}} {
+		at := t0.Add(step.at)
+		clock.set(at)
+		d.checkControls(ctx)
+		if d.paused.Load() != step.private {
+			t.Fatalf("at +%v: paused %v", step.at, d.paused.Load())
+		}
+		if !d.Submit(shell(at)) {
+			t.Fatalf("at +%v: hook got an error", step.at)
+		}
+		if !step.private {
+			d.apply(<-d.inbox)
+		}
+	}
+	d.flush(ctx, clock.Now(), clock.Now())
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.intervals) != 2 || d.counters.paused.Load() != 2 {
+		t.Errorf("%d commands recorded, %d discarded; want 2 and 2", len(sink.intervals), d.counters.paused.Load())
+	}
+}
+
+// Changed settings apply on the loop: minutes recorded before the change
+// are written under the old settings, later ones under the new.
+func TestReloadAppliesSettings(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	collector := &fakeCollector{clock: clock}
+	var next *Settings
+	d := newTestDaemon(t, clock, sink, collector, func(_ *Config, deps *Deps) {
+		deps.Reload = func() (Settings, bool) {
+			if next == nil {
+				return Settings{}, false
+			}
+			s := *next
+			next = nil
+			return s, true
+		}
+	})
+	ctx := context.Background()
+	minute := func() {
+		for range 60 {
+			d.onTick(ctx)
+		}
+	}
+	minute() // 10:00, defaults: the terminal is recorded by name
+	next = &Settings{Exclusions: []string{"com.googlecode.iterm2"}}
+	d.checkControls(ctx)
+	minute() // 10:01: the terminal is private
+	next = &Settings{AggregateOnly: true}
+	d.checkControls(ctx)
+	minute() // 10:02: one row per category
+	d.settle(ctx, clock.Now())
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	byMinute := map[int][]string{}
+	for _, r := range sink.rollups {
+		m := int(r.Minute.Sub(t0) / time.Minute)
+		byMinute[m] = append(byMinute[m], r.WindowKey+"/"+r.AppID+"/"+string(r.Category))
+	}
+	terminal := fakeHasher{}.Key("window", "com.googlecode.iterm2", "1") + "/com.googlecode.iterm2/terminal"
+	private := fakeHasher{}.Key("window", "private") + "//private"
+	for m, want := range map[int][]string{
+		0: {terminal, private},
+		1: {private},
+		2: {"category:terminal//terminal", private},
+	} {
+		got := byMinute[m]
+		sort.Strings(got)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("minute %d: %q, want %q", m, got, want)
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
@@ -40,6 +41,17 @@ func runDoctor(ctx context.Context, _ []string) error {
 
 	checkFix("daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
 	reportService()
+	cfg, cfgPath, cfgErr := loadConfig()
+	switch {
+	case cfgErr != nil && cfgPath == "":
+		check("config file", false, cfgErr.Error())
+	case cfgErr != nil:
+		check("config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
+			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
+		cfg = config.Default()
+	default:
+		check("config file is valid", true, printable(cfgPath))
+	}
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
@@ -75,7 +87,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 			fmt.Printf("  -  limitation: %s\n", l)
 		}
 		if snapErr == nil {
-			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(nil, nil)))
+			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Privacy.ExcludeApps, nil)))
 		}
 	}
 

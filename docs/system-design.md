@@ -200,7 +200,12 @@ The rules:
 
 - There is one TOML file at `<config dir>/burnout/config.toml`. Its schema,
   defaults and validation live in code.
-- `burnout config get|set|validate` manages it, and it reloads when changed.
+- `burnout config get|set|add|remove|unset|validate` manages it, and the
+  daemon reloads it within a second of a change. Unknown keys are an
+  error, so a typo never silently leaves a privacy control off. An invalid
+  file is never half-applied: a running daemon keeps its current settings
+  and logs a warning, a starting one refuses to start, and `doctor`
+  reports it.
 - **Secrets never go in the config file.** The ICS URL and the HMAC key live
   in the OS keystore (ADR-0007). `burnout keys rotate` rotates the HMAC key,
   which starts new identities (Privacy & Security §4.5).
@@ -561,7 +566,7 @@ CREATE TABLE raw_events (id INTEGER PRIMARY KEY, recv_ms INTEGER NOT NULL, v INT
 -- per-minute attention rollups per window (default 180 days)
 CREATE TABLE attention_minutes (
   minute_ms INTEGER NOT NULL, utc_offset_min INTEGER NOT NULL, logical_day TEXT NOT NULL,
-  window_key TEXT NOT NULL,            -- HMAC(key, app id + window identity)
+  window_key TEXT NOT NULL,            -- HMAC(key, app id + window identity); 'category:<c>' in aggregate-only mode
   app_id TEXT,                         -- NULL when category = 'private' or aggregate-only
   category TEXT NOT NULL, monitor INTEGER,
   attended_s REAL NOT NULL, focused_s REAL NOT NULL, visible_s REAL NOT NULL,

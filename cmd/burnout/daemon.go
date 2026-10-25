@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
@@ -25,7 +26,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
+	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
@@ -143,6 +144,10 @@ func runServiceDaemon(ctx context.Context) error {
 	}
 	defer func() { _ = release() }()
 	err = serveDaemon(ctx, log, dataDir)
+	if errors.Is(err, errBadConfig) {
+		log.Error("not starting: the config file is invalid; see `burnout config validate`", "err", err)
+		return nil
+	}
 	if errors.Is(err, sqlite.ErrSchemaTooNew) {
 		log.Error("not starting: the database was written by a newer burnout; install that version again", "err", err)
 		return nil
@@ -212,8 +217,21 @@ func (h homeRedactor) redactErr(err error) error {
 	return errors.New(strings.ReplaceAll(err.Error(), h.home, "~"))
 }
 
+// errBadConfig is an invalid config file at start. The daemon doesn't run
+// on defaults instead: that could quietly drop the user's private hours or
+// exclusions.
+var errBadConfig = errors.New("invalid config")
+
 // serveDaemon runs the daemon once it holds the lock.
 func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
+	cfgPath, err := configPath()
+	if err != nil {
+		return err
+	}
+	settings, err := newLiveConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errBadConfig, err)
+	}
 	if err := paths.ExcludeFromBackups(dataDir); err != nil {
 		log.Warn("could not exclude the data directory from backups", "err", err)
 	}
@@ -250,22 +268,30 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 	defer func() { _ = server.Close() }()
 
 	roots := identity.NewRoots()
-	d := app.New(app.DefaultConfig(), app.Deps{
+	cfg := app.DefaultConfig()
+	cfg.Settings = settingsFrom(settings.current())
+	d := app.New(cfg, app.Deps{
 		Clock:       systemClock{},
 		Collector:   collector,
 		Sink:        store,
 		Hasher:      identity.NewHasher(key),
 		ProjectRoot: func(dir string) string { return roots.Resolve(dir, projectRootTimeout) },
 		Procs:       procinfo.Info{},
-		Rules:       classify.New(nil, nil),
 		AgentKind:   agentKind,
 		Log:         log,
 		Maintain: func(ctx context.Context, now time.Time) error {
-			if _, err := store.RunRetention(ctx, now, sqlite.DefaultRetention()); err != nil {
+			c := settings.current()
+			if _, err := store.RunRetention(ctx, now, retentionFrom(c)); err != nil {
 				return err
 			}
 			if err := saveScores(ctx, store, now); err != nil {
 				log.Warn("could not update daily features and scores", "err", err)
+			}
+			if c.Privacy.AggregateOnly {
+				// After scoring, so closed days' features come from full detail.
+				if _, err := store.Aggregate(ctx, model.LogicalDay(now, cfg.Rollover)); err != nil {
+					return err
+				}
 			}
 			return store.Backup(ctx, now)
 		},
@@ -275,6 +301,13 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 		},
 		LoadHealth:  store.Health,
 		IngestStats: func() map[string]uint64 { return ingestStatsMap(server.Stats()) },
+		Reload: func() (app.Settings, bool) {
+			c, changed, err := settings.check()
+			if err != nil {
+				log.Warn("the config file changed but is invalid; keeping the current settings (see `burnout config validate`)")
+			}
+			return settingsFrom(c), changed
+		},
 	})
 
 	serveErr := make(chan error, 1)
@@ -291,6 +324,42 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 
 	log.Info("daemon started", "version", version, "keystore", keys.Backend())
 	return d.Run(runCtx)
+}
+
+// liveConfig is the config file as the daemon last read it. The loop
+// checks it for changes; maintenance reads it from its own goroutine.
+type liveConfig struct {
+	watcher *config.Watcher
+	mu      sync.Mutex
+	cfg     config.Config
+}
+
+func newLiveConfig(path string) (*liveConfig, error) {
+	w := config.NewWatcher(path)
+	c, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	return &liveConfig{watcher: w, cfg: c}, nil
+}
+
+func (l *liveConfig) current() config.Config {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cfg
+}
+
+// check reports a valid change to the file. An invalid file reports its
+// error once, and the current settings stay.
+func (l *liveConfig) check() (config.Config, bool, error) {
+	c, changed, err := l.watcher.Check()
+	if !changed || err != nil {
+		return config.Config{}, false, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg = c
+	return c, true, nil
 }
 
 // controlFiles reads the user's pause and forget requests from the data

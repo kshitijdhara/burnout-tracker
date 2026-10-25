@@ -6,13 +6,22 @@ import "time"
 // clearly holds (the user is looking at paper, a phone, or nothing on screen).
 const UnattributedWindowKey = "unattributed"
 
+// CategoryWindowKeyPrefix starts the rollup key of a category's row in
+// aggregate-only mode, where minutes are kept per category, not per window.
+const CategoryWindowKeyPrefix = "category:"
+
+// CategoryWindowKey is the rollup key for all of a category's windows in
+// aggregate-only mode. The category is stored in clear anyway, so the key
+// reveals nothing more.
+func CategoryWindowKey(c Category) string { return CategoryWindowKeyPrefix + string(c) }
+
 // MinuteRollup is the persisted unit of attention: per minute, per window.
 // 1 Hz ticks are never persisted; they are summed into these.
 type MinuteRollup struct {
 	Minute       time.Time // start of the minute, UTC
 	UTCOffsetMin int
 	LogicalDay   string // YYYY-MM-DD, see LogicalDay
-	WindowKey    string // HMAC of app id + OS window identity, or UnattributedWindowKey
+	WindowKey    string // HMAC of app id + OS window identity, UnattributedWindowKey or CategoryWindowKey
 	AppID        string // empty when Category is private or aggregate-only mode is on
 	Category     Category
 	Monitor      int

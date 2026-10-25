@@ -20,6 +20,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/timeline"
 )
 
@@ -47,7 +48,7 @@ type Config struct {
 	Rollover      time.Duration // logical-day rollover, 4 h
 	Attention     attention.Params
 	Timeline      timeline.Params
-	AggregateOnly bool // drop app ids from rollups (privacy & security §5.1)
+	Settings      Settings // the user's settings at start; Deps.Reload changes them
 
 	// Bounds on memory while the store is unavailable.
 	MaxPending        int // unflushed intervals
@@ -66,7 +67,7 @@ type Config struct {
 	IdleStride int
 
 	// ControlInterval is how often pause and forget requests are checked.
-	ControlInterval time.Duration
+	ControlInterval time.Duration // also how often settings and private hours are checked
 
 	// Maintenance (retention, vacuum, recovery copies) runs on its own
 	// goroutine, first MaintenanceDelay after start, then every
@@ -111,7 +112,6 @@ type Deps struct {
 	// mount must not block the caller indefinitely).
 	ProjectRoot func(dir string) string
 	Procs       ports.ProcessInfo
-	Rules       *classify.Rules
 	AgentKind   AgentKind
 	Log         *slog.Logger
 
@@ -123,6 +123,22 @@ type Deps struct {
 	Forget      func(ctx context.Context, since time.Time) error
 	LoadHealth  func(ctx context.Context, logicalDay string) (string, error)
 	IngestStats func() map[string]uint64
+	// Reload returns the user's settings when they have changed since the
+	// last call. It is called every ControlInterval on the loop.
+	Reload func() (Settings, bool)
+}
+
+// Settings are the user's privacy settings the loop applies (privacy &
+// security §5.1). They can change while the daemon runs.
+type Settings struct {
+	// PrivateHours are when nothing is recorded, as if paused.
+	PrivateHours schedule.Schedule
+	// Exclusions are app ids recorded as private, like the sensitive-apps
+	// denylist.
+	Exclusions []string
+	// AggregateOnly keeps one row per category per minute, without app ids
+	// or per-window keys.
+	AggregateOnly bool
 }
 
 // Controls are the user's requests to the daemon, checked every
@@ -140,6 +156,9 @@ type Controls interface {
 type Daemon struct {
 	cfg  Config
 	deps Deps
+	// settings and rules change only on the loop (Deps.Reload).
+	settings Settings
+	rules    *classify.Rules
 
 	inbox    chan event
 	counters counters // updated by Submit on ingest goroutines
@@ -159,6 +178,8 @@ type Daemon struct {
 	ticks            int
 	// paused is read by Submit on ingest goroutines.
 	paused atomic.Bool
+	// pausedFor says why, for the log: "pause" or "private hours".
+	pausedFor string
 }
 
 // tickRecord is what consuming a tick's result needs besides the result,
@@ -203,14 +224,16 @@ type event struct {
 func New(cfg Config, deps Deps) *Daemon {
 	cfg.Timeline.Rollover = cfg.Rollover
 	return &Daemon{
-		cfg:     cfg,
-		deps:    deps,
-		inbox:   make(chan event, cfg.QueueSize),
-		engine:  attention.New(cfg.Attention),
-		rollups: attention.NewRollups(cfg.Rollover),
-		tracker: timeline.New(cfg.Timeline),
-		windows: newSessionWindows(deps.Procs),
-		health:  newHealth(),
+		cfg:      cfg,
+		deps:     deps,
+		settings: cfg.Settings,
+		rules:    classify.New(cfg.Settings.Exclusions, nil),
+		inbox:    make(chan event, cfg.QueueSize),
+		engine:   attention.New(cfg.Attention),
+		rollups:  attention.NewRollups(cfg.Rollover),
+		tracker:  timeline.New(cfg.Timeline),
+		windows:  newSessionWindows(deps.Procs),
+		health:   newHealth(),
 	}
 }
 
@@ -230,16 +253,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 	flush := time.NewTicker(d.cfg.FlushInterval)
 	defer flush.Stop()
 
-	var ticks, controls <-chan time.Time
+	var ticks <-chan time.Time
 	if d.deps.Collector != nil {
 		ticks = tick.C
 	}
-	if d.deps.Controls != nil {
-		c := time.NewTicker(d.cfg.ControlInterval)
-		defer c.Stop()
-		controls = c.C
-		d.checkControls(ctx)
-	}
+	controls := time.NewTicker(d.cfg.ControlInterval)
+	defer controls.Stop()
+	d.checkControls(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -250,7 +270,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}
 		case ev := <-d.inbox:
 			d.apply(ev)
-		case <-controls:
+		case <-controls.C:
 			d.checkControls(ctx)
 		case <-flush.C:
 			if d.paused.Load() {
@@ -265,23 +285,37 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
-// checkControls applies the user's pause and forget requests.
+// checkControls applies changed settings, private hours and the user's
+// pause and forget requests.
 func (d *Daemon) checkControls(ctx context.Context) {
 	now := d.deps.Clock.Now()
-	switch paused := d.deps.Controls.Paused(now); {
+	d.reload(ctx, now)
+	reason := ""
+	switch {
+	case d.deps.Controls != nil && d.deps.Controls.Paused(now):
+		reason = "pause"
+	case d.settings.PrivateHours.Contains(now):
+		reason = "private hours"
+	}
+	switch paused := reason != ""; {
 	case paused && !d.paused.Load():
 		// Close and write everything open, then stop: collectors aren't
 		// sampled and hook events are discarded until the pause ends.
 		d.settle(ctx, now)
 		d.paused.Store(true)
-		d.deps.Log.Info("collection paused")
+		d.pausedFor = reason
+		d.deps.Log.Info("collection paused", "for", reason)
 	case !paused && d.paused.Load():
 		// Agent sessions stayed open through the pause; their segments
 		// restart now, and the paused span they would claim is dropped.
 		d.tracker.Flush(now)
 		d.tracker.Drain()
 		d.paused.Store(false)
-		d.deps.Log.Info("collection resumed")
+		d.deps.Log.Info("collection resumed", "after", d.pausedFor)
+		d.pausedFor = ""
+	}
+	if d.deps.Controls == nil {
+		return
 	}
 	since, done, ok := d.deps.Controls.TakeForget()
 	if !ok {
@@ -296,6 +330,25 @@ func (d *Daemon) checkControls(ctx context.Context) {
 	}
 	d.deps.Log.Info("forgot recorded data", "ok", err == nil)
 	done(err)
+}
+
+// reload applies changed settings. Everything recorded under the old
+// settings is written out first, so a new exclusion or aggregate-only mode
+// never mixes with minutes recorded before it.
+func (d *Daemon) reload(ctx context.Context, now time.Time) {
+	if d.deps.Reload == nil {
+		return
+	}
+	s, changed := d.deps.Reload()
+	if !changed {
+		return
+	}
+	if !d.paused.Load() {
+		d.settle(ctx, now)
+	}
+	d.settings = s
+	d.rules = classify.New(s.Exclusions, nil)
+	d.deps.Log.Info("settings changed", "private_hours", len(s.PrivateHours), "exclusions", len(s.Exclusions), "aggregate_only", s.AggregateOnly)
 }
 
 // settle closes every open span and held tick and writes them out, as at
@@ -320,7 +373,7 @@ func (d *Daemon) onTick(ctx context.Context) {
 	d.locked = snap.Locked || snap.DisplayAsleep
 	cats := make(map[model.WindowID]model.Category, len(snap.Windows))
 	for _, w := range snap.Windows {
-		cats[w.ID] = d.deps.Rules.App(w.AppID)
+		cats[w.ID] = d.rules.App(w.AppID)
 	}
 	sessions := d.windows.resolve(snap, d.tracker.Sessions())
 	res := d.engine.Tick(attention.Input{
@@ -356,12 +409,15 @@ func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity
 		AppID:    w.AppID,
 		Category: cat,
 	}
-	if cat == model.CategoryPrivate || d.cfg.AggregateOnly {
-		id.AppID = ""
-	}
-	if cat == model.CategoryPrivate {
+	switch {
+	case cat == model.CategoryPrivate:
 		// Private windows share one identity so no per-window trail exists.
+		id.AppID = ""
 		id.Key = d.deps.Hasher.Key("window", "private")
+	case d.settings.AggregateOnly:
+		// One row per category per minute: no app, no window.
+		id.AppID = ""
+		id.Key = model.CategoryWindowKey(cat)
 	}
 	return id
 }
