@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -29,7 +30,8 @@ func TestPause(t *testing.T) {
 	if paused, p := PauseState(dir, now.AddDate(1, 0, 0)); !paused || !p.Until.IsZero() {
 		t.Fatalf("until resumed: %v %v", paused, p)
 	}
-	if fi, _ := os.Stat(filepath.Join(dir, pauseFile)); fi.Mode().Perm() != 0o600 {
+	// Windows has no mode bits; the data folder's owner-only ACL applies.
+	if fi, _ := os.Stat(filepath.Join(dir, pauseFile)); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("pause file mode %v", fi.Mode().Perm())
 	}
 	if err := Resume(dir); err != nil {
