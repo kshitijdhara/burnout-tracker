@@ -1,0 +1,105 @@
+// Package features computes the daily features the strain score is built
+// from (system design §3.5, §7.1). Every feature is a declared entry in the
+// registry with a pure compute function, so explanations, the stored schema
+// version and the docs come from one place. Pure: no I/O, no clock.
+package features
+
+import (
+	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+)
+
+// Minute is one minute of attention, in the local time it was recorded in.
+type Minute struct {
+	At        time.Time      // start of the minute, local
+	Label     string         // the app (or category) that held most attention
+	Category  model.Category // the category of Label
+	AttendedS float64        // all attention in the minute
+	CallS     float64        // seconds a call held presence
+	VideoS    float64        // seconds visible video held presence
+}
+
+// Span is one interval of a timeline, in local time.
+type Span struct {
+	Start, End time.Time
+	State      string // agent or human state
+	Session    string // agent session key
+	Argv0      string // shell commands
+	Group      string // shell command group: vcs, build, infra, remote, …
+	Exit       int    // shell exit code
+	Reason     string // presence reason: input, video, call
+}
+
+// Duration returns the span's length.
+func (s Span) Duration() time.Duration { return s.End.Sub(s.Start) }
+
+// Day is everything recorded for one logical day, the input to every
+// feature.
+type Day struct {
+	Date    string // logical day, YYYY-MM-DD
+	Weekend bool   // Saturday or Sunday
+
+	Minutes  []Minute // in order; minutes without attention are absent
+	Presence []Span   // present spans, in order
+	Shell    []Span   // finished shell commands, in order of start
+	Agent    []Span   // agent state segments
+	Human    []Span   // human state segments
+
+	// PrevLastPresence is when the previous logical day's presence ended,
+	// zero when unknown. It gives the overnight gap.
+	PrevLastPresence time.Time
+
+	// Coverage and Present say how much of the day was observed: the
+	// share of present time a window was attributed to, and the time the
+	// user was present. A barely observed day is missing, not rest.
+	Coverage float64
+	Present  time.Duration
+}
+
+// Params are the definitions features depend on. Defaults follow the
+// design; they become config keys with the privacy controls.
+type Params struct {
+	CoreStart, CoreEnd time.Duration // core hours, local time of day
+	BreakMin           time.Duration // presence gap that counts as a break
+	FocusGap           time.Duration // gap allowed inside a focus block
+	LateStart, LateEnd time.Duration // late night, local time of day
+	LoopWindow         time.Duration // failing commands this close form a loop
+	MinAttended        time.Duration // below this, rate features are skipped
+	MinCommands        int           // below this, the failure rate is skipped
+}
+
+// DefaultParams returns the design defaults.
+func DefaultParams() Params {
+	return Params{
+		CoreStart:   9 * time.Hour,
+		CoreEnd:     18 * time.Hour,
+		BreakMin:    5 * time.Minute,
+		FocusGap:    2 * time.Minute,
+		LateStart:   22 * time.Hour,
+		LateEnd:     5 * time.Hour,
+		LoopWindow:  10 * time.Minute,
+		MinAttended: 30 * time.Minute,
+		MinCommands: 10,
+	}
+}
+
+// timeOfDay returns how far t is into its local calendar day.
+func timeOfDay(t time.Time) time.Duration {
+	y, m, d := t.Date()
+	return t.Sub(time.Date(y, m, d, 0, 0, 0, 0, t.Location()))
+}
+
+// work reports whether a minute counts as work: everything attended except
+// media (films, music, games).
+func work(m Minute) bool { return m.Category != model.CategoryMedia }
+
+func attendedWork(d Day) float64 {
+	total := 0.0
+	for _, m := range d.Minutes {
+		if work(m) {
+			total += m.AttendedS
+		}
+	}
+	return total
+}
