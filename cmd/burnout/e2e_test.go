@@ -175,6 +175,15 @@ func TestEndToEnd(t *testing.T) {
 	if !strings.Contains(status, "Strain: no completed days recorded yet") {
 		t.Fatalf("status missing the strain line:\n%s", status)
 	}
+	if !strings.Contains(status, "Weekly check-in due") {
+		t.Fatalf("status missing the check-in reminder:\n%s", status)
+	}
+	if out, _, err := run("", "review"); err != nil || !strings.Contains(out, "Check-in: none yet.") {
+		t.Fatalf("review: %v\n%s", err, out)
+	}
+	if _, errOut, err := run("", "checkin"); err == nil || !strings.Contains(errOut, "interactively") {
+		t.Fatalf("checkin without a terminal: %v %s", err, errOut)
+	}
 	if !strings.Contains(status, "Agents: 1 sessions") {
 		t.Fatalf("status missing agent session:\n%s", status)
 	}

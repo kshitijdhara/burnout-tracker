@@ -91,6 +91,15 @@ signal for reflection, not a diagnosis. On Linux, where there is no
 desktop collector yet, every day counts as barely used, so there is no
 score.
 
+**Weekly check-in and review.** Once a week, `burnout checkin` asks the
+13 questions of the Copenhagen Burnout Inventory (about a minute); `status`
+reminds you when it's due. `burnout checkin --daily` asks two quick
+questions about today. `burnout review` compares the last 7 days with the
+7 before: strain, what kept coming up, limits crossed, your check-ins, and
+one or two things to try. Check-in answers stay on this device. If a
+result is high, the check-in shows support resources for your region
+(from your locale) and a worldwide directory.
+
 Minutes appear in `status` after a minute or two of use. Time you spend
 reading without touching anything shows up once you next type, scroll or
 move the pointer (up to 8 minutes later), because only then is it clear

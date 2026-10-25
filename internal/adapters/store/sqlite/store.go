@@ -127,6 +127,31 @@ func OpenReadOnly(ctx context.Context, dir string) (*Store, error) {
 	return s, nil
 }
 
+// OpenExisting opens an existing database for small writes from the CLI
+// (a check-in) while the daemon may be running. Like OpenReadOnly it never
+// creates files or migrates: after an upgrade the running daemon may be
+// older, so a schema it doesn't know is refused (ErrSchemaMismatch) rather
+// than changed under it.
+func OpenExisting(ctx context.Context, dir string) (*Store, error) {
+	path := filepath.Join(dir, FileName)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrNoDatabase
+		}
+		return nil, fmt.Errorf("sqlite: open: %w", err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=rw&_pragma=busy_timeout(5000)&_pragma=secure_delete(ON)")
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: open: %w", err)
+	}
+	s := &Store{db: db, dir: dir, path: path}
+	if err := s.checkSchema(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
 func (s *Store) checkSchema(ctx context.Context) error {
 	ms, err := loadMigrations()
 	if err != nil {

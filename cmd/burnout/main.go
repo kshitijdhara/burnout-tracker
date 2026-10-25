@@ -29,6 +29,8 @@ func commands() []command {
 		{"service", "run the daemon in the background from login: service install|uninstall|status", runService},
 		{"status", "show today's summary", runStatus},
 		{"timeline", "show a day minute by minute: timeline [YYYY-MM-DD]", runTimeline},
+		{"checkin", "answer the weekly check-in (or --daily for two quick questions)", runCheckin},
+		{"review", "the weekly review: this week against the last, and what to try", runReview},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
 		{"install-hooks", "install shell (zsh) and Claude Code hooks", runInstallHooks},
 		{"uninstall-hooks", "remove shell and Claude Code hooks", runUninstallHooks},
