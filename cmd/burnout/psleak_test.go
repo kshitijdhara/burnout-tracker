@@ -142,10 +142,14 @@ func TestPSLeak(t *testing.T) {
 	// fish's conf.d, typed into a terminal as their hooks need.
 	for _, sh := range []struct {
 		argv  []string
+		diag  []string // typed first; their output is shown if no emitter is seen
 		lines []string
 	}{
-		{[]string{"bash", "-i"}, []string{": " + psCanary, "x=" + psCanary, "( : " + psCanary + " )"}},
-		{[]string{"fish", "-i"}, []string{"set x " + psCanary, "echo " + psCanary + " >/dev/null", "true " + psCanary}},
+		{[]string{"bash", "-i"}, []string{
+			`echo "PC=[${PROMPT_COMMAND[*]}] BP=[${bash_preexec_imported:-}] HOOK=[$(type -t __burnout_preexec)]"`,
+			`trap -p DEBUG`, `grep -n -i -e PROMPT_COMMAND -e trap -e preexec /etc/bash.bashrc 2>/dev/null | head -20`,
+		}, []string{": " + psCanary, "x=" + psCanary, "( : " + psCanary + " )"}},
+		{[]string{"fish", "-i"}, nil, []string{"set x " + psCanary, "echo " + psCanary + " >/dev/null", "true " + psCanary}},
 	} {
 		python, err := exec.LookPath("python3")
 		if err != nil {
@@ -157,14 +161,16 @@ func TestPSLeak(t *testing.T) {
 			continue
 		}
 		before := s.count("emit shell")
-		var typed []string
-		for i := range 30 {
+		// As many commands as zsh gets: each emitter lives a few
+		// milliseconds, and a slow CI runner catches only some of them.
+		typed := append([]string(nil), sh.diag...)
+		for i := range 150 {
 			typed = append(typed, sh.lines[i%len(sh.lines)])
 		}
 		typed = append(typed, "exit")
 		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 		cmd := exec.CommandContext(ctx, python, append([]string{"-c", testsupport.PTYType}, sh.argv...)...) //nolint:gosec // test tools
-		cmd.Env, cmd.Dir = append(env, "BT_TYPE_DELAY=0.1"), home
+		cmd.Env, cmd.Dir = append(env, "BT_TYPE_DELAY=0.05"), home
 		cmd.Stdin = strings.NewReader(strings.Join(typed, "\n") + "\n")
 		out, _ := cmd.CombinedOutput()
 		cancel()

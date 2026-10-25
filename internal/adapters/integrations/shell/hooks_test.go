@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,20 @@ func checkHookRecords(t *testing.T, recs []record, output string, timing func(r 
 	}
 }
 
+// bashMajor asks a bash for its major version.
+func bashMajor(t *testing.T, bash string) int {
+	t.Helper()
+	out, err := exec.Command(bash, "-c", "echo ${BASH_VERSINFO[0]}").Output() //nolint:gosec // test tool
+	if err != nil {
+		t.Fatalf("%s: %v", bash, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatalf("%s version %q: %v", bash, out, err)
+	}
+	return n
+}
+
 func withClock(r record) bool {
 	return r.env[EnvStart] != "" && r.env[EnvEnd] != "" && r.env[EnvDuration] == ""
 }
@@ -145,7 +160,7 @@ func TestBashHook(t *testing.T) {
 	bash := []string{"bash", "--norc", "--noprofile", "-i"}
 	recs, out := runTyped(t, bash, renderBash, []string{"HISTCONTROL=ignorespace"}, hookCommands)
 	clock := withClock
-	if strings.Contains(out, "version 3.") { // bash before 5 has no $EPOCHREALTIME
+	if bashMajor(t, "bash") < 5 { // bash before 5 has no $EPOCHREALTIME
 		clock = withDuration
 	}
 	checkHookRecords(t, recs, out, clock)
@@ -170,7 +185,11 @@ func TestBashHookOnSystemBash(t *testing.T) {
 		t.Skip("/bin/bash is the bash on PATH")
 	}
 	recs, out := runTyped(t, []string{"/bin/bash", "--norc", "--noprofile", "-i"}, renderBash, nil, hookCommands)
-	checkHookRecords(t, recs, out, func(r record) bool { return withClock(r) || withDuration(r) })
+	clock := withClock
+	if bashMajor(t, "/bin/bash") < 5 {
+		clock = withDuration
+	}
+	checkHookRecords(t, recs, out, clock)
 }
 
 // The user's HISTCONTROL stays: bash-preexec would drop ignorespace.
