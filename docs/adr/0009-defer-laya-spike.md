@@ -56,7 +56,8 @@ Phase 0 is now otherwise done, and the spike doesn't fit it:
 ## Consequences
 
 - Phase 0 exits on the measured-day accuracy test alone, with the privacy
-  canary and ps-leak tests already passing.
+  canary and ps-leak tests passing. (The ps-leak test was still missing
+  when this ADR was accepted; `TestPSLeak` added it on 2026-10-25.)
 - Until Phase 2, classification is rules and user overrides. Browser-heavy
   roles see more `browser` and `uncategorized` time than they would with a
   classifier. Their alpha feedback is what the spike will measure against.

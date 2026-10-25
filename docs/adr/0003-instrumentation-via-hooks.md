@@ -158,7 +158,7 @@ in Phase 1.
 
 ## Action Items
 1. [ ] Embedded hook scripts with interactive guard and in-function argv0/subcommand extraction; `install-hooks` / `uninstall-hooks` with marked blocks, backups, atomic writes.
-2. [ ] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the message, the DB or logs.
+2. [x] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the message, the DB or logs. Process listings: `TestPSLeak` (Linux, macOS); the message: `TestZshHookNeverLeaksCommandLine`; the DB and logs: `TestEndToEnd`.
 3. [ ] Benchmarks in CI: p99 prompt overhead < 5 ms (zsh, bash 3.2, bash 5, fish); PowerShell in-process pipe write; Claude hook < 10 ms p99.
 4. [ ] Claude Code adapter: no-stdout test (any byte on stdout fails CI), version detection, `PermissionRequest`/`StopFailure`/timeout segment closing, parent-walk tty mapping.
 5. [ ] `internal/timeline`: one human timeline + N agent timelines, with property tests (non-overlapping human states; Σ human sub-states ≤ wall time).
