@@ -14,6 +14,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/review"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
 )
 
@@ -38,6 +39,11 @@ func runStatus(ctx context.Context, _ []string) error {
 		fmt.Printf("Strain: unavailable (%v)\n\n", err)
 	} else {
 		fmt.Println(formatStrain(sc.Scores, day))
+	}
+	if records, err := store.Checkins(ctx, now.AddDate(0, -3, 0)); err == nil {
+		if due, _ := review.WeeklyDue(records, now); due {
+			fmt.Print("Weekly check-in due: run `burnout checkin` (about a minute).\n\n")
+		}
 	}
 	s, err := store.DaySummary(ctx, day)
 	if err != nil {

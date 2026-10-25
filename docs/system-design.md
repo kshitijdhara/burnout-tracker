@@ -471,6 +471,27 @@ Mozilla-signed `.xpi`.
 - Target effort is about 30 s a week. High-band results trigger the safety
   flow (§8.4).
 
+Phase 1 implementation (`internal/domain/checkin`, `burnout checkin`):
+- **Weekly:** both CBI subscales in English (6 personal and 7
+  work-related items, original wording and response scales). Each is
+  scored as the mean of 0–100 item values, with the leisure-energy item
+  reversed.
+- **Bands:** the CBI has no official cut-offs. The commonly used ones
+  are: below 50 low, 50–74 moderate, 75–99 high, 100 severe.
+- **Safety:** the flow (§8.4) shows for a subscale in the high band or
+  above.
+- **Due:** six days after the last weekly check-in, so it is due on the
+  same weekday a week later. `status` reminds; nothing interrupts.
+- **Daily:** energy (reversed) and "how drained" on a 5-point scale. It
+  is unvalidated and optional.
+- **Storage:** only complete check-ins are stored. Both subscales are
+  saved in one transaction.
+- **Process:** the CLI writes through `OpenExisting`, which never
+  creates or migrates the database, so it is safe beside a running
+  daemon.
+- **Before the alpha:** the item wording must be checked against the
+  published instrument, and the copy reviewed (§8.4).
+
 ### 4.6 Activity classification (role-aware)
 
 Onboarding sets a **role profile**. Each profile defines a category taxonomy
@@ -753,6 +774,20 @@ The first run must be completed **interactively by the logged-in user**
 - the user sets or edits **boundaries** (shutdown time, no-weekend rule,
   deep-work blocks), and adherence is tracked gently.
 
+Phase 1 so far (`burnout review`, `internal/domain/review`):
+- **Built:**
+  - the last 7 completed days against the 7 before (average and peak
+    strain);
+  - drivers by the number of days they appeared;
+  - limits crossed;
+  - the latest weekly check-in against the previous one;
+  - up to two suggestions, guardrails first, from a fixed table tied to
+    features.
+- **Not yet:**
+  - labelling uncategorized items (with classification);
+  - annotating the week (with annotations);
+  - boundaries and adherence.
+
 ### 8.3 Nudges
 
 - At most 1/day, never during Do Not Disturb/Focus, a screen share or a
@@ -767,6 +802,14 @@ When CBI is in the high band, or free text suggests distress, the app shows
 supportive copy and **regional mental-health resources**. It doesn't send
 alarming forecasts. A mental-health professional reviews all
 score, forecast and safety copy before alpha.
+
+Phase 1 implementation:
+- **Resources:** a built-in table of free national lines, picked by the
+  locale's territory (`LC_ALL`, `LC_MESSAGES`, `LANG`), plus
+  findahelpline.com for every region. There is no network call.
+- **Covered so far:** US, CA, GB, IE, AU, NZ, IN and DE.
+- **Not yet:** free-text distress detection, which needs the Laya
+  classifier.
 
 ### 8.5 Accessibility and i18n
 
