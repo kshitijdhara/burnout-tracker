@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/identity"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
@@ -268,6 +269,10 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 			}
 			return store.Backup(ctx, now)
 		},
+		Controls: controlFiles{dataDir: dataDir},
+		Forget: func(ctx context.Context, since time.Time) error {
+			return store.Forget(ctx, since, model.LogicalDay(since, app.DefaultConfig().Rollover))
+		},
 		LoadHealth:  store.Health,
 		IngestStats: func() map[string]uint64 { return ingestStatsMap(server.Stats()) },
 	})
@@ -286,6 +291,23 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 
 	log.Info("daemon started", "version", version, "keystore", keys.Backend())
 	return d.Run(runCtx)
+}
+
+// controlFiles reads the user's pause and forget requests from the data
+// folder (internal/adapters/control).
+type controlFiles struct{ dataDir string }
+
+func (c controlFiles) Paused(now time.Time) bool {
+	paused, _ := control.PauseState(c.dataDir, now)
+	return paused
+}
+
+func (c controlFiles) TakeForget() (time.Time, func(error), bool) {
+	r, ok := control.TakeForget(c.dataDir)
+	if !ok {
+		return time.Time{}, nil, false
+	}
+	return r.Since(), func(err error) { _ = control.ForgetDone(c.dataDir, r, err) }, true
 }
 
 // saveScores computes the daily features and strain scores of completed

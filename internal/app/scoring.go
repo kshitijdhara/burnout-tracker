@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
@@ -14,6 +15,7 @@ type ScoreStore interface {
 	DataDays(ctx context.Context, from, to string) ([]string, error)
 	DayInput(ctx context.Context, logicalDay string) (features.Day, error)
 	FeatureDays(ctx context.Context, from, to string) ([]strain.Day, error)
+	Annotations(ctx context.Context, from, to string) ([]annotation.Annotation, error)
 }
 
 // Scoring horizons: features are kept two years (privacy & security §3),
@@ -82,6 +84,20 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, rollover time.
 		if !isToday {
 			out.Computed = append(out.Computed, d)
 		}
+	}
+	// Vacation and sick days are applied at scoring time, so an annotation
+	// added later also covers days whose features are already stored.
+	notes, err := st.Annotations(ctx, day(featureHistory), today)
+	if err != nil {
+		return Scoring{}, err
+	}
+	dates := make([]string, len(days))
+	for i, d := range days {
+		dates[i] = d.Date
+	}
+	excluded := annotation.Excluded(notes, dates)
+	for i := range days {
+		days[i].Excluded = excluded[days[i].Date]
 	}
 	out.Scores = strain.Compute(days, strain.DefaultParams())
 	return out, nil

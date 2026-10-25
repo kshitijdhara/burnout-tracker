@@ -20,7 +20,7 @@ var (
 
 // counters are updated by Submit on ingest goroutines and read by the loop.
 type counters struct {
-	accepted, rejected, queueFull atomic.Uint64
+	accepted, rejected, queueFull, paused atomic.Uint64
 }
 
 func (c *counters) snapshot() map[string]uint64 {
@@ -28,6 +28,7 @@ func (c *counters) snapshot() map[string]uint64 {
 		"accepted":   c.accepted.Load(),
 		"rejected":   c.rejected.Load(),
 		"queue_full": c.queueFull.Load(),
+		"paused":     c.paused.Load(),
 	}
 }
 
@@ -37,6 +38,10 @@ func (c *counters) snapshot() map[string]uint64 {
 // concurrent use and never blocks: if the loop is far behind, the event is
 // dropped and counted. It reports whether the event was queued.
 func (d *Daemon) Submit(m wire.Message) bool {
+	if d.paused.Load() {
+		d.counters.paused.Add(1)
+		return true // discarded: nothing is recorded while paused
+	}
 	ev, err := d.accept(m, d.deps.Clock.Now())
 	if err != nil {
 		d.counters.rejected.Add(1)

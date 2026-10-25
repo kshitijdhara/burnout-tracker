@@ -212,6 +212,26 @@ The agent MUST provide:
 | **Privacy view** | `burnout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
 | **Screen-share safety** | Nudges are suppressed in Do Not Disturb / Focus mode or while a screen share is active; the dashboard has a "blur numbers" option |
 
+Phase 1 so far (CLI; the tray and dashboard come later):
+- **Pause** is built: `burnout pause [DURATION|tomorrow]` and `resume`.
+  - The daemon checks a pause file in the data folder every second.
+  - While paused it samples nothing, discards hook events, and drops
+    the paused span from agent sessions that stay open.
+  - An unreadable pause file counts as paused.
+- **Delete recent and Forget** are built: `burnout forget --last D |
+  --today | --since DATE | --all`. A running daemon does the deleting:
+  1. It writes out what it holds in memory.
+  2. It deletes rows from then on and the derived rows of those days,
+     plus every recovery and pre-migration copy made since then.
+  3. It overwrites freed pages and truncates the WAL.
+  - Annotations, consent and hooks are kept.
+  - Logs aren't touched: they hold no activity data (§10).
+- **Privacy view** is built: `burnout privacy`.
+- **Sensitive-apps denylist:** covers password managers only so far.
+  Banking, health and dating apps are still to be added.
+- **Still to do:** private hours, exclusions, aggregate-only mode,
+  retention settings and export come with the config file.
+
 ### 5.2 Anti-coercion requirements
 
 A local activity tracker can be installed on someone else's machine to watch

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
@@ -35,6 +36,9 @@ func runStatus(ctx context.Context, _ []string) error {
 
 	now := time.Now()
 	day := model.LogicalDay(now, app.DefaultConfig().Rollover)
+	if paused, p := control.PauseState(dataDir, now); paused {
+		fmt.Printf("Paused %s: nothing is being recorded. `burnout resume` starts again.\n\n", describePause(p, now))
+	}
 	if sc, err := app.ScoreDays(ctx, store, now, app.DefaultConfig().Rollover, false); err != nil {
 		fmt.Printf("Strain: unavailable (%v)\n\n", err)
 	} else {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
 )
@@ -29,6 +30,8 @@ type Week struct {
 
 	Checkin, PrevCheckin map[string]checkin.Record // weekly CBI results by instrument
 
+	Annotations []annotation.Annotation // those overlapping the week
+
 	Suggestions []string
 }
 
@@ -43,7 +46,7 @@ type Recurring struct {
 
 // Build reviews the 7 logical days before today. scores may cover any
 // range; records are all check-ins (any order).
-func Build(scores []strain.Score, records []checkin.Record, today string) Week {
+func Build(scores []strain.Score, records []checkin.Record, notes []annotation.Annotation, today string) Week {
 	t, _ := time.Parse(time.DateOnly, today)
 	day := func(back int) string { return t.AddDate(0, 0, -back).Format(time.DateOnly) }
 	w := Week{From: day(7), To: day(1)}
@@ -85,6 +88,11 @@ func Build(scores []strain.Score, records []checkin.Record, today string) Week {
 	w.Drivers = sorted(drivers)
 	w.Guardrails = sorted(guards)
 	w.Checkin, w.PrevCheckin = latestWeekly(records)
+	for _, a := range notes {
+		if a.To >= w.From && a.From <= w.To {
+			w.Annotations = append(w.Annotations, a)
+		}
+	}
 	w.Suggestions = suggest(w.Drivers, w.Guardrails)
 	return w
 }

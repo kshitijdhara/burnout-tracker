@@ -111,6 +111,25 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("hook on garbage: err=%v stdout=%q stderr=%q", err, out, errOut)
 	}
 
+	// While paused, hook events are discarded: this session never appears.
+	if out, _, err := run("", "pause", "10m"); err != nil || !strings.Contains(out, "Paused until") {
+		t.Fatalf("pause: %v %s", err, out)
+	}
+	time.Sleep(1500 * time.Millisecond) // the daemon checks every second
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "Stop"} {
+		payload := fmt.Sprintf(`{"session_id":"sess-paused","hook_event_name":%q,"cwd":%q}`, event, projectDir)
+		if _, _, err := run(payload, "hook", "claude"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, _, _ := run("", "status"); !strings.Contains(out, "Paused until") {
+		t.Fatalf("status doesn't show the pause:\n%s", out)
+	}
+	if out, _, err := run("", "resume"); err != nil || !strings.Contains(out, "Resumed") {
+		t.Fatalf("resume: %v %s", err, out)
+	}
+	time.Sleep(1500 * time.Millisecond)
+
 	if _, err := exec.LookPath("zsh"); err == nil {
 		if out, _, err := run("", "install-hooks", "--claude=false"); err != nil {
 			t.Fatalf("install-hooks: %v\n%s", err, out)
@@ -189,6 +208,51 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if _, err := exec.LookPath("zsh"); err == nil && !strings.Contains(status, "Shell: ") {
 		t.Fatalf("status missing shell commands:\n%s", status)
+	}
+
+	// Annotations, against the real database.
+	if out, _, err := run("", "annotate", "vacation", "2026-11-02", "2026-11-06", "--note", "away"); err != nil || !strings.Contains(out, "left out of your baseline") {
+		t.Fatalf("annotate: %v %s", err, out)
+	}
+	if out, _, err := run("", "annotate", "list"); err != nil || !strings.Contains(out, "vacation, 2026-11-02 to 2026-11-06 (5 days): away") {
+		t.Fatalf("annotate list: %v %s", err, out)
+	}
+	if out, _, err := run("", "privacy"); err != nil || !strings.Contains(out, "Collection:") || !strings.Contains(out, "burnout forget") {
+		t.Fatalf("privacy: %v %s", err, out)
+	}
+
+	// Forget the last hour through a running daemon: everything above goes.
+	var log2 bytes.Buffer
+	daemon2 := exec.Command(bin, "daemon")
+	daemon2.Env, daemon2.Stdout, daemon2.Stderr = env, &log2, &log2
+	if err := daemon2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = daemon2.Process.Kill() })
+	waitFor(t, &log2, func() bool {
+		c, err := net.Dial("unix", filepath.Join(runtimeDir, "burnout.sock"))
+		if err == nil {
+			_ = c.Close()
+		}
+		return err == nil
+	})
+	if _, _, err := run("", "forget", "--last", "1h"); err == nil {
+		t.Fatal("forget without a terminal or --yes deleted data")
+	}
+	if out, errOut, err := run("", "forget", "--last", "1h", "--yes"); err != nil || !strings.Contains(out, "Deleted everything recorded in the last 1h") {
+		t.Fatalf("forget: %v %s %s\n%s", err, out, errOut, log2.String())
+	}
+	if err := daemon2.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon2.Wait(); err != nil {
+		t.Fatalf("daemon after forget: %v\n%s", err, log2.String())
+	}
+	if out, _, _ := run("", "status"); strings.Contains(out, "Agents:") || strings.Contains(out, "Shell:") {
+		t.Fatalf("data left after forgetting:\n%s", out)
+	}
+	if out, _, _ := run("", "annotate", "list"); !strings.Contains(out, "vacation") {
+		t.Fatalf("forget removed the annotation:\n%s", out)
 	}
 
 	// Canary scan: every file the app wrote, plus its log output.

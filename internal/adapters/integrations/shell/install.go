@@ -214,3 +214,22 @@ func withoutBlock(content []byte) []byte {
 }
 
 func join(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
+
+// Installed reports whether the hook is in place: the marked block in the
+// rc file, or for fish the conf.d file.
+func Installed(o InstallOptions) bool {
+	if o.RCPath == "" {
+		_, err := os.Stat(o.ScriptPath())
+		return err == nil
+	}
+	target, err := fileedit.ResolveTarget(o.RCPath)
+	if err != nil {
+		return false
+	}
+	b, err := os.ReadFile(target) //nolint:gosec // the user's own rc file
+	if err != nil {
+		return false
+	}
+	start, _ := findBlock(b)
+	return start >= 0
+}

@@ -688,6 +688,10 @@ v1 implementation notes (`internal/domain/features`, registry version 1):
    work +2.1σ vs. your usual weekdays").
 
 v1 implementation choices (`internal/domain/strain`, `strain-v1`):
+- **Annotations** (`burnout annotate`): vacation and sick days are
+  excluded at scoring time, so an annotation added later also applies to
+  days already stored. Planned crunch is scored and listed in the weekly
+  review.
 - **Smoothing:** EWMA with a 7-day half-life, so one long day moves the
   score a little and a sustained week moves it a lot.
 - **Baselines:** need at least 5 weekdays or 2 weekend days in the

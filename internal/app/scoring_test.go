@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
@@ -15,6 +17,11 @@ type fakeScoreStore struct {
 	stored   []strain.Day
 	withData []string
 	loaded   []string
+	notes    []annotation.Annotation
+}
+
+func (f *fakeScoreStore) Annotations(context.Context, string, string) ([]annotation.Annotation, error) {
+	return f.notes, nil
 }
 
 func (f *fakeScoreStore) DataDays(_ context.Context, from, to string) ([]string, error) {
@@ -82,6 +89,18 @@ func TestScoreDays(t *testing.T) {
 	if v := sc.Computed[0].Values["attended_hours"]; v != 2 {
 		t.Errorf("computed attended hours %v, want 2", v)
 	}
+
+	// A vacation annotation excludes a day already stored, and the day is
+	// reported as missing, not rest.
+	st.notes = []annotation.Annotation{{From: "2026-10-20", To: "2026-10-20", Kind: annotation.Vacation}}
+	sc, err = ScoreDays(context.Background(), st, now, 4*time.Hour, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := sc.Scores[0]; s.Date != "2026-10-20" || s.Status != strain.StatusMissing || !strings.Contains(s.Reason, "vacation") {
+		t.Errorf("vacation day scored: %+v", s)
+	}
+	st.notes = nil
 
 	st.loaded = nil
 	sc, err = ScoreDays(context.Background(), st, now, 4*time.Hour, true)

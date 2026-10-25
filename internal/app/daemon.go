@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
@@ -64,6 +65,9 @@ type Config struct {
 	// IdleStride × TickInterval below the attention engine's MaxGap.
 	IdleStride int
 
+	// ControlInterval is how often pause and forget requests are checked.
+	ControlInterval time.Duration
+
 	// Maintenance (retention, vacuum, recovery copies) runs on its own
 	// goroutine, first MaintenanceDelay after start, then every
 	// MaintenanceInterval.
@@ -89,6 +93,7 @@ func DefaultConfig() Config {
 
 		IdleStride: 4,
 
+		ControlInterval:     time.Second,
 		MaintenanceDelay:    2 * time.Minute,
 		MaintenanceInterval: 24 * time.Hour,
 	}
@@ -111,9 +116,23 @@ type Deps struct {
 	Log         *slog.Logger
 
 	// Optional.
-	Maintain    func(ctx context.Context, now time.Time) error // runs on its own goroutine
+	Maintain func(ctx context.Context, now time.Time) error // runs on its own goroutine
+	// Controls carries the user's pause and forget requests; Forget deletes
+	// stored data from a time on (privacy & security §5.1). Both or neither.
+	Controls    Controls
+	Forget      func(ctx context.Context, since time.Time) error
 	LoadHealth  func(ctx context.Context, logicalDay string) (string, error)
 	IngestStats func() map[string]uint64
+}
+
+// Controls are the user's requests to the daemon, checked every
+// ControlInterval.
+type Controls interface {
+	// Paused reports whether collection is paused at now.
+	Paused(now time.Time) bool
+	// TakeForget returns a pending request to forget everything from since
+	// on, once, and done to report how it went.
+	TakeForget() (since time.Time, done func(error), ok bool)
 }
 
 // Daemon is the main loop. Create it with New, feed it with Submit, and
@@ -138,6 +157,8 @@ type Daemon struct {
 	lastTopology     string
 	locked           bool
 	ticks            int
+	// paused is read by Submit on ingest goroutines.
+	paused atomic.Bool
 }
 
 // tickRecord is what consuming a tick's result needs besides the result,
@@ -209,19 +230,32 @@ func (d *Daemon) Run(ctx context.Context) error {
 	flush := time.NewTicker(d.cfg.FlushInterval)
 	defer flush.Stop()
 
-	var ticks <-chan time.Time
+	var ticks, controls <-chan time.Time
 	if d.deps.Collector != nil {
 		ticks = tick.C
+	}
+	if d.deps.Controls != nil {
+		c := time.NewTicker(d.cfg.ControlInterval)
+		defer c.Stop()
+		controls = c.C
+		d.checkControls(ctx)
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return d.shutdown()
 		case <-ticks:
-			d.onTick(ctx)
+			if !d.paused.Load() {
+				d.onTick(ctx)
+			}
 		case ev := <-d.inbox:
 			d.apply(ev)
+		case <-controls:
+			d.checkControls(ctx)
 		case <-flush.C:
+			if d.paused.Load() {
+				continue // everything was written when the pause began
+			}
 			now := d.deps.Clock.Now()
 			// Timeouts run here, not on collector ticks, so they also fire
 			// on platforms without a collector.
@@ -229,6 +263,47 @@ func (d *Daemon) Run(ctx context.Context) error {
 			d.flush(ctx, now, now)
 		}
 	}
+}
+
+// checkControls applies the user's pause and forget requests.
+func (d *Daemon) checkControls(ctx context.Context) {
+	now := d.deps.Clock.Now()
+	switch paused := d.deps.Controls.Paused(now); {
+	case paused && !d.paused.Load():
+		// Close and write everything open, then stop: collectors aren't
+		// sampled and hook events are discarded until the pause ends.
+		d.settle(ctx, now)
+		d.paused.Store(true)
+		d.deps.Log.Info("collection paused")
+	case !paused && d.paused.Load():
+		// Agent sessions stayed open through the pause; their segments
+		// restart now, and the paused span they would claim is dropped.
+		d.tracker.Flush(now)
+		d.tracker.Drain()
+		d.paused.Store(false)
+		d.deps.Log.Info("collection resumed")
+	}
+	since, done, ok := d.deps.Controls.TakeForget()
+	if !ok {
+		return
+	}
+	// Write out everything held in memory first, so nothing from before
+	// the request can reach the store after the deletion.
+	d.settle(ctx, now)
+	err := d.deps.Forget(ctx, since)
+	if err == nil {
+		d.health = newHealth() // its counters covered the forgotten time
+	}
+	d.deps.Log.Info("forgot recorded data", "ok", err == nil)
+	done(err)
+}
+
+// settle closes every open span and held tick and writes them out, as at
+// shutdown, without stopping.
+func (d *Daemon) settle(ctx context.Context, now time.Time) {
+	d.consume(d.resolver.Flush())
+	d.tracker.Flush(now)
+	d.flush(ctx, now, now.Add(time.Minute))
 }
 
 func (d *Daemon) onTick(ctx context.Context) {
