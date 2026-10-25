@@ -206,7 +206,7 @@ The agent MUST provide:
 | **Sensitive-apps denylist** | On by default: password managers, banking, health, dating and similar apps are recorded as `private` |
 | **Delete recent** | "Delete last hour" and "Delete today", one click from the tray |
 | **Forget** | `burnout forget --since <date>` / `--all`. Also removes backups, spools, logs, caches and exports created by the app (§7.2) |
-| **Aggregate-only mode** | When a logical day closes, keep only category rollups and daily features; drop per-app/per-window detail |
+| **Aggregate-only mode** | Keep only category rollups and daily features; drop per-app/per-window detail. New minutes are recorded per category; days recorded before the mode was on are reduced at the next nightly maintenance |
 | **Retention** | Every retention period in §3 is configurable downwards |
 | **Export** | `burnout export` (JSON/CSV) with a warning that the export is plaintext |
 | **Privacy view** | `burnout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
@@ -227,10 +227,28 @@ Phase 1 so far (CLI; the tray and dashboard come later):
   - Annotations, consent and hooks are kept.
   - Logs aren't touched: they hold no activity data (§10).
 - **Privacy view** is built: `burnout privacy`.
-- **Sensitive-apps denylist:** covers password managers only so far.
-  Banking, health and dating apps are still to be added.
-- **Still to do:** private hours, exclusions, aggregate-only mode,
-  retention settings and export come with the config file.
+- **Sensitive-apps denylist** is built for desktop apps: password
+  managers, finance and tax apps, crypto wallets and a few health apps.
+  Banking, health and dating mostly happen in a browser, where only the
+  window title says what a page is; those sites are covered when opt-in
+  title classification arrives.
+- **The config file** is built (system design §3.4): `burnout config
+  get|set|add|remove|unset|validate`. It carries:
+  - **private hours** (`privacy.private_hours`): the daemon treats them
+    exactly as a pause;
+  - **exclusions** (`privacy.exclude_apps`): per app; per domain comes
+    with title classification;
+  - **aggregate-only mode** (`privacy.aggregate_only`): new minutes are
+    written as one row per category, with no app id or window key, and
+    the nightly maintenance reduces days recorded before the mode was on.
+    Terminal commands and agent sessions keep their detail: they hold
+    command names and keyed session ids, not apps or windows;
+  - **retention** (`retention.*`): each period can be lowered from its
+    default down to a floor the scoring needs, never raised.
+  - An invalid file is never half-applied. A running daemon keeps its
+    current settings, and a starting one refuses to run on defaults,
+    which could silently drop private hours or exclusions.
+- **Still to do:** export (next), the tray, and the dashboard page.
 
 ### 5.2 Anti-coercion requirements
 

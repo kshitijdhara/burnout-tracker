@@ -19,6 +19,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -329,31 +330,59 @@ func runPrivacy(ctx context.Context, _ []string) error {
 	} else {
 		fmt.Println("  Consent:          not given; nothing is collected")
 	}
+	cfg, cfgPath, cfgErr := loadConfig()
+	if cfgErr != nil {
+		fmt.Printf("  Config file:      INVALID, see `burnout config validate`; showing the defaults\n")
+		cfg = config.Default()
+	} else {
+		fmt.Printf("  Config file:      %s\n", printable(cfgPath))
+	}
 	collecting := "not running"
 	if daemonAnswers(ctx) {
 		collecting = "running"
 	}
 	if paused, p := control.PauseState(dataDir, now); paused {
 		collecting += ", paused " + describePause(p, now)
+	} else if w, ok := privateNow(cfg, now); ok {
+		collecting += ", private hours now (" + w + ")"
 	}
 	fmt.Printf("  Collection:       %s\n", collecting)
 	fmt.Println("  Window titles:    off (not collected)")
 	fmt.Println("  Keystroke counts: off (not collected)")
-	fmt.Printf("  Always private:   %d password-manager apps; their time counts, their names aren't kept\n", len(classify.SensitiveApps()))
+	hours := "none"
+	if len(cfg.Privacy.PrivateHours) > 0 {
+		hours = strings.Join(cfg.Privacy.PrivateHours, "; ")
+	}
+	fmt.Printf("  Private hours:    %s\n", printable(hours))
+	excluded := ""
+	if n := len(cfg.Privacy.ExcludeApps); n > 0 {
+		excluded = fmt.Sprintf(" and %d you excluded", n)
+	}
+	fmt.Printf("  Always private:   %d sensitive apps (password managers, finance, crypto wallets, health)%s;\n", len(classify.SensitiveApps()), excluded)
+	fmt.Println("                    their time counts, their names aren't kept")
+	if cfg.Privacy.AggregateOnly {
+		fmt.Println("  Aggregate-only:   on: time per category only, no app names or per-window detail")
+	} else {
+		fmt.Println("  Aggregate-only:   off: app names are kept for each minute")
+	}
 	fmt.Printf("  Hooks:            %s\n", hookSummary())
 	fmt.Println("  Network:          none. Calendar sync, update checks and model downloads aren't built;")
 	fmt.Println("                    each will be opt-in")
 	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
 	fmt.Printf("  Data folder:      %s (owner-only; disk encryption %s)\n", printable(dataDir), state)
-	r := sqlite.DefaultRetention()
-	fmt.Printf("  Kept for:         raw events %s, minutes and intervals %s, features, scores and check-ins %s\n",
-		days(int(r.RawEvents.Hours()/24)), days(int(r.Rollups.Hours()/24)), days(int(r.DailyFeatures.Hours()/24)))
+	r := cfg.Retention
+	fmt.Printf("  Kept for:         raw events %s, minutes %s, intervals %s,\n", days(r.RawEventsDays), days(r.MinutesDays), days(r.IntervalsDays))
+	fmt.Printf("                    features and scores %s, check-ins %s\n", days(r.DailyDays), days(r.CheckinsDays))
 	fmt.Print(`
 Your controls:
   burnout pause [1h | tomorrow]     stop recording for a while (or until resume)
   burnout resume
   burnout forget --last 1h | --today | --since YYYY-MM-DD | --all
   burnout annotate vacation FROM TO  mark time off; such days don't count
+  burnout config set privacy.private_hours "Mon-Fri 19:00-08:00" "Sat,Sun"
+  burnout config add privacy.exclude_apps APP   record an app as private
+  burnout config set privacy.aggregate_only true
+  burnout config set retention.minutes_days 30  keep less (all keys: burnout config get)
   burnout uninstall-hooks, burnout service uninstall
 Details: docs/privacy-and-security.md
 `)

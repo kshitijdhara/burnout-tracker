@@ -60,12 +60,26 @@ var bundledPrefixes = []struct {
 }
 
 // sensitiveApps are recorded as private by default (privacy & security
-// §5.1): time is kept, identity is dropped.
+// §5.1): time is kept, identity is dropped. Matching ignores case. Most
+// banking, health and dating happens in a browser, where only the title
+// says what it is; those sites are covered once title classification
+// exists. Users add their own with privacy.exclude_apps.
 var sensitiveApps = []string{
+	// Password managers and keychains.
 	"com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop", "org.keepassxc.keepassxc",
 	"com.apple.keychainaccess", "com.apple.Passwords", "com.dashlane.dashlanephonefinal",
-	"1Password.exe", "Bitwarden.exe", "KeePassXC.exe", "KeePass.exe", "Dashlane.exe",
-	"1password", "bitwarden", "keepassxc", "seahorse",
+	"com.lastpass.LastPass", "in.sinew.Enpass-Desktop", "me.proton.pass.electron", "com.keepersecurity.passwordmanager",
+	"1Password.exe", "Bitwarden.exe", "KeePassXC.exe", "KeePass.exe", "Dashlane.exe", "Enpass.exe",
+	"Proton Pass.exe", "NordPass.exe", "keeperpasswordmanager.exe",
+	"1password", "bitwarden", "keepassxc", "seahorse", "enpass",
+	// Banking, budgeting and tax.
+	"com.moneymoney-app.retail", "com.iggsoftware.banktivity7", "com.quicken.Quicken", "com.moneydance.Moneydance",
+	"org.gnucash.Gnucash", "qw.exe", "Moneydance.exe", "gnucash.exe", "gnucash", "kmymoney", "homebank",
+	// Crypto wallets.
+	"com.ledger.live", "io.trezor.TrezorSuite", "com.electron.exodus",
+	"Ledger Live.exe", "Trezor Suite.exe", "Exodus.exe", "ledger-live-desktop", "exodus",
+	// Health and therapy.
+	"com.apple.Health", "com.headspace.Headspace", "com.calm.Calm",
 }
 
 var commandCategories = map[string]CommandCategory{

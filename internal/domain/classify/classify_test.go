@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -42,5 +43,21 @@ func TestCommandAndSubcommand(t *testing.T) {
 		if got := Subcommand(tc.argv0, tc.sub); got != tc.want {
 			t.Errorf("Subcommand(%q, %q) = %q, want %q", tc.argv0, tc.sub, got, tc.want)
 		}
+	}
+}
+
+func TestSensitiveAppsArePrivate(t *testing.T) {
+	r := New([]string{"com.Spotify.Client"}, map[string]model.Category{"com.spotify.client": model.CategoryComms})
+	for _, id := range append(SensitiveApps(), "COM.LEDGER.LIVE", "com.spotify.client") {
+		if got := r.App(id); got != model.CategoryPrivate {
+			t.Errorf("%s: %s, want private", id, got)
+		}
+	}
+	seen := map[string]bool{}
+	for _, id := range SensitiveApps() {
+		if seen[strings.ToLower(id)] {
+			t.Errorf("%s listed twice", id)
+		}
+		seen[strings.ToLower(id)] = true
 	}
 }

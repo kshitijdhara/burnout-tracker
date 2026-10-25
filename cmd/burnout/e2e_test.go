@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -130,6 +131,49 @@ func TestEndToEnd(t *testing.T) {
 	}
 	time.Sleep(1500 * time.Millisecond)
 
+	// Private hours from the config file apply to the running daemon.
+	serviceLog := func() string {
+		b, _ := os.ReadFile(filepath.Join(dataDir, "logs", "daemon.log")) //nolint:gosec // test file
+		return string(b)
+	}
+	if out, _, err := run("", "config", "set", "privacy.private_hours", "daily"); err != nil || !strings.Contains(out, `privacy.private_hours = ["daily"]`) {
+		t.Fatalf("config set: %v %s", err, out)
+	}
+	waitFor(t, &daemonLog, func() bool { return strings.Contains(serviceLog(), `for="private hours"`) })
+	for _, event := range []string{"SessionStart", "UserPromptSubmit", "Stop"} {
+		payload := fmt.Sprintf(`{"session_id":"sess-private","hook_event_name":%q,"cwd":%q}`, event, projectDir)
+		if _, _, err := run(payload, "hook", "claude"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, _, _ := run("", "status"); !strings.Contains(out, "Private hours (daily)") {
+		t.Fatalf("status doesn't show private hours:\n%s", out)
+	}
+	// A hand edit that breaks the file is reported, and the daemon keeps
+	// its settings rather than dropping the user's private hours.
+	cfgFile := filepath.Join(configDir, "config.toml")
+	good, err := os.ReadFile(cfgFile) //nolint:gosec // test file
+	if err != nil || !strings.Contains(string(good), `private_hours = ["daily"]`) {
+		t.Fatalf("config file: %v\n%s", err, good)
+	}
+	if err := os.WriteFile(cfgFile, append(slices.Clone(good), "titles = true\n"...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, errOut, err := run("", "config", "validate"); err == nil || !strings.Contains(errOut, "unknown keys: retention.titles") {
+		t.Fatalf("validate accepted a bad file: %s %s", out, errOut)
+	}
+	waitFor(t, &daemonLog, func() bool { return strings.Contains(serviceLog(), "keeping the current settings") })
+	if _, _, err := run("", "config", "set", "privacy.aggregate_only", "true"); err == nil {
+		t.Fatal("config set rewrote a file it couldn't read")
+	}
+	if err := os.WriteFile(cfgFile, good, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := run("", "config", "unset", "privacy.private_hours"); err != nil || !strings.Contains(out, "privacy.private_hours = []") {
+		t.Fatalf("config unset: %v %s", err, out)
+	}
+	waitFor(t, &daemonLog, func() bool { return strings.Contains(serviceLog(), `after="private hours"`) })
+
 	if _, err := exec.LookPath("zsh"); err == nil {
 		if out, _, err := run("", "install-hooks", "--claude=false"); err != nil {
 			t.Fatalf("install-hooks: %v\n%s", err, out)
@@ -219,6 +263,20 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if out, _, err := run("", "privacy"); err != nil || !strings.Contains(out, "Collection:") || !strings.Contains(out, "burnout forget") {
 		t.Fatalf("privacy: %v %s", err, out)
+	}
+
+	// A daemon doesn't start on an invalid config file.
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("[retention]\nminutes_days = 999\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, err := run("", "daemon"); err == nil || !strings.Contains(errOut, "retention can only be lowered") {
+		t.Fatalf("daemon started on an invalid config: %v %s", err, errOut)
+	}
+	if out, _, _ := run("", "doctor"); !strings.Contains(out, "config file is valid") || !strings.Contains(out, "won't start") {
+		t.Fatalf("doctor doesn't report the invalid config:\n%s", out)
+	}
+	if err := os.Remove(filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatal(err)
 	}
 
 	// Forget the last hour through a running daemon: everything above goes.

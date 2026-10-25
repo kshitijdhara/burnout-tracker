@@ -127,6 +127,26 @@ result is high, the check-in shows support resources for your region
   no score. `on_call`, `release` and `exam` mark busy stretches, which are
   still scored. `annotate list` and `annotate remove ID` manage them.
 
+**Settings** live in one file, `config.toml` (`burnout config path` shows
+where). `burnout config get` shows them all with comments, and
+`burnout config set|add|remove|unset KEY …` changes one; a running
+daemon picks changes up within a few seconds. You can also edit the file
+and check it with `burnout config validate`. A file with a typo or an
+unknown key is rejected, never half-applied: the daemon keeps its current
+settings, and won't start on it.
+- `burnout config set privacy.private_hours "Mon-Fri 19:00-08:00" "Sat,Sun"`:
+  nothing is recorded at those times, as if paused.
+- `burnout config add privacy.exclude_apps com.spotify.client`: that
+  app's time counts, under `private`, without its name. Password
+  managers, finance apps, crypto wallets and a few health apps are always
+  private.
+- `burnout config set privacy.aggregate_only true`: keep only time per
+  category (code, comms, browser, …), with no app names or per-window
+  rows. Days recorded before you turned it on are reduced overnight.
+- `burnout config set retention.minutes_days 30`: keep less. Every
+  retention period can be lowered (not raised); the nightly clean-up
+  applies it.
+
 Minutes appear in `status` after a minute or two of use. Time you spend
 reading without touching anything shows up once you next type, scroll or
 move the pointer (up to 8 minutes later), because only then is it clear

@@ -38,6 +38,10 @@ func runStatus(ctx context.Context, _ []string) error {
 	day := model.LogicalDay(now, app.DefaultConfig().Rollover)
 	if paused, p := control.PauseState(dataDir, now); paused {
 		fmt.Printf("Paused %s: nothing is being recorded. `burnout resume` starts again.\n\n", describePause(p, now))
+	} else if c, _, err := loadConfig(); err == nil {
+		if w, ok := privateNow(c, now); ok {
+			fmt.Printf("Private hours (%s): nothing is being recorded.\n\n", w)
+		}
 	}
 	if sc, err := app.ScoreDays(ctx, store, now, app.DefaultConfig().Rollover, false); err != nil {
 		fmt.Printf("Strain: unavailable (%v)\n\n", err)
