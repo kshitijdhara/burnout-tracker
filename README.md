@@ -78,9 +78,18 @@ Sessions that were already open are not tracked.
 
 ```sh
 ~/.local/bin/burnout doctor     # permissions, disk encryption, daemon health, calls/video right now
-~/.local/bin/burnout status     # today's summary
+~/.local/bin/burnout status     # strain score and today's summary
 ~/.local/bin/burnout timeline   # today minute by minute
 ```
+
+`status` starts with a **strain score** (0–100) for the last completed
+day, the top reasons behind it, and the last 7 days. It compares each day
+with your own usual weekdays or weekends, so it needs 14 days with enough
+data first; until then it says how far calibration has come. Days the
+computer was barely used count as missing, never as rest. The score is a
+signal for reflection, not a diagnosis. On Linux, where there is no
+desktop collector yet, every day counts as barely used, so there is no
+score.
 
 Minutes appear in `status` after a minute or two of use. Time you spend
 reading without touching anything shows up once you next type, scroll or

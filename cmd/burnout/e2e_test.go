@@ -172,6 +172,9 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("status: %v", err)
 	}
 	t.Logf("status:\n%s", status)
+	if !strings.Contains(status, "Strain: no completed days recorded yet") {
+		t.Fatalf("status missing the strain line:\n%s", status)
+	}
 	if !strings.Contains(status, "Agents: 1 sessions") {
 		t.Fatalf("status missing agent session:\n%s", status)
 	}

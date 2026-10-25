@@ -263,6 +263,9 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 			if _, err := store.RunRetention(ctx, now, sqlite.DefaultRetention()); err != nil {
 				return err
 			}
+			if err := saveScores(ctx, store, now); err != nil {
+				log.Warn("could not update daily features and scores", "err", err)
+			}
 			return store.Backup(ctx, now)
 		},
 		LoadHealth:  store.Health,
@@ -283,6 +286,20 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 
 	log.Info("daemon started", "version", version, "keystore", keys.Backend())
 	return d.Run(runCtx)
+}
+
+// saveScores computes the daily features and strain scores of completed
+// days and stores them, so they outlive the raw data (two years vs. 180
+// days).
+func saveScores(ctx context.Context, store *sqlite.Store, now time.Time) error {
+	sc, err := app.ScoreDays(ctx, store, now, app.DefaultConfig().Rollover, false)
+	if err != nil {
+		return err
+	}
+	if err := store.SaveFeatureDays(ctx, sc.Computed); err != nil {
+		return err
+	}
+	return store.SaveScores(ctx, sc.Scores)
 }
 
 func agentKind(agent, event string) (model.AgentEventKind, bool) {

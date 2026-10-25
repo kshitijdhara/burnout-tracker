@@ -615,6 +615,21 @@ device wasn't used, is **missing, not rest**. Work on another machine is
 indistinguishable from rest, so we say so in the UI and rely on import
 (F17) for multi-device users.
 
+v1 implementation notes (`internal/domain/features`, registry version 1):
+- Built: attended hours, after-hours share (weekdays), meeting hours,
+  app switches per hour, longest focus block (code, terminal, docs; gaps
+  up to 2 min), comms share, breaks and longest break, overnight gap,
+  shell failure rate and failure loops, late-night infra/ssh commands,
+  agent parallelism, minutes agents waited on you, and reading share
+  (exploratory, weight 0).
+- Weekend work is covered by the weekend baseline and the weekend
+  guardrail rather than a separate feature.
+- Not yet: back-to-back meetings (needs the calendar), comms interrupt
+  rate, days since a light day, human switches while agents work, and
+  approval latency.
+- Coverage is the share of present time attributed to a window, from the
+  day's health record. A day with under 30 min of presence is "not used".
+
 ### 7.2 Strain score v1 (cold start, no labels)
 
 1. **Calibration:** 14 days. The UI explains why there's no score yet, and
@@ -648,6 +663,30 @@ indistinguishable from rest, so we say so in the UI and rely on import
    counters baselines drifting upward during long overwork.
 8. **Explainability:** the top 3 drivers in plain language ("after-hours
    work +2.1σ vs. your usual weekdays").
+
+v1 implementation choices (`internal/domain/strain`, `strain-v1`):
+- **Smoothing:** EWMA with a 7-day half-life, so one long day moves the
+  score a little and a sustained week moves it a lot.
+- **Baselines:** need at least 5 weekdays or 2 weekend days in the
+  window. A feature with fewer has no deviation yet.
+- **Group caps:** ±2 per group, in both directions.
+- **Mapping:** `c0 = 3`, `s = 1.25`. An ordinary day is about 10, a
+  moderately heavier fortnight about 60, and a crunch week above 90.
+- **Guardrail penalties:** weekly hours +1.5, short night +1, weekend
+  work +1.
+- **Anchor:** the 28-day window with the lowest mean composite (at least
+  14 scored days), ending before the rolling window and starting within
+  180 days. Its medians and MADs are averaged with the rolling ones.
+  Until it exists, the guardrails alone counter drift.
+- **Drivers:** shown at a contribution of 0.5 or more. The text says
+  "than usual lately", because the smoothed deviation spans both
+  weekdays and weekends.
+- **Determinism:** each day sees only earlier days, so past scores never
+  change. Same input, same score.
+- **Storage:** the daemon stores completed days' features and scores
+  during maintenance, recomputing the last two days. `burnout status`
+  computes missing days in memory, so it is current even before
+  maintenance runs.
 
 ### 7.3 Trajectory (Phase 2)
 
