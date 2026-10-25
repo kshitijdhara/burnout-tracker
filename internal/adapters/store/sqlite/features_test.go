@@ -3,10 +3,14 @@ package sqlite
 import (
 	"context"
 	"math"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
@@ -138,5 +142,114 @@ func TestReadOnlyStoreRefusesFeatureWrites(t *testing.T) {
 	}
 	if _, err := ro.DayInput(context.Background(), "2026-10-20"); err != nil {
 		t.Errorf("read-only DayInput: %v", err)
+	}
+}
+
+func TestForget(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	at := func(m int) time.Time { return base.Add(time.Duration(m) * time.Minute) }
+	d := "2026-10-21"
+	exit := 0
+	if err := s.WriteRollups(ctx, []model.MinuteRollup{
+		{Minute: at(0), LogicalDay: d, WindowKey: "a", Category: model.CategoryCode, AttendedS: 60},
+		{Minute: at(9), LogicalDay: d, WindowKey: "a", Category: model.CategoryCode, AttendedS: 60}, // since falls inside it
+		{Minute: at(20), LogicalDay: d, WindowKey: "a", Category: model.CategoryCode, AttendedS: 60},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteIntervals(ctx, []model.Interval{
+		{Start: at(0), End: at(5), LogicalDay: d, Kind: model.IntervalShellCmd, Attrs: model.IntervalAttrs{Argv0: "a", ExitCode: &exit}},
+		{Start: at(5), End: at(15), LogicalDay: d, Kind: model.IntervalPresence}, // runs into since
+		{Start: at(20), End: at(21), LogicalDay: d, Kind: model.IntervalShellCmd, Attrs: model.IntervalAttrs{Argv0: "b", ExitCode: &exit}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteHealth(ctx, d, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveCheckins(ctx, []checkin.Record{
+		{At: at(1), Instrument: checkin.DailyID, Answers: checkin.Answers{"x": 1}},
+		{At: at(30), Instrument: checkin.DailyID, Answers: checkin.Answers{"x": 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddAnnotation(ctx, annotation.Annotation{From: d, To: d, Kind: annotation.OnCall}); err != nil {
+		t.Fatal(err)
+	}
+	// A recovery copy made before since survives; one made after goes.
+	if err := s.Backup(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(s.dir, backupDir, "burnout-20261020.db")
+	if err := os.Rename(filepath.Join(s.dir, backupDir, "burnout-20261021.db"), old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(old, at(-60), at(-60)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Backup(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	newer := filepath.Join(s.dir, backupDir, "burnout-20261021.db")
+	if err := os.Chtimes(newer, at(30), at(30)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Forget(ctx, at(9).Add(30*time.Second), d); err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string) int {
+		var n int
+		if err := s.db.QueryRowContext(ctx, q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT COUNT(*) FROM attention_minutes`); n != 1 {
+		t.Errorf("%d attention minutes left, want only the one before since", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM intervals`); n != 1 {
+		t.Errorf("%d intervals left, want only the command that ended before since", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM checkins`); n != 1 {
+		t.Errorf("%d check-ins left", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM health_daily`); n != 0 {
+		t.Errorf("health for the forgotten day kept")
+	}
+	if n := count(`SELECT COUNT(*) FROM annotations`); n != 1 {
+		t.Errorf("annotations removed")
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Errorf("copy made before since removed: %v", err)
+	}
+	if _, err := os.Stat(newer); !os.IsNotExist(err) {
+		t.Errorf("copy made after since kept")
+	}
+}
+
+func TestAnnotations(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	id, err := s.AddAnnotation(ctx, annotation.Annotation{From: "2026-10-20", To: "2026-10-24", Kind: annotation.Vacation, Note: "Lisbon"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddAnnotation(ctx, annotation.Annotation{From: "2026-10-20", To: "2026-10-19", Kind: annotation.Sick}); err == nil {
+		t.Error("stored an invalid annotation")
+	}
+	got, err := s.Annotations(ctx, "2026-10-24", "2026-10-30")
+	if err != nil || len(got) != 1 || got[0].ID != id || got[0].Note != "Lisbon" || got[0].Kind != annotation.Vacation {
+		t.Fatalf("annotations %+v %v", got, err)
+	}
+	if got, _ := s.Annotations(ctx, "2026-10-25", "2026-10-30"); len(got) != 0 {
+		t.Errorf("non-overlapping: %+v", got)
+	}
+	if ok, err := s.RemoveAnnotation(ctx, id); !ok || err != nil {
+		t.Fatalf("remove: %v %v", ok, err)
+	}
+	if ok, _ := s.RemoveAnnotation(ctx, id); ok {
+		t.Error("removed twice")
 	}
 }

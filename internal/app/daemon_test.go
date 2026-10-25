@@ -459,3 +459,148 @@ func TestHealthSkipsTicksFromEarlierDays(t *testing.T) {
 		t.Fatalf("present %v, confirmed idle %v: want only today's tick", h.presentS, h.confirmedIdleS)
 	}
 }
+
+// fakeControls is a pause switch and at most one forget request.
+type fakeControls struct {
+	mu     sync.Mutex
+	paused bool
+	forget *time.Time
+	done   []error
+}
+
+func (f *fakeControls) Paused(time.Time) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.paused }
+func (f *fakeControls) set(p bool)            { f.mu.Lock(); f.paused = p; f.mu.Unlock() }
+func (f *fakeControls) TakeForget() (time.Time, func(error), bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.forget == nil {
+		return time.Time{}, nil, false
+	}
+	since := *f.forget
+	f.forget = nil
+	return since, func(err error) { f.mu.Lock(); f.done = append(f.done, err); f.mu.Unlock() }, true
+}
+
+func agentMsg(event string, at time.Time) wire.Message {
+	return wire.Message{V: 1, Kind: wire.KindAgentHook, Agent: &wire.AgentHook{
+		Agent: "claude", Event: event, SessionID: "s1", AtMs: at.UnixMilli(),
+	}}
+}
+
+// While paused, collectors aren't sampled and hook events are discarded.
+func TestPausedDaemonCollectsNothing(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	collector := &fakeCollector{clock: clock}
+	controls := &fakeControls{paused: true}
+	d := newTestDaemon(t, clock, sink, collector, func(c *Config, deps *Deps) {
+		c.ControlInterval = time.Millisecond
+		deps.Controls = controls
+		deps.Forget = func(context.Context, time.Time) error { return nil }
+	})
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		if !d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+			Argv0: "ls", StartMs: t0.Add(-time.Second).UnixMilli(), EndMs: t0.UnixMilli(),
+		}}) {
+			t.Error("a hook got an error while paused")
+		}
+	}()
+	runFor(t, d, 100*time.Millisecond)
+	if collector.n != 0 {
+		t.Errorf("collector sampled %d times while paused", collector.n)
+	}
+	if got := d.counters.paused.Load(); got != 1 {
+		t.Errorf("paused counter %d", got)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.intervals) != 0 || len(sink.rollups) != 0 {
+		t.Errorf("recorded while paused: %d intervals, %d rollups", len(sink.intervals), len(sink.rollups))
+	}
+}
+
+// An agent session open across a pause records nothing for the paused span.
+func TestPauseLeavesAGap(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	controls := &fakeControls{}
+	d := newTestDaemon(t, clock, sink, nil, func(_ *Config, deps *Deps) {
+		deps.Controls = controls
+		deps.Forget = func(context.Context, time.Time) error { return nil }
+	})
+	ctx := context.Background()
+	step := func(at time.Time, msg *wire.Message) {
+		clock.set(at)
+		if msg != nil {
+			if !d.Submit(*msg) {
+				t.Fatalf("message at %v not accepted", at)
+			}
+			d.apply(<-d.inbox)
+		}
+		d.checkControls(ctx)
+	}
+	start := agentMsg("UserPromptSubmit", t0)
+	step(t0, &start)
+	controls.set(true)
+	step(t0.Add(time.Minute), nil) // pause
+	controls.set(false)
+	step(t0.Add(31*time.Minute), nil) // resume
+	stop := agentMsg("Stop", t0.Add(32*time.Minute))
+	step(t0.Add(32*time.Minute), &stop)
+	d.flush(ctx, clock.Now(), clock.Now())
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var working []string
+	for _, iv := range sink.intervals {
+		if iv.Kind == model.IntervalAgentState && iv.Attrs.State == "working" {
+			working = append(working, iv.Start.Sub(t0).String()+"–"+iv.End.Sub(t0).String())
+			if iv.Start.Before(t0.Add(31*time.Minute)) && iv.End.After(t0.Add(time.Minute)) {
+				t.Errorf("interval covers the pause: %v–%v", iv.Start, iv.End)
+			}
+		}
+	}
+	if strings.Join(working, ",") != "0s–1m0s,31m0s–32m0s" {
+		t.Errorf("working segments %v, want the minute before the pause and the one after", working)
+	}
+}
+
+// A forget request writes out everything held in memory first, so the
+// deletion removes it, and nothing older reaches the store afterwards.
+func TestForgetSettlesThenDeletes(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	controls := &fakeControls{}
+	var seenAtForget int
+	var forgotSince time.Time
+	d := newTestDaemon(t, clock, sink, nil, func(_ *Config, deps *Deps) {
+		deps.Controls = controls
+		deps.Forget = func(_ context.Context, since time.Time) error {
+			sink.mu.Lock()
+			seenAtForget = len(sink.intervals)
+			sink.mu.Unlock()
+			forgotSince = since
+			return nil
+		}
+	})
+	ctx := context.Background()
+	start := agentMsg("UserPromptSubmit", t0)
+	d.Submit(start)
+	d.apply(<-d.inbox)
+	clock.set(t0.Add(10 * time.Minute))
+	since := t0.Add(5 * time.Minute)
+	controls.mu.Lock()
+	controls.forget = &since
+	controls.mu.Unlock()
+	d.checkControls(ctx)
+	if seenAtForget == 0 || !forgotSince.Equal(since) {
+		t.Fatalf("forget ran with %d intervals written, since %v", seenAtForget, forgotSince)
+	}
+	if len(controls.done) != 1 || controls.done[0] != nil {
+		t.Fatalf("done: %v", controls.done)
+	}
+	if len(d.pendingIntervals)+len(d.pendingRollups) != 0 {
+		t.Fatal("data still held in memory after forgetting")
+	}
+}

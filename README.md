@@ -113,6 +113,20 @@ one or two things to try. Check-in answers stay on this device. If a
 result is high, the check-in shows support resources for your region
 (from your locale) and a worldwide directory.
 
+**Privacy controls.**
+- `burnout privacy` shows what's collected, your current settings and
+  your controls.
+- `burnout pause 1h` (or `pause tomorrow`, or `pause` alone until
+  `burnout resume`) stops recording. Hook events sent meanwhile are
+  discarded.
+- `burnout forget --last 1h`, `--today`, `--since 2026-10-20` or `--all`
+  deletes recorded data for good, including recovery copies made since
+  then. Your annotations, consent and hooks stay.
+- `burnout annotate vacation 2026-11-02 2026-11-06` marks time off. Sick
+  days work the same way: such days are left out of your baseline and get
+  no score. `on_call`, `release` and `exam` mark busy stretches, which are
+  still scored. `annotate list` and `annotate remove ID` manage them.
+
 Minutes appear in `status` after a minute or two of use. Time you spend
 reading without touching anything shows up once you next type, scroll or
 move the pointer (up to 8 minutes later), because only then is it clear

@@ -116,3 +116,6 @@ func Subcommands() map[string][]string {
 	}
 	return out
 }
+
+// SensitiveApps returns the apps recorded as private by default.
+func SensitiveApps() []string { return slices.Clone(sensitiveApps) }

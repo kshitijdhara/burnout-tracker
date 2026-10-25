@@ -33,7 +33,7 @@ func TestBuild(t *testing.T) {
 	}
 	scores[3].Guardrails = []strain.Guardrail{{Name: "weekly_hours", Text: "57 h"}}
 	scores[5].Guardrails = []strain.Guardrail{{Name: "weekly_hours", Text: "58 h"}}
-	w := Build(scores, nil, today)
+	w := Build(scores, nil, nil, today)
 	if w.From != "2026-10-19" || w.To != "2026-10-25" {
 		t.Fatalf("range %s–%s", w.From, w.To)
 	}
@@ -54,13 +54,13 @@ func TestBuild(t *testing.T) {
 	for i := range scores {
 		scores[i].Guardrails = nil
 	}
-	if got := Build(scores, nil, today).Suggestions; len(got) != 2 || got[0] != tips["after_hours_share"] {
+	if got := Build(scores, nil, nil, today).Suggestions; len(got) != 2 || got[0] != tips["after_hours_share"] {
 		t.Errorf("driver suggestions: %q", got)
 	}
 }
 
 func TestBuildWhileCalibrating(t *testing.T) {
-	w := Build([]strain.Score{{Date: "2026-10-24", Status: strain.StatusCalibrating, UsableDays: 6}}, nil, today)
+	w := Build([]strain.Score{{Date: "2026-10-24", Status: strain.StatusCalibrating, UsableDays: 6}}, nil, nil, today)
 	if !w.Calibrating || w.CalibratedOf != 6 || len(w.Suggestions) != 0 {
 		t.Errorf("week: %+v", w)
 	}
@@ -77,7 +77,7 @@ func TestLatestWeeklyCheckins(t *testing.T) {
 		rec(19, checkin.DailyID, 75), // not weekly
 		rec(25, checkin.CBIPersonalID, 60), rec(25, checkin.CBIWorkID, 70),
 	}
-	w := Build(nil, records, today)
+	w := Build(nil, records, nil, today)
 	if w.Checkin[checkin.CBIWorkID].Score != 70 || w.Checkin[checkin.CBIPersonalID].Score != 60 ||
 		w.PrevCheckin[checkin.CBIWorkID].Score != 55 || len(w.PrevCheckin) != 2 {
 		t.Errorf("check-ins: latest %+v, previous %+v", w.Checkin, w.PrevCheckin)

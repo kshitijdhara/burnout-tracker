@@ -42,7 +42,13 @@ func runReview(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	w := review.Build(sc.Scores, records, model.LogicalDay(now, rollover))
+	today := model.LogicalDay(now, rollover)
+	t, _ := time.Parse(time.DateOnly, today)
+	notes, err := store.Annotations(ctx, t.AddDate(0, 0, -7).Format(time.DateOnly), today)
+	if err != nil {
+		return err
+	}
+	w := review.Build(sc.Scores, records, notes, today)
 	due, _ := review.WeeklyDue(records, now)
 	fmt.Print(formatReview(w, due))
 	return nil
@@ -60,6 +66,9 @@ func formatReview(w review.Week, checkinDue bool) string {
 			fmt.Fprintf(&b, " (the week before: %.0f, %+.0f)", w.PrevAverage, w.Average-w.PrevAverage)
 		}
 		fmt.Fprintf(&b, "\n  Highest: %s, %.0f (%s)\n", w.Peak.Date, w.Peak.Strain, strainBand(w.Peak.Strain))
+	}
+	for _, a := range w.Annotations {
+		fmt.Fprintf(&b, "  Marked: %s\n", describeAnnotation(a))
 	}
 	if len(w.Drivers) > 0 {
 		b.WriteString("\nWhat kept coming up:\n")
