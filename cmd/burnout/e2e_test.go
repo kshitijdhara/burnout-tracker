@@ -28,20 +28,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 	const canary = "CANARYe2eQ7"
 	tmp := t.TempDir()
-	// Not in tmp: install-hooks refuses a binary in a folder everyone can
-	// write to, such as /tmp.
-	binDir, err := os.MkdirTemp(".", "e2e-bin-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(binDir) })
-	bin, err := filepath.Abs(filepath.Join(binDir, "burnout"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
+	bin := buildBinary(t)
 
 	// The unix socket path must stay short (sun_path is ~104 bytes on macOS).
 	runtimeDir, err := os.MkdirTemp("", "bt")
@@ -214,6 +201,25 @@ func TestEndToEnd(t *testing.T) {
 	if strings.Contains(status, canary) {
 		t.Errorf("canary found in status output")
 	}
+}
+
+// buildBinary builds the real burnout binary for a test. Not in tmp:
+// install-hooks refuses a binary in a folder everyone can write to.
+func buildBinary(t *testing.T) string {
+	t.Helper()
+	binDir, err := os.MkdirTemp(".", "e2e-bin-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(binDir) })
+	bin, err := filepath.Abs(filepath.Join(binDir, "burnout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	return bin
 }
 
 func waitFor(t *testing.T, log *bytes.Buffer, ok func() bool) {
