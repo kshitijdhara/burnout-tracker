@@ -102,7 +102,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("database", false, err.Error())
 	}
 
-	fmt.Println("\nNetwork: no outbound calls are configured (calendar, update checks and model download are all off).")
+	fmt.Println("\n" + networkSummary(dataDir))
 	return nil
 }
 

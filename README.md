@@ -142,6 +142,22 @@ hours decide what counts as after-hours work. Change either later with
 `burnout config set profile.core_hours 08:00-16:30`. New core hours
 recompute the days whose detail is still kept (180 days by default).
 
+**Your calendar (optional).** Meetings away from the screen count too if
+you add your calendar's ICS feed:
+`burnout calendar add "https://calendar.google.com/calendar/ical/…/basic.ics"`.
+In Google Calendar that is Settings, your calendar, then "Secret address
+in iCal format"; Outlook publishes one under Settings, Calendar, Shared
+calendars. A local `.ics` file works too.
+- Only meeting start and end times and busy or free are kept. Titles,
+  attendees, places and notes are dropped as the feed is read.
+- The URL is a key to your calendar, so it stays in your OS keystore, and
+  it is fetched over HTTPS about every 3 hours. This is the only network
+  call burnout makes.
+- `burnout calendar status` shows the last sync, and
+  `burnout calendar remove [--forget]` stops it.
+- This adds back-to-back and after-hours meetings to what the strain score
+  weighs.
+
 **Settings** live in one file, `config.toml` (`burnout config path` shows
 where). `burnout config get` shows them all with comments, and
 `burnout config set|add|remove|unset KEY …` changes one; a running

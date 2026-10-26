@@ -10,7 +10,7 @@ import (
 
 // RegistryVersion changes whenever a feature is added, removed or computed
 // differently. Stored features from another version are recomputed.
-const RegistryVersion = 1
+const RegistryVersion = 2
 
 // Group is a family of correlated features; the strain score caps each
 // group's contribution so they can't count the same thing twice.
@@ -122,20 +122,46 @@ func Registry() []Feature {
 			Compute: afterHoursShare,
 		},
 		{
-			Name: "meeting_hours", Version: 1, Unit: "h", Group: GroupLoad, HigherWorse: true,
+			Name: "meeting_hours", Version: 2, Unit: "h", Group: GroupLoad, HigherWorse: true,
 			Epsilon: 0.25, Weights: weights(0.75, map[Role]float64{RoleStudent: 0.5, RolePM: 0.25}),
 			Label: "hours in meetings and calls",
-			Doc:   "Time in meeting apps or on a call, counted once per minute.",
-			Compute: func(d Day, _ Params) (float64, bool) {
-				total := 0.0
-				for _, m := range d.Minutes {
-					s := m.CallS
-					if m.Category == model.CategoryMeeting {
-						s = max(s, m.AttendedS)
-					}
-					total += s
+			Doc: "Time in meeting apps, on a call, or in a calendar meeting (so in-person meetings count), " +
+				"counted once per minute.",
+			Compute: meetingHours,
+		},
+		{
+			Name: "back_to_back_meetings", Version: 1, Unit: "count", Group: GroupFragmentation, HigherWorse: true,
+			Epsilon: 0.5, Weights: weights(0.5, map[Role]float64{RolePM: 0.25}),
+			Label: "back-to-back meetings",
+			Doc:   "Calendar meetings that start within 5 minutes of the previous one ending. Needs a calendar.",
+			Compute: func(d Day, p Params) (float64, bool) {
+				if !d.Calendar {
+					return 0, false
 				}
-				return total / 3600, true
+				blocks := sortedBusy(d)
+				n := 0
+				for i := 1; i < len(blocks); i++ {
+					gap := blocks[i].Start.Sub(blocks[i-1].End)
+					if gap >= 0 && gap <= p.BackToBack {
+						n++
+					}
+				}
+				return float64(n), true
+			},
+		},
+		{
+			Name: "after_hours_meetings", Version: 1, Unit: "h", Group: GroupLoad, HigherWorse: true,
+			Epsilon: 0.25, Weights: weight(0.5), Label: "meetings outside core hours",
+			Doc: "Hours of a weekday's calendar meetings outside your core hours. Needs a calendar; not computed on weekends.",
+			Compute: func(d Day, p Params) (float64, bool) {
+				if !d.Calendar || d.Weekend {
+					return 0, false
+				}
+				total := time.Duration(0)
+				for _, b := range mergedBusy(d) {
+					total += b.Duration() - overlap(b, coreSpan(b.Start, p))
+				}
+				return total.Hours(), true
 			},
 		},
 		{
@@ -459,4 +485,75 @@ func agentParallelism(d Day, _ Params) (float64, bool) {
 		return 0, false
 	}
 	return weighted / busy, true
+}
+
+// meetingHours unions, per minute, time in meeting apps or on a call with
+// calendar busy time, so a meeting is counted once whether it shows up on
+// screen, on the calendar or both.
+func meetingHours(d Day, _ Params) (float64, bool) {
+	perMinute := map[int64]float64{}
+	for _, m := range d.Minutes {
+		s := m.CallS
+		if m.Category == model.CategoryMeeting {
+			s = max(s, m.AttendedS)
+		}
+		if s > 0 {
+			k := m.At.Unix() / 60
+			perMinute[k] = max(perMinute[k], s)
+		}
+	}
+	for _, b := range mergedBusy(d) {
+		for t := b.Start.Truncate(time.Minute); t.Before(b.End); t = t.Add(time.Minute) {
+			s := overlap(b, Span{Start: t, End: t.Add(time.Minute)}).Seconds()
+			k := t.Unix() / 60
+			perMinute[k] = max(perMinute[k], s)
+		}
+	}
+	total := 0.0
+	for _, s := range perMinute {
+		total += s
+	}
+	return total / 3600, true
+}
+
+// sortedBusy returns the day's busy blocks by start.
+func sortedBusy(d Day) []Span {
+	b := slices.Clone(d.Busy)
+	slices.SortFunc(b, func(x, y Span) int { return x.Start.Compare(y.Start) })
+	return b
+}
+
+// mergedBusy returns the day's busy blocks with overlaps merged, so the
+// same meeting on two calendars counts once.
+func mergedBusy(d Day) []Span {
+	var out []Span
+	for _, b := range sortedBusy(d) {
+		if n := len(out); n > 0 && !b.Start.After(out[n-1].End) {
+			if b.End.After(out[n-1].End) {
+				out[n-1].End = b.End
+			}
+			continue
+		}
+		out = append(out, Span{Start: b.Start, End: b.End})
+	}
+	return out
+}
+
+// overlap is how long a and b overlap.
+func overlap(a, b Span) time.Duration {
+	start, end := a.Start, a.End
+	if b.Start.After(start) {
+		start = b.Start
+	}
+	if b.End.Before(end) {
+		end = b.End
+	}
+	return max(0, end.Sub(start))
+}
+
+// coreSpan is the core hours of t's local calendar day.
+func coreSpan(t time.Time, p Params) Span {
+	y, m, d := t.Date()
+	midnight := time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+	return Span{Start: midnight.Add(p.CoreStart), End: midnight.Add(p.CoreEnd)}
 }

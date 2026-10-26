@@ -558,6 +558,37 @@ matter for PMs and researchers.
 - **Features:** meeting hours, back-to-back chains, free-time
   fragmentation, after-hours meetings.
 
+Phase 1 so far (`internal/domain/calendar`, `internal/adapters/egress/ics`):
+- **Setup:** `burnout calendar add URL|FILE` accepts https:// or webcal://
+  feeds, or a local `.ics` file. Plain http:// is refused.
+  - The URL goes into the OS keystore, after a confirmation that it is a
+    key to the whole calendar.
+  - The feed is test-fetched before it is kept.
+- **Syncing:** the daemon fetches the feed a minute after it starts, then
+  every 3 hours.
+  - It skips fetching while paused, or when `calendar.ics.enabled = false`.
+  - Each sync replaces the busy blocks from 60 days back to 2 days ahead.
+  - It records which days it covered, so a day without meetings counts as
+    0 rather than missing.
+  - Meetings starting in private hours are dropped.
+  - Nothing that starts before the last `forget` is ever imported again.
+  - `burnout calendar sync | status | remove [--forget]` manage it.
+- **Parsing:** the parser streams the feed. It expands RRULE (DAILY,
+  WEEKLY, MONTHLY and YEARLY, with INTERVAL, COUNT, UNTIL, BYDAY with
+  ordinals, BYMONTHDAY, BYMONTH and BYSETPOS), EXDATE and RECURRENCE-ID
+  overrides.
+  - Repeats keep their local wall-clock time across DST changes.
+  - TZIDs resolve as IANA names, then common Windows names, then local time.
+  - These are not meetings: all-day events, free (TRANSPARENT) events,
+    cancelled events, and events longer than 12 hours. Tentative ones count
+    and are marked tentative.
+  - A kept property over 8 KB drops its event.
+  - Caps: 20,000 events, and 5,000 instances per recurring event.
+- **Fetching:** a 20 MB size cap and a 60 s timeout. Redirects must stay on
+  https. No cookies are sent, the User-Agent is generic, and errors name
+  only the host.
+- Free-time fragmentation isn't built yet.
+
 ---
 
 ## 5. Time model
@@ -667,7 +698,7 @@ device wasn't used, is **missing, not rest**. Work on another machine is
 indistinguishable from rest, so we say so in the UI and rely on import
 (F17) for multi-device users.
 
-v1 implementation notes (`internal/domain/features`, registry version 1):
+v1 implementation notes (`internal/domain/features`, registry version 2):
 - Built: attended hours, after-hours share (weekdays), meeting hours,
   app switches per hour, longest focus block (code, terminal, docs; gaps
   up to 2 min), comms share, breaks and longest break, overnight gap,
@@ -676,7 +707,15 @@ v1 implementation notes (`internal/domain/features`, registry version 1):
   (exploratory, weight 0).
 - Weekend work is covered by the weekend baseline and the weekend
   guardrail rather than a separate feature.
-- Not yet: back-to-back meetings (needs the calendar), comms interrupt
+- Registry version 2 adds the calendar:
+  - meeting hours now count calendar meetings too, unioned per minute with
+    meeting-app and call time, so in-person meetings count and nothing
+    counts twice;
+  - back-to-back meetings: meetings starting within 5 minutes of the last
+    one ending;
+  - after-hours meetings: a weekday's meeting hours outside core hours;
+  - the last two apply only on days a calendar sync covered.
+- Not yet: comms interrupt
   rate, days since a light day, human switches while agents work, and
   approval latency.
 - Coverage is the share of present time attributed to a window, from the

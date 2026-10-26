@@ -125,6 +125,14 @@ func newStore(dir string, o options, probe func() bool) (*Store, error) {
 	}
 }
 
+// Exists reports whether a store was set up in dir (a backend was chosen),
+// so read-only views can skip New, whose first run probes the OS keyring
+// and may prompt.
+func Exists(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "keys", backendMarker))
+	return err == nil
+}
+
 // GetOrCreate returns the named secret, generating a random one on first use.
 func (s *Store) GetOrCreate(name string) (model.Sensitive[[]byte], error) {
 	if !reName.MatchString(name) {
@@ -159,6 +167,43 @@ func (s *Store) GetOrCreate(name string) (model.Sensitive[[]byte], error) {
 		return model.Sensitive[[]byte]{}, fmt.Errorf("keystore: %s is %d bytes, want %d; refusing to use it", name, len(b), SecretSize)
 	}
 	return model.NewSensitive(b), nil
+}
+
+// maxValue bounds what Put stores; a calendar feed URL is well under it.
+const maxValue = 4096
+
+// Put stores a secret the user supplied (such as an ICS URL) under name,
+// replacing any earlier value.
+func (s *Store) Put(name string, value model.Sensitive[string]) error {
+	if !reName.MatchString(name) {
+		return fmt.Errorf("keystore: invalid name %q", name)
+	}
+	if v := value.Reveal(); v == "" || len(v) > maxValue {
+		return fmt.Errorf("keystore: %s must be 1 to %d bytes", name, maxValue)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.backend.del(name); err != nil && !errors.Is(err, errNotFound) {
+		return err
+	}
+	return s.backend.set(name, value.Reveal())
+}
+
+// Get returns the named secret; ok is false when there is none.
+func (s *Store) Get(name string) (model.Sensitive[string], bool, error) {
+	if !reName.MatchString(name) {
+		return model.Sensitive[string]{}, false, fmt.Errorf("keystore: invalid name %q", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, err := s.backend.get(name)
+	if errors.Is(err, errNotFound) {
+		return model.Sensitive[string]{}, false, nil
+	}
+	if err != nil {
+		return model.Sensitive[string]{}, false, err
+	}
+	return model.NewSensitive(v), true, nil
 }
 
 // Delete removes the named secret. Deleting a missing secret is not an error.

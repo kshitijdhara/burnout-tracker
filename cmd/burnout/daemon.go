@@ -310,6 +310,13 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 		},
 	})
 
+	var calendarDone sync.WaitGroup
+	defer calendarDone.Wait() // before the store closes
+	runCalendar := func(ctx context.Context) {
+		calendarDone.Add(1)
+		go func() { defer calendarDone.Done(); calendarLoop(ctx, log, store, dataDir, keys, settings) }()
+	}
+
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(ctx, func(m wire.Message) { d.Submit(m) }) }()
 	runCtx, cancel := context.WithCancel(ctx)
@@ -322,6 +329,7 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 		cancel()
 	}()
 
+	runCalendar(runCtx)
 	log.Info("daemon started", "version", version, "keystore", keys.Backend())
 	return d.Run(runCtx)
 }

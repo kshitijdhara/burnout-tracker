@@ -103,5 +103,7 @@ jobs:
         run: go test ./internal/adapters/integrations/claude/ -run='^$' -fuzz=FuzzParsePayload -fuzztime=60s
       - name: Fuzz config loader
         run: go test ./internal/config/ -run='^$' -fuzz=FuzzParse -fuzztime=60s
+      - name: Fuzz ICS parser
+        run: go test ./internal/domain/calendar/ -run='^$' -fuzz=FuzzParse -fuzztime=60s
       - name: Fuzz private-hours parser
         run: go test ./internal/domain/schedule/ -run='^$' -fuzz=FuzzParse -fuzztime=30s

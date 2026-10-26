@@ -79,6 +79,7 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (i
 		{`DELETE FROM monitor_snapshots WHERE rowid IN (SELECT rowid FROM monitor_snapshots WHERE ts_ms < ? LIMIT 5000)`, ms(r.Rollups)},
 		{`DELETE FROM health_daily WHERE rowid IN (SELECT rowid FROM health_daily WHERE logical_day < ? LIMIT 5000)`, dayCut(r.Rollups)},
 		{`DELETE FROM intervals WHERE rowid IN (SELECT rowid FROM intervals WHERE end_ms < ? LIMIT 5000)`, ms(r.Intervals)},
+		{`DELETE FROM calendar_days WHERE rowid IN (SELECT rowid FROM calendar_days WHERE logical_day < ? LIMIT 5000)`, dayCut(r.Intervals)},
 		{`DELETE FROM daily_features WHERE rowid IN (SELECT rowid FROM daily_features WHERE logical_day < ? LIMIT 5000)`, dayCut(r.DailyFeatures)},
 		{`DELETE FROM scores WHERE rowid IN (SELECT rowid FROM scores WHERE logical_day < ? LIMIT 5000)`, dayCut(r.DailyFeatures)},
 		{`DELETE FROM checkins WHERE rowid IN (SELECT rowid FROM checkins WHERE ts_ms < ? LIMIT 5000)`, ms(r.Checkins)},

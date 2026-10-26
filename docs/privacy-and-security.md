@@ -177,10 +177,14 @@ model's context.
 
 ### 4.4 ICS feeds
 
-The parser keeps only `DTSTART`, `DTEND`, `TRANSP` and `STATUS` (plus
-`RRULE`/`EXDATE` for expansion). It drops `SUMMARY`, `DESCRIPTION`,
-`LOCATION`, `ATTENDEE`, `ORGANIZER` and everything else while streaming,
-without holding the full feed in memory.
+The parser keeps only `DTSTART`, `DTEND`/`DURATION`, `TRANSP` and
+`STATUS`. For expanding repeats it also uses `RRULE`, `EXDATE`,
+`RECURRENCE-ID` and `UID`; the UID is held in memory only, to match a moved
+instance to its series, and is never stored.
+
+It drops `SUMMARY`, `DESCRIPTION`, `LOCATION`, `ATTENDEE`, `ORGANIZER` and
+everything else while streaming, without holding the full feed in memory.
+A canary test confirms none of them reach the database.
 
 ### 4.5 Identity hashing
 
@@ -265,6 +269,17 @@ Phase 1 so far (CLI; the tray and dashboard come later):
   - Exports live wherever the user saved them, so `forget` can't delete
     them. The data folder keeps a list of export paths (no contents), and
     `forget` and `privacy` show the ones still on disk.
+- **Calendar** is built: `burnout calendar add|sync|status|remove`.
+  - The feed URL is kept in the OS keystore only. It is never in config,
+    logs, errors or the sync status file, which names only the host.
+  - The ICS fetch is the only network call so far. `doctor` and `privacy`
+    show it.
+  - `calendar.ics.enabled = false` stops it.
+  - No fetch happens while paused, and meetings in private hours are
+    dropped.
+  - Busy blocks are intervals: `forget` deletes them, and later syncs
+    never re-import meetings from before the last forget.
+  - `calendar remove --forget` deletes everything stored from the feed.
 - **Still to do:** the tray and the dashboard page.
 
 ### 5.2 Anti-coercion requirements
