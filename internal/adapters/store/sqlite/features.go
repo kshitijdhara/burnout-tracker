@@ -128,11 +128,13 @@ type storedFeatures struct {
 	PresentS float64            `json:"present_s"`
 	Excluded bool               `json:"excluded,omitempty"`
 	Values   map[string]float64 `json:"values"`
+	Params   string             `json:"params,omitempty"` // features.Params.Key; empty means the defaults
 }
 
 // SaveFeatureDays stores days' features under the current registry
-// version, replacing what was there.
-func (s *Store) SaveFeatureDays(ctx context.Context, days []strain.Day) error {
+// version and the parameters they were computed with (paramsKey,
+// features.Params.Key), replacing what was there.
+func (s *Store) SaveFeatureDays(ctx context.Context, days []strain.Day, paramsKey string) error {
 	if err := s.writable(); err != nil {
 		return err
 	}
@@ -149,7 +151,7 @@ func (s *Store) SaveFeatureDays(ctx context.Context, days []strain.Day) error {
 		}
 		defer func() { _ = stmt.Close() }()
 		for _, d := range days {
-			b, err := json.Marshal(storedFeatures{PresentS: d.Present.Seconds(), Excluded: d.Excluded, Values: d.Values})
+			b, err := json.Marshal(storedFeatures{PresentS: d.Present.Seconds(), Excluded: d.Excluded, Values: d.Values, Params: paramsKey})
 			if err != nil {
 				return err
 			}
@@ -162,9 +164,10 @@ func (s *Store) SaveFeatureDays(ctx context.Context, days []strain.Day) error {
 }
 
 // FeatureDays returns stored features for days in [from, to], in order.
-// Rows from another registry version are left out, so callers recompute
-// them.
-func (s *Store) FeatureDays(ctx context.Context, from, to string) ([]strain.Day, error) {
+// Rows from another registry version, or computed with parameters other
+// than paramsKey (features.Params.Key), are left out, so callers
+// recompute them.
+func (s *Store) FeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error) {
 	var out []strain.Day
 	err := s.scanRows(ctx, `
 		SELECT logical_day, coverage, features FROM daily_features
@@ -178,6 +181,12 @@ func (s *Store) FeatureDays(ctx context.Context, from, to string) ([]strain.Day,
 			var sf storedFeatures
 			if err := json.Unmarshal([]byte(raw), &sf); err != nil {
 				return nil // recomputed by the caller
+			}
+			if sf.Params == "" {
+				sf.Params = features.DefaultKey // stored before keys existed
+			}
+			if sf.Params != paramsKey {
+				return nil
 			}
 			d.Present = time.Duration(sf.PresentS * float64(time.Second))
 			d.Excluded, d.Values = sf.Excluded, sf.Values

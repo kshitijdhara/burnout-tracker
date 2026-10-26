@@ -33,7 +33,7 @@ func TestExport(t *testing.T) {
 	}))
 	must(s.WriteIntervals(ctx, []model.Interval{{Start: at, End: at.Add(3 * time.Second), UTCOffsetMin: 120, LogicalDay: "2026-10-21",
 		Kind: model.IntervalShellCmd, Attrs: model.IntervalAttrs{Argv0: "git", Subcommand: "push", ExitCode: &exit, ProjectKey: "pk", Group: "vcs"}}}))
-	must(s.SaveFeatureDays(ctx, []strain.Day{{Date: "2026-10-20", Coverage: 0.9, Present: time.Hour, Values: map[string]float64{"breaks": 3}}}))
+	must(s.SaveFeatureDays(ctx, []strain.Day{{Date: "2026-10-20", Coverage: 0.9, Present: time.Hour, Values: map[string]float64{"breaks": 3}}}, "k"))
 	must(s.SaveScores(ctx, []strain.Score{
 		{Date: "2026-10-20", Status: strain.StatusOK, Strain: 42, Drivers: []strain.Driver{{Feature: "breaks"}}},
 		{Date: "2026-10-19", Status: strain.StatusCalibrating},

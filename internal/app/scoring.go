@@ -14,7 +14,7 @@ import (
 type ScoreStore interface {
 	DataDays(ctx context.Context, from, to string) ([]string, error)
 	DayInput(ctx context.Context, logicalDay string) (features.Day, error)
-	FeatureDays(ctx context.Context, from, to string) ([]strain.Day, error)
+	FeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error)
 	Annotations(ctx context.Context, from, to string) ([]annotation.Annotation, error)
 }
 
@@ -38,16 +38,36 @@ type Scoring struct {
 	Computed []strain.Day
 }
 
+// ScoreOptions say how to score.
+type ScoreOptions struct {
+	Rollover time.Duration
+	// Features are the feature definitions (core hours come from the
+	// user's profile); Role weights the features in the score.
+	Features features.Params
+	Role     features.Role
+	// IncludeToday scores today's partial day too.
+	IncludeToday bool
+}
+
+// DefaultScoreOptions are the defaults: a developer with 09:00–18:00 core
+// hours, today left out.
+func DefaultScoreOptions() ScoreOptions {
+	return ScoreOptions{Rollover: DefaultConfig().Rollover, Features: features.DefaultParams(), Role: features.RoleDeveloper}
+}
+
 // ScoreDays scores every day with data up to now. Today's features are
-// partial, so it is only included when includeToday is set, and is never
-// in Computed.
-func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, rollover time.Duration, includeToday bool) (Scoring, error) {
+// partial, so it is only included with IncludeToday, and is never in
+// Computed. Stored features computed with other feature parameters (the
+// user changed their core hours) are recomputed while their raw data is
+// kept.
+func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions) (Scoring, error) {
+	rollover, includeToday := o.Rollover, o.IncludeToday
 	today := model.LogicalDay(now, rollover)
 	todayDate, _ := time.Parse(time.DateOnly, today)
 	day := func(back int) string { return todayDate.AddDate(0, 0, -back).Format(time.DateOnly) }
 	yesterday := day(1)
 
-	stored, err := st.FeatureDays(ctx, day(featureHistory), yesterday)
+	stored, err := st.FeatureDays(ctx, day(featureHistory), yesterday, o.Features.Key())
 	if err != nil {
 		return Scoring{}, err
 	}
@@ -78,7 +98,7 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, rollover time.
 		}
 		d := strain.Day{
 			Date: date, Coverage: in.Coverage, Present: in.Present,
-			Values: features.Values(in, features.DefaultParams()),
+			Values: features.Values(in, o.Features),
 		}
 		days = append(days, d)
 		if !isToday {
@@ -99,6 +119,8 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, rollover time.
 	for i := range days {
 		days[i].Excluded = excluded[days[i].Date]
 	}
-	out.Scores = strain.Compute(days, strain.DefaultParams())
+	p := strain.DefaultParams()
+	p.Role = o.Role
+	out.Scores = strain.Compute(days, p)
 	return out, nil
 }

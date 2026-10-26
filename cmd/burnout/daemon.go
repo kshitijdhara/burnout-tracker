@@ -284,7 +284,7 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 			if _, err := store.RunRetention(ctx, now, retentionFrom(c)); err != nil {
 				return err
 			}
-			if err := saveScores(ctx, store, now); err != nil {
+			if err := saveScores(ctx, store, now, c); err != nil {
 				log.Warn("could not update daily features and scores", "err", err)
 			}
 			if c.Privacy.AggregateOnly {
@@ -382,12 +382,13 @@ func (c controlFiles) TakeForget() (time.Time, func(error), bool) {
 // saveScores computes the daily features and strain scores of completed
 // days and stores them, so they outlive the raw data (two years vs. 180
 // days).
-func saveScores(ctx context.Context, store *sqlite.Store, now time.Time) error {
-	sc, err := app.ScoreDays(ctx, store, now, app.DefaultConfig().Rollover, false)
+func saveScores(ctx context.Context, store *sqlite.Store, now time.Time, c config.Config) error {
+	opts := scoreOptions(c)
+	sc, err := app.ScoreDays(ctx, store, now, opts)
 	if err != nil {
 		return err
 	}
-	if err := store.SaveFeatureDays(ctx, sc.Computed); err != nil {
+	if err := store.SaveFeatureDays(ctx, sc.Computed, opts.Features.Key()); err != nil {
 		return err
 	}
 	return store.SaveScores(ctx, sc.Scores)

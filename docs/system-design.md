@@ -520,6 +520,30 @@ redacted before any rule or Laya sees them. The redaction rules are in
 [Privacy & Security §4.1](privacy-and-security.md). Titles and title hashes
 are **never persisted**.
 
+Phase 1 so far:
+- **Roles:** developer, student, researcher and PM (`profile.role`; `setup` asks).
+- **One taxonomy:** every role uses the same categories. The bundled rules
+  also cover study, research and planning apps, such as RStudio, MATLAB,
+  Zotero, Anki, OneNote and Linear. A role changes the feature weights
+  (§3.5), not how activity is classified.
+- **Starting weights:**
+  - developer: as in §7.1;
+  - PM: meetings, app switching, short focus blocks and chat weigh less;
+  - student: after-hours work, meetings and switching weigh less;
+  - researcher: after-hours work weighs less, short focus blocks more.
+
+  They are starting points for Phase 4 to fit.
+- **Changing role** rescores all of history at once, because weights are
+  applied at scoring time.
+- **Core hours** (`profile.core_hours`, default 09:00-18:00, weekdays)
+  define after-hours work. Changing them changes the features themselves:
+  - each stored day records the feature parameters it was computed with;
+  - days stored under other parameters are recomputed while their minutes
+    and intervals are kept (180 days by default), so baselines compare
+    like with like;
+  - older days keep their stored values;
+  - with the default profile, nothing is recomputed.
+
 ### 4.7 Calendar busy blocks
 
 Calendar data covers in-person meetings and meeting-heavy days, which
@@ -770,6 +794,11 @@ v1 implementation choices (`internal/domain/strain`, `strain-v1`):
    adds" and a "not now" option.
 4. Offer the optional integrations: shell hooks, Claude Code hooks, ICS.
 5. Explain the 14-day calibration and the data-quality badge.
+
+Built (CLI): `burnout setup` covers steps 1 and 2. After consent it asks
+for a role and core hours, and Enter keeps the defaults. It saves them to
+the config file, where `burnout config set profile.role|profile.core_hours`
+changes them later.
 
 The first run must be completed **interactively by the logged-in user**
 (anti-coercion; see Privacy & Security).

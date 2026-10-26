@@ -5,6 +5,7 @@
 package features
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -58,7 +59,7 @@ type Day struct {
 }
 
 // Params are the definitions features depend on. Defaults follow the
-// design; they become config keys with the privacy controls.
+// design; core hours come from the user's profile.
 type Params struct {
 	CoreStart, CoreEnd time.Duration // core hours, local time of day
 	BreakMin           time.Duration // presence gap that counts as a break
@@ -82,6 +83,26 @@ func DefaultParams() Params {
 		MinAttended: 30 * time.Minute,
 		MinCommands: 10,
 	}
+}
+
+// Key identifies the parameters a stored day's features were computed
+// with, with the registry version. A day stored under another key is
+// recomputed while its raw data is kept, so every scored day is measured
+// the same way.
+func (p Params) Key() string {
+	if p == DefaultParams() {
+		return DefaultKey // what days stored before keys existed were computed with
+	}
+	return fmt.Sprintf("r%d core=%s-%s break=%s focus=%s late=%s-%s loop=%s min=%s cmds=%d",
+		RegistryVersion, clock(p.CoreStart), clock(p.CoreEnd), p.BreakMin, p.FocusGap,
+		clock(p.LateStart), clock(p.LateEnd), p.LoopWindow, p.MinAttended, p.MinCommands)
+}
+
+// DefaultKey is DefaultParams' key. Stored days without a key have it.
+const DefaultKey = "default"
+
+func clock(d time.Duration) string {
+	return fmt.Sprintf("%02d:%02d", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // timeOfDay returns how far t is into its local calendar day.

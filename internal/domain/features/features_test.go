@@ -2,6 +2,7 @@ package features
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,5 +217,35 @@ func TestValuesSkipsWhatDoesntApply(t *testing.T) {
 	}
 	if got, ok := v["attended_hours"]; !ok || got != 0 {
 		t.Errorf("attended_hours = %v, %v", got, ok)
+	}
+}
+
+// Core hours come from the profile: the same day is after-hours work for
+// a 09:00 starter and core work for a 07:00 starter.
+func TestCoreHoursParam(t *testing.T) {
+	d := Day{Minutes: concat(
+		minutes(at(7, 0), 120, "editor", model.CategoryCode),  // 07:00–09:00
+		minutes(at(10, 0), 120, "editor", model.CategoryCode), // core either way
+	)}
+	f, _ := ByName("after_hours_share")
+	def, _ := f.Compute(d, DefaultParams())
+	early := DefaultParams()
+	early.CoreStart, early.CoreEnd = 7*time.Hour, 16*time.Hour
+	got, _ := f.Compute(d, early)
+	if !near(def, 0.5) || !near(got, 0) {
+		t.Errorf("after-hours share: %v with 09:00-18:00, %v with 07:00-16:00", def, got)
+	}
+	if early.Key() == DefaultParams().Key() || DefaultParams().Key() != DefaultKey || !strings.Contains(early.Key(), "core=07:00-16:00") {
+		t.Errorf("keys: default %q, early %q", DefaultParams().Key(), early.Key())
+	}
+	for _, r := range Roles() {
+		if !r.Valid() || r.Describe() == "" {
+			t.Errorf("role %q", r)
+		}
+		for _, f := range Registry() {
+			if w := f.Weight(r); w < 0 || w > 1 {
+				t.Errorf("%s weight for %s: %v", f.Name, r, w)
+			}
+		}
 	}
 }

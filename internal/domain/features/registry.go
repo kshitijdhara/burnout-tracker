@@ -25,14 +25,38 @@ const (
 	GroupAgent         Group = "agent"
 )
 
-// Role selects per-role feature weights. Role profiles arrive with the
-// classification work; every user is a developer until then.
+// Role selects per-role feature weights (system design §4.6, F11). It
+// changes how much each deviation counts, not how features are computed,
+// so changing role rescores history without recomputing it.
 type Role string
 
 // Roles.
 const (
-	RoleDeveloper Role = "developer"
+	RoleDeveloper  Role = "developer"
+	RoleStudent    Role = "student"
+	RoleResearcher Role = "researcher"
+	RolePM         Role = "pm"
 )
+
+// Roles lists every role, in the order onboarding offers them.
+func Roles() []Role { return []Role{RoleDeveloper, RoleStudent, RoleResearcher, RolePM} }
+
+// Valid reports whether r is a known role.
+func (r Role) Valid() bool { return slices.Contains(Roles(), r) }
+
+// Describe is a role's one-line description, for onboarding.
+func (r Role) Describe() string {
+	switch r {
+	case RoleStudent:
+		return "student: study, lectures, assignments"
+	case RoleResearcher:
+		return "researcher: papers, data, long focused work"
+	case RolePM:
+		return "project or product manager: meetings, docs, coordination"
+	default:
+		return "developer: code, terminals, AI coding agents"
+	}
+}
 
 // Feature is one declared daily feature.
 type Feature struct {
@@ -67,6 +91,18 @@ func (f Feature) Weight(r Role) float64 {
 
 func weight(w float64) map[Role]float64 { return map[Role]float64{RoleDeveloper: w} }
 
+// weights sets the developer weight and the roles that differ from it.
+// These starting values follow what each role's work looks like: a PM's
+// day is meetings and switching, a student's evenings are often study by
+// choice. Phase 4 fits them from opt-in data (system design §7.3).
+func weights(dev float64, others map[Role]float64) map[Role]float64 {
+	m := map[Role]float64{RoleDeveloper: dev}
+	for r, w := range others {
+		m[r] = w
+	}
+	return m
+}
+
 // Registry returns every feature, in a fixed order.
 func Registry() []Feature {
 	return []Feature{
@@ -80,14 +116,16 @@ func Registry() []Feature {
 		},
 		{
 			Name: "after_hours_share", Version: 1, Unit: "ratio", Group: GroupLoad, HigherWorse: true,
-			Epsilon: 0.05, Weights: weight(1), Label: "share of work outside core hours",
-			Doc:     "Share of a weekday's attended work outside core hours (09:00–18:00). Not computed on weekends.",
+			Epsilon: 0.05, Weights: weights(1, map[Role]float64{RoleStudent: 0.5, RoleResearcher: 0.75}),
+			Label:   "share of work outside core hours",
+			Doc:     "Share of a weekday's attended work outside your core hours (default 09:00–18:00). Not computed on weekends.",
 			Compute: afterHoursShare,
 		},
 		{
 			Name: "meeting_hours", Version: 1, Unit: "h", Group: GroupLoad, HigherWorse: true,
-			Epsilon: 0.25, Weights: weight(0.75), Label: "hours in meetings and calls",
-			Doc: "Time in meeting apps or on a call, counted once per minute.",
+			Epsilon: 0.25, Weights: weights(0.75, map[Role]float64{RoleStudent: 0.5, RolePM: 0.25}),
+			Label: "hours in meetings and calls",
+			Doc:   "Time in meeting apps or on a call, counted once per minute.",
 			Compute: func(d Day, _ Params) (float64, bool) {
 				total := 0.0
 				for _, m := range d.Minutes {
@@ -102,20 +140,23 @@ func Registry() []Feature {
 		},
 		{
 			Name: "switches_per_hour", Version: 1, Unit: "/h", Group: GroupFragmentation, HigherWorse: true,
-			Epsilon: 2, Weights: weight(1), Label: "app switches per hour",
+			Epsilon: 2, Weights: weights(1, map[Role]float64{RoleStudent: 0.75, RolePM: 0.5}),
+			Label:   "app switches per hour",
 			Doc:     "How often the app holding your attention changed, per attended hour.",
 			Compute: switchesPerHour,
 		},
 		{
 			Name: "longest_focus_block", Version: 1, Unit: "min", Group: GroupFragmentation, HigherWorse: false,
-			Epsilon: 10, Weights: weight(0.75), Label: "longest focus block",
+			Epsilon: 10, Weights: weights(0.75, map[Role]float64{RoleResearcher: 1, RolePM: 0.5}),
+			Label:   "longest focus block",
 			Doc:     "Longest unbroken stretch in code, terminal or docs (gaps up to 2 minutes allowed).",
 			Compute: longestFocusBlock,
 		},
 		{
 			Name: "comms_share", Version: 1, Unit: "ratio", Group: GroupFragmentation, HigherWorse: true,
-			Epsilon: 0.05, Weights: weight(0.5), Label: "share of work in chat and email",
-			Doc: "Share of attended work spent in chat and email apps.",
+			Epsilon: 0.05, Weights: weights(0.5, map[Role]float64{RolePM: 0.25}),
+			Label: "share of work in chat and email",
+			Doc:   "Share of attended work spent in chat and email apps.",
 			Compute: func(d Day, p Params) (float64, bool) {
 				total := attendedWork(d)
 				if total < p.MinAttended.Seconds() {

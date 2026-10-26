@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 )
 
 func TestMissingFileIsDefaults(t *testing.T) {
@@ -138,7 +140,7 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	if err := c.Add("retention.minutes_days", []string{"1"}); err == nil {
 		t.Error("add to a number accepted")
 	}
-	if len(Keys()) != 8 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
+	if len(Keys()) != 10 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
 		t.Errorf("keys: %v", Keys())
 	}
 }
@@ -238,4 +240,35 @@ func FuzzParse(f *testing.F) {
 			t.Fatalf("valid config does not round-trip: %v\n%s", err, Render(c))
 		}
 	})
+}
+
+func TestProfile(t *testing.T) {
+	c, err := Parse([]byte("[profile]\nrole = \"PM\"\ncore_hours = \"7:30-16:00\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Role() != features.RolePM || c.Profile.CoreHours != "07:30-16:00" {
+		t.Errorf("profile %+v", c.Profile)
+	}
+	p := c.FeatureParams()
+	if p.CoreStart != 7*time.Hour+30*time.Minute || p.CoreEnd != 16*time.Hour || p.Key() == features.DefaultKey {
+		t.Errorf("params %+v", p)
+	}
+	if Default().FeatureParams().Key() != features.DefaultKey {
+		t.Error("the default profile must keep the default feature key, so stored days aren't recomputed")
+	}
+	for _, bad := range []string{
+		"role = \"manager\"", "core_hours = \"18:00-09:00\"", "core_hours = \"Mon-Fri 09:00-17:00\"",
+		"core_hours = \"09:00-09:30\"", "core_hours = \"weekdays\"", "core_hours = \"9-5\"", "core_hours = \"\"",
+	} {
+		if _, err := Parse([]byte("[profile]\n" + bad + "\n")); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	if err := c.Set("profile.core_hours", []string{"10:00-19:00"}); err != nil || c.Profile.CoreHours != "10:00-19:00" {
+		t.Errorf("set: %v %+v", err, c.Profile)
+	}
+	if err := c.Unset("profile.role"); err != nil || c.Role() != features.RoleDeveloper {
+		t.Errorf("unset: %v %+v", err, c.Profile)
+	}
 }

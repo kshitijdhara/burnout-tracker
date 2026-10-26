@@ -17,6 +17,9 @@ var bundledApps = map[model.Category][]string{
 		"Code.exe", "Cursor.exe", "Zed.exe", "sublime_text.exe", "devenv.exe", "idea64.exe", "goland64.exe",
 		"pycharm64.exe", "webstorm64.exe", "rider64.exe", "clion64.exe",
 		"code", "cursor", "zed", "zeditor", "sublime_text",
+		// Data and research environments.
+		"com.rstudio.desktop", "org.rstudio.RStudio", "com.mathworks.matlab", "org.jupyter.jupyterlab-desktop",
+		"rstudio.exe", "MATLAB.exe", "rstudio", "matlab",
 	},
 	model.CategoryBrowser: {
 		"com.google.Chrome", "org.mozilla.firefox", "com.apple.Safari", "com.microsoft.edgemac",
@@ -39,6 +42,10 @@ var bundledApps = map[model.Category][]string{
 		"com.adobe.Reader", "com.apple.Notes", "com.figma.Desktop",
 		"Notion.exe", "Obsidian.exe", "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "AcroRd32.exe", "Acrobat.exe",
 		"Figma.exe", "obsidian", "notion-app", "libreoffice", "soffice.bin", "evince", "okular", "zathura",
+		// Study, research and planning.
+		"org.zotero.zotero", "net.ankiweb.dtop", "com.microsoft.onenote.mac", "com.linear", "com.electron.logseq",
+		"zotero.exe", "anki.exe", "ONENOTE.EXE", "Linear.exe", "Logseq.exe", "texstudio.exe",
+		"zotero", "anki", "logseq", "texstudio",
 	},
 	model.CategoryMedia: {
 		"com.spotify.client", "com.apple.Music", "com.apple.TV", "org.videolan.vlc", "com.apple.QuickTimePlayerX",
