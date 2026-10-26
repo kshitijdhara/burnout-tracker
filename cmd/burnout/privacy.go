@@ -374,8 +374,9 @@ func runPrivacy(ctx context.Context, _ []string) error {
 		fmt.Println("  Aggregate-only:   off: app names are kept for each minute")
 	}
 	fmt.Printf("  Hooks:            %s\n", hookSummary())
-	fmt.Println("  Network:          none. Calendar sync, update checks and model downloads aren't built;")
-	fmt.Println("                    each will be opt-in")
+	fmt.Printf("  Calendar:         %s\n", calendarLine(dataDir))
+	fmt.Println("  Network:          only the calendar feed, if you added one by URL. Update checks and")
+	fmt.Println("                    model downloads aren't built; each will be opt-in")
 	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
 	fmt.Printf("  Data folder:      %s (owner-only; disk encryption %s)\n", printable(dataDir), state)
 	exports := "none on disk"

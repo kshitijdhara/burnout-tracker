@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zalando/go-keyring"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
 func TestFileBackend(t *testing.T) {
@@ -250,5 +253,41 @@ func TestStaleTempFilesRemoved(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stale temp file still present: %v", err)
+	}
+}
+
+func TestPutGet(t *testing.T) {
+	for name, opts := range map[string][]Option{"file": {WithFileOnly()}, "os": nil} {
+		t.Run(name, func(t *testing.T) {
+			if name == "os" {
+				keyring.MockInit()
+			}
+			s, err := New(t.TempDir(), opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, err := s.Get("ics-url"); ok || err != nil {
+				t.Fatalf("empty store: %v %v", ok, err)
+			}
+			for _, v := range []string{"https://cal.example/a.ics?token=1", "https://cal.example/b.ics?token=2"} {
+				if err := s.Put("ics-url", model.NewSensitive(v)); err != nil {
+					t.Fatal(err)
+				}
+				if got, ok, err := s.Get("ics-url"); !ok || err != nil || got.Reveal() != v {
+					t.Fatalf("get after put %q: %q %v %v", v, got.Reveal(), ok, err)
+				}
+			}
+			for _, bad := range []string{"", strings.Repeat("x", maxValue+1)} {
+				if err := s.Put("ics-url", model.NewSensitive(bad)); err == nil {
+					t.Errorf("put of %d bytes accepted", len(bad))
+				}
+			}
+			if err := s.Delete("ics-url"); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, _ := s.Get("ics-url"); ok {
+				t.Error("deleted value still there")
+			}
+		})
 	}
 }

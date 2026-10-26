@@ -37,6 +37,17 @@ type Config struct {
 	Profile   Profile   `toml:"profile"`
 	Privacy   Privacy   `toml:"privacy"`
 	Retention Retention `toml:"retention"`
+	Calendar  Calendar  `toml:"calendar"`
+}
+
+// Calendar holds the calendar feed settings. The feed URL itself is a
+// secret and lives in the OS keystore, never here (system design §3.4).
+type Calendar struct {
+	ICS struct {
+		// Enabled turns fetching the feed on or off without forgetting it
+		// (privacy & security §6).
+		Enabled bool `toml:"enabled"`
+	} `toml:"ics"`
 }
 
 // Profile is who the user is, for scoring (system design §4.6, §8.1).
@@ -73,7 +84,7 @@ type Retention struct {
 
 // Default returns the documented defaults.
 func Default() Config {
-	return Config{
+	c := Config{
 		Profile: Profile{Role: string(features.RoleDeveloper), CoreHours: "09:00-18:00"},
 		Privacy: Privacy{PrivateHours: []string{}, ExcludeApps: []string{}},
 		Retention: Retention{
@@ -84,6 +95,8 @@ func Default() Config {
 			CheckinsDays:  730,
 		},
 	}
+	c.Calendar.ICS.Enabled = true // fetched only once a feed is added
+	return c
 }
 
 // bounds are the allowed retention values. The upper bound is the default;
@@ -385,6 +398,12 @@ func Render(c Config) []byte {
 		setting := fmt.Sprintf("%s = %d", strings.TrimPrefix(bd.key, "retention."), *bd.get(&c.Retention))
 		fmt.Fprintf(&b, "%-22s # %s (%d to %d)\n", setting, bd.what, bd.min, bd.max)
 	}
+	b.WriteString(`
+[calendar.ics]
+# Fetch the calendar feed added with ` + "`burnout calendar add`" + ` (its URL is kept in
+# your OS keystore, not here). false stops fetching and keeps the feed.
+`)
+	fmt.Fprintf(&b, "enabled = %t\n", c.Calendar.ICS.Enabled)
 	return b.Bytes()
 }
 
@@ -455,7 +474,7 @@ var keys = func() []key {
 		get := b.get
 		k = append(k, key{name: b.key, num: func(c *Config) *int { return get(&c.Retention) }})
 	}
-	return k
+	return append(k, key{name: "calendar.ics.enabled", flag: func(c *Config) *bool { return &c.Calendar.ICS.Enabled }})
 }()
 
 func lookup(name string) (key, error) {

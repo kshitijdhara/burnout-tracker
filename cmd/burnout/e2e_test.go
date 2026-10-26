@@ -160,7 +160,7 @@ func TestEndToEnd(t *testing.T) {
 	if err := os.WriteFile(cfgFile, append(slices.Clone(good), "titles = true\n"...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if out, errOut, err := run("", "config", "validate"); err == nil || !strings.Contains(errOut, "unknown keys: retention.titles") {
+	if out, errOut, err := run("", "config", "validate"); err == nil || !strings.Contains(errOut, "unknown keys: ") || !strings.Contains(errOut, ".titles") {
 		t.Fatalf("validate accepted a bad file: %s %s", out, errOut)
 	}
 	waitFor(t, &daemonLog, func() bool { return strings.Contains(serviceLog(), "keeping the current settings") })
@@ -310,6 +310,36 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("privacy doesn't list the exports or the profile:\n%s", out)
 	}
 
+	// A calendar from a local .ics file (no network): only meeting times are
+	// kept; titles, notes, places and attendees (canaries here) never are.
+	icsFile := filepath.Join(tmp, "work.ics")
+	ev := func(uid string, start time.Time, extra string) string {
+		return "BEGIN:VEVENT\r\nUID:" + uid + "\r\nDTSTART:" + start.UTC().Format("20060102T150405Z") +
+			"\r\nDURATION:PT30M\r\nSUMMARY:Review " + canary + "\r\nDESCRIPTION:dial-in " + canary +
+			"\r\nLOCATION:Room " + canary + "\r\nATTENDEE;CN=" + canary + ":mailto:x@example.com\r\n" + extra + "END:VEVENT\r\n"
+	}
+	base := time.Now().Add(-3 * time.Hour).Truncate(time.Minute)
+	icsBody := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + ev("a", base, "") + ev("b", base.Add(30*time.Minute), "") +
+		ev("daily", base.AddDate(0, 0, -5), "RRULE:FREQ=DAILY;COUNT=3\r\n") + "END:VCALENDAR\r\n"
+	if err := os.WriteFile(icsFile, []byte(icsBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := run("", "calendar", "status"); err != nil || !strings.Contains(out, "No calendar") {
+		t.Fatalf("calendar status before: %v %s", err, out)
+	}
+	if out, errOut, err := run("", "calendar", "add", icsFile); err != nil || !strings.Contains(out, "Added work.ics: 5 meetings") || !strings.Contains(out, "Stored 5 meetings") {
+		t.Fatalf("calendar add: %v %s %s", err, out, errOut)
+	}
+	if out, _, err := run("", "calendar", "status"); err != nil || !strings.Contains(out, "from work.ics, last synced") {
+		t.Fatalf("calendar status: %v %s", err, out)
+	}
+	if out, _, _ := run("", "privacy"); !strings.Contains(out, "Calendar:         from work.ics") {
+		t.Fatalf("privacy doesn't show the calendar:\n%s", out)
+	}
+	if out, _, _ := run("", "calendar", "add", "http://calendar.example.com/feed.ics"); strings.Contains(out, "Added") {
+		t.Fatal("an http:// feed was accepted")
+	}
+
 	// A daemon doesn't start on an invalid config file.
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("[retention]\nminutes_days = 999\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -359,6 +389,13 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if out, _, _ := run("", "annotate", "list"); !strings.Contains(out, "vacation") {
 		t.Fatalf("forget removed the annotation:\n%s", out)
+	}
+	// The calendar stays added, but forget's meetings don't come back.
+	if out, errOut, err := run("", "calendar", "sync"); err != nil || !strings.Contains(out, "0 meetings stored") {
+		t.Fatalf("calendar sync after forget: %v %s %s", err, out, errOut)
+	}
+	if out, _, err := run("", "calendar", "remove", "--forget"); err != nil || !strings.Contains(out, "deleted") {
+		t.Fatalf("calendar remove: %v %s", err, out)
 	}
 
 	// Canary scan: every file the app wrote, plus its log output.

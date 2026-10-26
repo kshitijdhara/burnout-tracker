@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
@@ -22,6 +23,10 @@ import (
 // and are kept. Freed pages are overwritten (secure_delete) and the WAL
 // truncated, so the data doesn't linger on disk.
 //
+// Calendar busy blocks go with the other intervals, and later calendar
+// syncs import nothing that starts before now, so a sync can't bring the
+// forgotten meetings back.
+//
 // Run it from the process that writes the database: the daemon when it is
 // running, so nothing it holds in memory is written back afterwards.
 func (s *Store) Forget(ctx context.Context, since time.Time, sinceDay string) error {
@@ -29,6 +34,7 @@ func (s *Store) Forget(ctx context.Context, since time.Time, sinceDay string) er
 		return err
 	}
 	ms := since.UnixMilli()
+	now := time.Now().UnixMilli()
 	err := s.inTx(ctx, "forget", func(tx *sql.Tx) error {
 		for _, q := range []struct {
 			query string
@@ -43,12 +49,16 @@ func (s *Store) Forget(ctx context.Context, since time.Time, sinceDay string) er
 			{`DELETE FROM health_daily WHERE logical_day >= ?`, sinceDay},
 			{`DELETE FROM daily_features WHERE logical_day >= ?`, sinceDay},
 			{`DELETE FROM scores WHERE logical_day >= ?`, sinceDay},
+			{`DELETE FROM calendar_days WHERE logical_day >= ?`, sinceDay},
 		} {
 			if _, err := tx.ExecContext(ctx, q.query, q.arg); err != nil {
 				return err
 			}
 		}
-		return nil
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES (?, ?)
+			ON CONFLICT (key) DO UPDATE SET value = MAX(CAST(value AS INTEGER), CAST(excluded.value AS INTEGER))`,
+			metaForgotAt, strconv.FormatInt(now, 10))
+		return err
 	})
 	if err != nil {
 		return err

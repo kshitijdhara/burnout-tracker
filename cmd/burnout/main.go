@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata" // calendar feeds name time zones; Windows has no zone database
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -35,6 +36,7 @@ func commands() []command {
 		{"annotate", "mark days: annotate vacation FROM [TO] [--note TEXT] | list | remove ID", runAnnotate},
 		{"privacy", "what is collected, your current settings and your controls", runPrivacy},
 		{"config", "settings: config get|set|add|remove|unset|validate|path", runConfig},
+		{"calendar", "meetings from your calendar feed: calendar add URL|FILE | sync | status | remove", runCalendar},
 		{"export", "write your data out as JSON or CSV: export --out FILE [--format csv] [--since DATE]", runExport},
 		{"checkin", "answer the weekly check-in (or --daily for two quick questions)", runCheckin},
 		{"review", "the weekly review: this week against the last, and what to try", runReview},

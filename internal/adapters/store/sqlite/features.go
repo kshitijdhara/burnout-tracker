@@ -54,9 +54,9 @@ func (s *Store) DayInput(ctx context.Context, logicalDay string) (features.Day, 
 	}
 	err = s.scanRows(ctx, `
 		SELECT start_ms, end_ms, utc_offset_min, kind, COALESCE(session_key, ''), COALESCE(attrs, '{}')
-		FROM intervals WHERE logical_day = ? AND kind IN (?, ?, ?, ?) ORDER BY start_ms`,
+		FROM intervals WHERE logical_day = ? AND kind IN (?, ?, ?, ?, ?) ORDER BY start_ms`,
 		[]any{logicalDay, string(model.IntervalPresence), string(model.IntervalShellCmd),
-			string(model.IntervalAgentState), string(model.IntervalHumanState)},
+			string(model.IntervalAgentState), string(model.IntervalHumanState), string(model.IntervalBusy)},
 		func(r *sql.Rows) error {
 			var start, end int64
 			var off int
@@ -86,12 +86,20 @@ func (s *Store) DayInput(ctx context.Context, logicalDay string) (features.Day, 
 				d.Agent = append(d.Agent, sp)
 			case model.IntervalHumanState:
 				d.Human = append(d.Human, sp)
+			case model.IntervalBusy:
+				d.Busy = append(d.Busy, sp)
 			}
 			return nil
 		})
 	if err != nil {
 		return features.Day{}, fmt.Errorf("sqlite: day input: %w", err)
 	}
+
+	var covered int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM calendar_days WHERE logical_day = ?`, logicalDay).Scan(&covered); err != nil {
+		return features.Day{}, fmt.Errorf("sqlite: day input: %w", err)
+	}
+	d.Calendar = covered > 0
 
 	prev := date.AddDate(0, 0, -1).Format(time.DateOnly)
 	var lastMs sql.NullInt64

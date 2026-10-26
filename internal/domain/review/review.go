@@ -183,6 +183,8 @@ var tips = map[string]string{
 	"longest_focus_block":   "Your focused stretches were shorter than usual. Try blocking an hour or two for focused work with chat silenced.",
 	"comms_share":           "Chat and email took a bigger share of your time. Try checking messages at set times instead of as they arrive.",
 	"meeting_hours":         "Meetings took more of your time than usual. Is there one recurring meeting you could shorten or skip?",
+	"back_to_back_meetings": "Your meetings ran back to back more than usual. Try ending them five minutes early, or leaving a gap between them.",
+	"after_hours_meetings":  "More of your meetings fell outside your core hours. Is there one you could move, or join less often?",
 	"shell_failure_rate":    "More of your commands failed than usual. When you're stuck, a few minutes away can help more than another try.",
 	"failure_loops":         "You hit the same failing command repeatedly. When you're stuck, a few minutes away can help more than another try.",
 	"late_night_infra":      "You ran infrastructure or ssh commands late at night. If that's on-call work, it's worth noticing how often it happens.",

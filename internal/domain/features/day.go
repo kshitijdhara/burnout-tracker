@@ -46,6 +46,11 @@ type Day struct {
 	Shell    []Span   // finished shell commands, in order of start
 	Agent    []Span   // agent state segments
 	Human    []Span   // human state segments
+	// Busy are calendar busy blocks (State "tentative" when tentative),
+	// and Calendar says whether a calendar sync covered this day, so a day
+	// without meetings is told apart from a day with no calendar.
+	Busy     []Span
+	Calendar bool
 
 	// PrevLastPresence is when the previous logical day's presence ended,
 	// zero when unknown. It gives the overnight gap.
@@ -66,6 +71,7 @@ type Params struct {
 	FocusGap           time.Duration // gap allowed inside a focus block
 	LateStart, LateEnd time.Duration // late night, local time of day
 	LoopWindow         time.Duration // failing commands this close form a loop
+	BackToBack         time.Duration // meetings this close are back to back
 	MinAttended        time.Duration // below this, rate features are skipped
 	MinCommands        int           // below this, the failure rate is skipped
 }
@@ -80,6 +86,7 @@ func DefaultParams() Params {
 		LateStart:   22 * time.Hour,
 		LateEnd:     5 * time.Hour,
 		LoopWindow:  10 * time.Minute,
+		BackToBack:  5 * time.Minute,
 		MinAttended: 30 * time.Minute,
 		MinCommands: 10,
 	}
@@ -93,9 +100,9 @@ func (p Params) Key() string {
 	if p == DefaultParams() {
 		return DefaultKey // what days stored before keys existed were computed with
 	}
-	return fmt.Sprintf("r%d core=%s-%s break=%s focus=%s late=%s-%s loop=%s min=%s cmds=%d",
+	return fmt.Sprintf("r%d core=%s-%s break=%s focus=%s late=%s-%s loop=%s b2b=%s min=%s cmds=%d",
 		RegistryVersion, clock(p.CoreStart), clock(p.CoreEnd), p.BreakMin, p.FocusGap,
-		clock(p.LateStart), clock(p.LateEnd), p.LoopWindow, p.MinAttended, p.MinCommands)
+		clock(p.LateStart), clock(p.LateEnd), p.LoopWindow, p.BackToBack, p.MinAttended, p.MinCommands)
 }
 
 // DefaultKey is DefaultParams' key. Stored days without a key have it.

@@ -140,7 +140,7 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	if err := c.Add("retention.minutes_days", []string{"1"}); err == nil {
 		t.Error("add to a number accepted")
 	}
-	if len(Keys()) != 10 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
+	if len(Keys()) != 11 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
 		t.Errorf("keys: %v", Keys())
 	}
 }

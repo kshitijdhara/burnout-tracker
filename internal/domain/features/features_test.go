@@ -249,3 +249,45 @@ func TestCoreHoursParam(t *testing.T) {
 		}
 	}
 }
+
+// Calendar meetings count once with on-screen meeting time, and in-person
+// ones (no screen time) count too.
+func TestCalendarFeatures(t *testing.T) {
+	busy := func(h1, m1, h2, m2 int) Span { return Span{Start: at(h1, m1), End: at(h2, m2)} }
+	d := Day{
+		Minutes: minutes(at(10, 0), 30, "zoom", model.CategoryMeeting), // 10:00–10:30 on screen
+		Busy: []Span{
+			busy(10, 0, 10, 30), // the same call, on the calendar
+			busy(10, 30, 11, 0), // back to back, in person
+			busy(11, 3, 11, 30), // 3 minutes later: back to back
+			busy(11, 3, 11, 30), // the same meeting on a second calendar
+			busy(14, 0, 15, 0),  // not back to back
+			busy(17, 30, 19, 0), // 1 h after 18:00
+		},
+		Calendar: true,
+	}
+	if v, _ := value(t, "meeting_hours", d); !near(v, (30+30+27+60+90)/60.0) {
+		t.Errorf("meeting_hours = %v", v)
+	}
+	if v, ok := value(t, "back_to_back_meetings", d); !ok || v != 2 {
+		t.Errorf("back_to_back_meetings = %v %v", v, ok)
+	}
+	if v, ok := value(t, "after_hours_meetings", d); !ok || !near(v, 1) {
+		t.Errorf("after_hours_meetings = %v %v", v, ok)
+	}
+	// Without a calendar the calendar-only features don't apply, and a
+	// day with a calendar but no meetings is 0, not missing.
+	d.Calendar, d.Busy = false, nil
+	for _, name := range []string{"back_to_back_meetings", "after_hours_meetings"} {
+		if _, ok := value(t, name, d); ok {
+			t.Errorf("%s computed without a calendar", name)
+		}
+	}
+	d.Calendar = true
+	if v, ok := value(t, "back_to_back_meetings", d); !ok || v != 0 {
+		t.Errorf("no meetings: %v %v", v, ok)
+	}
+	if v, _ := value(t, "meeting_hours", d); !near(v, 0.5) {
+		t.Errorf("screen-only meeting_hours = %v", v)
+	}
+}
