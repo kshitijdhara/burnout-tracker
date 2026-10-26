@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
@@ -23,7 +25,11 @@ func send(m wire.Message) error {
 
 // hookGuard makes a hook process silent and infallible: stdout/stderr go
 // to the null device and any panic is swallowed. Exit status is always 0.
+// It also ignores SIGHUP: fish starts the emitter in its own process group,
+// which is hung up when the shell exits, and closing a terminal right after
+// a command must not lose that command.
 func hookGuard() func() {
+	signal.Ignore(syscall.SIGHUP)
 	silenceStdio()
 	return func() { _ = recover() }
 }

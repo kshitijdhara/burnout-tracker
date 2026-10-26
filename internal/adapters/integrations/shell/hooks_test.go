@@ -32,7 +32,10 @@ func runTyped(t *testing.T, argv []string, render func(emitter, dir string) stri
 		t.Fatal(err)
 	}
 	emitter := filepath.Join(dir, "fake-burnout")
-	script := "#!/bin/sh\nf=$(mktemp " + out + "/tmp.XXXXXX)\n" +
+	// Like the real emitter (cmd/burnout hookGuard), the fake ignores
+	// SIGHUP: fish hangs up its own process group, background emitters
+	// included, when it exits.
+	script := "#!/bin/sh\ntrap '' HUP\nf=$(mktemp " + out + "/tmp.XXXXXX)\n" +
 		"{ printf 'ARGS=%s\\n' \"$*\"; env; } > \"$f\"\n" +
 		"mv \"$f\" \"$f.rec\"\n"
 	if err := os.WriteFile(emitter, []byte(script), 0o700); err != nil { //nolint:gosec // a test executable
