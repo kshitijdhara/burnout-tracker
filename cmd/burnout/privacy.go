@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/export"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/shell"
@@ -160,6 +161,12 @@ func runForget(ctx context.Context, args []string) error {
 		}
 	}
 	fmt.Printf("Deleted %s.\n", what)
+	if left, err := export.Existing(dataDir); err == nil && len(left) > 0 {
+		fmt.Println("Exports you saved are still there; delete them yourself if they should go too:")
+		for _, e := range left {
+			fmt.Printf("  %s  (%s)\n", printable(e.Path), e.At.Format("2006-01-02 15:04"))
+		}
+	}
 	return nil
 }
 
@@ -370,6 +377,11 @@ func runPrivacy(ctx context.Context, _ []string) error {
 	fmt.Println("                    each will be opt-in")
 	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
 	fmt.Printf("  Data folder:      %s (owner-only; disk encryption %s)\n", printable(dataDir), state)
+	exports := "none on disk"
+	if left, err := export.Existing(dataDir); err == nil && len(left) > 0 {
+		exports = fmt.Sprintf("%d still on disk (plaintext), latest %s", len(left), printable(left[len(left)-1].Path))
+	}
+	fmt.Printf("  Exports:          %s\n", exports)
 	r := cfg.Retention
 	fmt.Printf("  Kept for:         raw events %s, minutes %s, intervals %s,\n", days(r.RawEventsDays), days(r.MinutesDays), days(r.IntervalsDays))
 	fmt.Printf("                    features and scores %s, check-ins %s\n", days(r.DailyDays), days(r.CheckinsDays))
@@ -383,6 +395,7 @@ Your controls:
   burnout config add privacy.exclude_apps APP   record an app as private
   burnout config set privacy.aggregate_only true
   burnout config set retention.minutes_days 30  keep less (all keys: burnout config get)
+  burnout export --out FILE [--format csv]       your data as JSON or CSV
   burnout uninstall-hooks, burnout service uninstall
 Details: docs/privacy-and-security.md
 `)

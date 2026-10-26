@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/export.schema.json",
+  "title": "burnout export, version 1",
+  "description": "What `burnout export` writes as JSON. The CSV export has one file per array with the same fields as columns. Kept in step with internal/adapters/export by TestSchemaMatchesTypes. Times are RFC 3339 in the UTC offset they were recorded at; days are logical days (YYYY-MM-DD, starting at 04:00). Keyed hashes (session, project) are opaque: they only match each other within one install.",
+  "type": "object",
+  "required": ["v", "exported_at", "app_version", "from", "to", "minutes", "intervals", "days", "checkins", "annotations"],
+  "properties": {
+    "v": { "const": 1 },
+    "exported_at": { "type": "string", "format": "date-time" },
+    "app_version": { "type": "string" },
+    "from": { "$ref": "#/$defs/day" },
+    "to": { "$ref": "#/$defs/day" },
+    "minutes": { "type": "array", "items": { "$ref": "#/$defs/minute" } },
+    "intervals": { "type": "array", "items": { "$ref": "#/$defs/interval" } },
+    "days": { "type": "array", "items": { "$ref": "#/$defs/dayRecord" } },
+    "checkins": { "type": "array", "items": { "$ref": "#/$defs/checkin" } },
+    "annotations": { "type": "array", "items": { "$ref": "#/$defs/annotation" } }
+  },
+  "$defs": {
+    "day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "minute": {
+      "type": "object",
+      "description": "Attention in one minute on one app, or on a category for private apps and aggregate-only mode.",
+      "required": ["minute", "day", "category", "attended_s", "focused_s", "visible_s"],
+      "properties": {
+        "minute": { "type": "string", "format": "date-time" },
+        "day": { "$ref": "#/$defs/day" },
+        "app": { "type": "string", "description": "Bundle id or exe name. Absent for private apps and in aggregate-only mode." },
+        "category": { "type": "string" },
+        "unattributed": { "type": "boolean", "description": "Present, but no window clearly held attention." },
+        "attended_s": { "type": "number" },
+        "focused_s": { "type": "number" },
+        "visible_s": { "type": "number" }
+      }
+    },
+    "interval": {
+      "type": "object",
+      "required": ["start", "end", "day", "kind"],
+      "properties": {
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" },
+        "day": { "$ref": "#/$defs/day" },
+        "kind": { "enum": ["shell_cmd", "agent_state", "human_state", "presence", "busy"] },
+        "category": { "type": "string" },
+        "session": { "type": "string", "description": "Keyed hash of the agent session id." },
+        "command": { "type": "string", "description": "The command name (argv0) only." },
+        "subcommand": { "type": "string", "description": "Only for allowlisted tools." },
+        "exit": { "type": "integer" },
+        "group": { "type": "string" },
+        "project": { "type": "string", "description": "Keyed hash of the project folder." },
+        "state": { "type": "string" },
+        "reason": { "enum": ["input", "video", "call"] },
+        "agent": { "type": "string" },
+        "tools": { "type": "integer" }
+      }
+    },
+    "dayRecord": {
+      "type": "object",
+      "required": ["day"],
+      "properties": {
+        "day": { "$ref": "#/$defs/day" },
+        "registry_version": { "type": "integer" },
+        "coverage": { "type": "number" },
+        "present_s": { "type": "number" },
+        "features": { "type": "object", "additionalProperties": { "type": "number" } },
+        "model_version": { "type": "string" },
+        "status": { "enum": ["ok", "missing", "calibrating"] },
+        "strain": { "type": "number", "minimum": 0, "maximum": 100 },
+        "drivers": { "type": "array", "items": { "type": "string" } },
+        "guardrails": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "checkin": {
+      "type": "object",
+      "required": ["at", "instrument", "score", "answers"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "instrument": { "type": "string" },
+        "score": { "type": "number" },
+        "answers": { "type": "object", "additionalProperties": { "type": "integer" }, "description": "Item id to answer." }
+      }
+    },
+    "annotation": {
+      "type": "object",
+      "required": ["from", "to", "kind"],
+      "properties": {
+        "from": { "$ref": "#/$defs/day" },
+        "to": { "$ref": "#/$defs/day" },
+        "kind": { "enum": ["vacation", "sick", "on_call", "release", "exam", "other"] },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

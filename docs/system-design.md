@@ -186,7 +186,7 @@ Every cross-process message is versioned:
 - hook messages (one per stream connection);
 - the GNOME/KWin bridge protocol;
 - the sidecar's stdin/stdout protocol;
-- the export format.
+- the export format (`schemas/v1/export.schema.json`, `burnout export`).
 
 The rules:
 - Every message carries `"v": <int>`, with a JSON Schema in `schemas/`.

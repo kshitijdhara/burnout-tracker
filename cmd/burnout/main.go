@@ -35,6 +35,7 @@ func commands() []command {
 		{"annotate", "mark days: annotate vacation FROM [TO] [--note TEXT] | list | remove ID", runAnnotate},
 		{"privacy", "what is collected, your current settings and your controls", runPrivacy},
 		{"config", "settings: config get|set|add|remove|unset|validate|path", runConfig},
+		{"export", "write your data out as JSON or CSV: export --out FILE [--format csv] [--since DATE]", runExport},
 		{"checkin", "answer the weekly check-in (or --daily for two quick questions)", runCheckin},
 		{"review", "the weekly review: this week against the last, and what to try", runReview},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
