@@ -128,6 +128,7 @@ user's account and protected at rest by OS full-disk encryption
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
 | Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |
+| Exports | `burnout export` | on demand | Plaintext JSON or CSV at a user-chosen path, owner-only; the data folder keeps only a list of export paths and times, so `forget` and `privacy` can point at them | User-managed; a path leaves the list once its file is gone | Only where the user puts it |
 | Spool (events buffered while the DB is busy) | Agent | on | Same redaction as raw events | Until flushed (minutes) | Never |
 | Raw events | Collectors / hooks | on | Only already-redacted events (classification and redaction happen before persistence) | 7 d | Never |
 
@@ -248,7 +249,23 @@ Phase 1 so far (CLI; the tray and dashboard come later):
   - An invalid file is never half-applied. A running daemon keeps its
     current settings, and a starting one refuses to run on defaults,
     which could silently drop private hours or exclusions.
-- **Still to do:** export (next), the tray, and the dashboard page.
+- **Export** is built: `burnout export --out FILE [--format csv]
+  [--since DATE] [--until DATE]`.
+  - It reads one consistent snapshot, read-only, so the daemon keeps
+    running.
+  - It warns that the export is plaintext before writing. Files are
+    new and owner-only: it never overwrites one, and a failed export
+    leaves nothing behind.
+  - CSV text fields that a spreadsheet would run as a formula are
+    prefixed with `'`.
+  - The format is versioned (`schemas/v1/export.schema.json`).
+  - Exports hold what the database holds: app ids, command names,
+    category minutes, features, scores, check-in answers and
+    annotations. Keyed hashes stay opaque.
+  - Exports live wherever the user saved them, so `forget` can't delete
+    them. The data folder keeps a list of export paths (no contents), and
+    `forget` and `privacy` show the ones still on disk.
+- **Still to do:** the tray and the dashboard page.
 
 ### 5.2 Anti-coercion requirements
 

@@ -122,6 +122,12 @@ result is high, the check-in shows support resources for your region
 - `burnout forget --last 1h`, `--today`, `--since 2026-10-20` or `--all`
   deletes recorded data for good, including recovery copies made since
   then. Your annotations, consent and hooks stay.
+- `burnout export --out burnout.json` writes your data out as one JSON
+  file; `--format csv --out DIR` writes a new folder with one CSV per kind
+  of data; `--since` and `--until` take dates. The format is described in
+  [`schemas/v1/export.schema.json`](schemas/v1/export.schema.json).
+  Exports are plaintext and `forget` can't delete them: `forget` and
+  `privacy` list the ones still on disk.
 - `burnout annotate vacation 2026-11-02 2026-11-06` marks time off. Sick
   days work the same way: such days are left out of your baseline and get
   no score. `on_call`, `release` and `exam` mark busy stretches, which are

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
@@ -265,6 +266,36 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("privacy: %v %s", err, out)
 	}
 
+	// Export, as JSON and as CSV; both are canary-scanned below. Forget
+	// can't delete them, so it points at them.
+	exportDir := filepath.Join(tmp, "exports")
+	if err := os.MkdirAll(exportDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	jsonExport := filepath.Join(exportDir, "burnout.json")
+	if out, errOut, err := run("", "export", "--out", jsonExport); err != nil || !strings.Contains(errOut, "plaintext") || !strings.Contains(out, "Exported") {
+		t.Fatalf("export: %v %s %s", err, out, errOut)
+	}
+	var exported struct {
+		V         int               `json:"v"`
+		Intervals []json.RawMessage `json:"intervals"`
+	}
+	if b, err := os.ReadFile(jsonExport); err != nil || json.Unmarshal(b, &exported) != nil || exported.V != 1 || len(exported.Intervals) == 0 { //nolint:gosec // test file
+		t.Fatalf("JSON export: %v\n%s", err, b)
+	}
+	if _, _, err := run("", "export", "--out", jsonExport); err == nil {
+		t.Fatal("export overwrote an existing file")
+	}
+	if out, errOut, err := run("", "export", "--format", "csv", "--out", filepath.Join(exportDir, "csv"), "--since", "2026-01-01"); err != nil {
+		t.Fatalf("CSV export: %v %s %s", err, out, errOut)
+	}
+	if b, err := os.ReadFile(filepath.Join(exportDir, "csv", "intervals.csv")); err != nil || !strings.HasPrefix(string(b), "start,end,day,kind") { //nolint:gosec // test file
+		t.Fatalf("intervals.csv: %v\n%s", err, b)
+	}
+	if out, _, _ := run("", "privacy"); !strings.Contains(out, "2 still on disk") {
+		t.Fatalf("privacy doesn't list the exports:\n%s", out)
+	}
+
 	// A daemon doesn't start on an invalid config file.
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("[retention]\nminutes_days = 999\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -300,6 +331,9 @@ func TestEndToEnd(t *testing.T) {
 	if out, errOut, err := run("", "forget", "--last", "1h", "--yes"); err != nil || !strings.Contains(out, "Deleted everything recorded in the last 1h") {
 		t.Fatalf("forget: %v %s %s\n%s", err, out, errOut, log2.String())
 	}
+	if out, _, _ := run("", "forget", "--all", "--yes"); !strings.Contains(out, "burnout.json") {
+		t.Fatalf("forget doesn't point at the exports:\n%s", out)
+	}
 	if err := daemon2.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
@@ -329,6 +363,7 @@ func TestEndToEnd(t *testing.T) {
 	scan(dataDir)
 	scan(configDir)
 	scan(runtimeDir)
+	scan(exportDir)
 	if strings.Contains(daemonLog.String(), canary) {
 		t.Errorf("canary found in daemon log")
 	}
