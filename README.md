@@ -23,7 +23,7 @@ every field that is collected.
 
 ## Trying Phase 0
 
-Phase 0 is a developer preview: no installer, tray icon or dashboard yet.
+Phase 0 is a developer preview: there is no installer yet.
 Desktop collection works on macOS and Windows; on Linux only shell and
 Claude Code hooks are recorded for now.
 
@@ -160,6 +160,14 @@ website you visit can't read it: the page refuses other sites and
 host names, and nothing is ever fetched from the internet. If the browser
 doesn't open, `burnout dashboard --no-open` prints the link.
 
+**The tray icon.** While the daemon runs, a slice of burnt toast sits in
+your menu bar (macOS) or notification area (Windows, Linux). Its menu says
+whether anything is being recorded, and pauses, resumes, deletes the last
+hour or today, and opens the dashboard. It has no hide option: while the
+screen is watched, the icon shows. If it can't show, the screen isn't
+watched and only shell and Claude Code hooks are recorded. On Linux the
+desktop needs a tray; GNOME needs the AppIndicator extension.
+
 **Your calendar (optional).** Meetings away from the screen count too if
 you add your calendar's ICS feed:
 `burnout calendar add "https://calendar.google.com/calendar/ical/…/basic.ics"`.
@@ -251,7 +259,7 @@ rm ~/.local/bin/burnout
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
-**Preview limits.** There is no installer or tray icon yet, and the
+**Preview limits.** There is no installer yet, and the
 background service is macOS and Linux only (on Windows, run `burnout
 daemon` in a terminal). Phase 0 needs no macOS privacy permissions,
 because window titles and input counts are off. Call and video detection

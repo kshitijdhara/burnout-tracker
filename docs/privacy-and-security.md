@@ -217,7 +217,7 @@ The agent MUST provide:
 | **Privacy view** | `burnout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
 | **Screen-share safety** | Nudges are suppressed in Do Not Disturb / Focus mode or while a screen share is active; the dashboard has a "blur numbers" option |
 
-Phase 1 so far (CLI; the tray and dashboard come later):
+Phase 1 so far:
 - **Pause** is built: `burnout pause [DURATION|tomorrow]` and `resume`.
   - The daemon checks a pause file in the data folder every second.
   - While paused it samples nothing, discards hook events, and drops
@@ -283,7 +283,18 @@ Phase 1 so far (CLI; the tray and dashboard come later):
 - **Dashboard:** its Privacy page shows the same settings as
   `burnout privacy`, from the same code. "Blur numbers" covers screen
   sharing.
-- **Still to do:** the tray.
+- **The tray** is built (`internal/adapters/tray`): a menu-bar icon on
+  macOS, a notification-area icon on Windows and Linux. The daemon shows
+  it. Its menu has:
+  - a first line saying whether anything is recorded: "Recording",
+    "Paused until 15:30" or "Private hours: nothing is recorded". The icon
+    changes too;
+  - pause for an hour, until tomorrow or until resumed, and resume;
+  - "Delete the last hour" and "Delete today", one click each. They go
+    through the daemon like `burnout forget`, and the first line says
+    whether they worked;
+  - "Open dashboard" (§8.2).
+  - There is no hide or quit item (§5.2).
 
 ### 5.2 Anti-coercion requirements
 
@@ -304,6 +315,23 @@ them. These are requirements, not intentions:
    is restricted to the same OS user (§8.1).
 6. **AC-6** The README and the first-run screen MUST state that the tool is
    for self-use only and must not be used to monitor others.
+
+AC-1 in Phase 1:
+- The daemon shows the icon before it collects anything, and watches the
+  screen only once the icon is up. If it can't show one, it doesn't watch
+  the screen, and its log says why:
+  - macOS: no login session at the screen, e.g. started over ssh;
+  - Linux: the desktop has no tray (GNOME needs the AppIndicator
+    extension). There is no Linux screen collector yet anyway;
+  - Windows: the icon didn't appear within 10 seconds.
+- The menu has no hide or quit item. On macOS the icon can't be
+  ⌘-dragged off the menu bar.
+- **Open question:** shell and Claude Code hooks still record without an
+  icon, e.g. in an ssh session or on a desktop without a tray. They run
+  only after the interactive first run (AC-3) and `burnout install-hooks`.
+  Treating hooks as collectors under AC-1 would mean recording nothing
+  without an icon, which ends hook-only use on servers and on GNOME
+  without the extension.
 
 ---
 
@@ -402,9 +430,11 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
   every state-changing request.
 
 Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
-- **Lifecycle:** the CLI runs the server for as long as the command runs,
-  until Ctrl-C. Each run has its own port and launch token, and it opens
-  the browser itself (the tray will later).
+- **Lifecycle:** `burnout dashboard` runs the server for as long as the
+  command runs, until Ctrl-C. The tray's "Open dashboard" starts one inside
+  the daemon on first use, which runs until the daemon stops; each click
+  opens it with a new launch token. Each server has its own port, and both
+  read the database read-only.
 - **Launch token:** 256 bits, compared in constant time, single-use, and
   valid for 60 s.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and

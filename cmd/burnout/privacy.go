@@ -139,12 +139,7 @@ func runForget(ctx context.Context, args []string) error {
 	if daemonAnswers(ctx) {
 		// The daemon writes the database and holds unsaved data in memory,
 		// so it does the deleting.
-		r, err := control.RequestForget(dataDir, from)
-		if err != nil {
-			return err
-		}
-		if err := control.WaitForgetDone(dataDir, r, forgetWait, 100*time.Millisecond); err != nil {
-			control.TakeForget(dataDir) // withdraw it, so it doesn't run later unannounced
+		if err := forgetThroughDaemon(dataDir, from); err != nil {
 			return err
 		}
 	} else {
@@ -167,6 +162,20 @@ func runForget(ctx context.Context, args []string) error {
 		for _, e := range left {
 			fmt.Printf("  %s  (%s)\n", printable(e.Path), e.At.Format("2006-01-02 15:04"))
 		}
+	}
+	return nil
+}
+
+// forgetThroughDaemon asks the running daemon to forget everything from
+// from on, and waits for it.
+func forgetThroughDaemon(dataDir string, from time.Time) error {
+	r, err := control.RequestForget(dataDir, from)
+	if err != nil {
+		return err
+	}
+	if err := control.WaitForgetDone(dataDir, r, forgetWait, 100*time.Millisecond); err != nil {
+		control.TakeForget(dataDir) // withdraw it, so it doesn't run later unannounced
+		return err
 	}
 	return nil
 }

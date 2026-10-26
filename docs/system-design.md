@@ -945,7 +945,8 @@ These, plus §7.5, are the alpha exit criteria.
     state-changing requests.
 - **Phase 1 so far:** `burnout dashboard` serves the page from the CLI
   while it runs (`internal/adapters/dashboard`), hardened as in Privacy &
-  Security §8.2. It is read-only for now, so the POST and DELETE routes
+  Security §8.2. The tray's "Open dashboard" serves the same page from the
+  daemon, read-only, with a new launch token per click. It is read-only for now, so the POST and DELETE routes
   above aren't built.
   - **Overview:** 90-day strain with drivers, limits and calibration.
   - **Today:** categories, apps, a 10-minute timeline with calendar
@@ -961,6 +962,19 @@ These, plus §7.5, are the alpha exit criteria.
 - **UI:** a tray icon (always visible while collecting) and an embedded SPA
   via `go:embed`. A native webview (Wails) is a Phase 2 option, which would
   remove the TCP listener entirely.
+- **Phase 1 so far:** the tray (`internal/adapters/tray`, on
+  `fyne.io/systray`) runs inside the daemon:
+  - **Threads:** on macOS it owns the main thread, as AppKit requires,
+    and the daemon's work runs beside it. On Windows and Linux it runs on
+    a goroutine of its own.
+  - **Ordering:** the icon shows first; the screen collector starts only
+    once it does (Privacy & Security §5.2 AC-1).
+  - **Menu:** pause and resume, delete the last hour or today, and open
+    the dashboard. It reuses the CLI's control files, so the daemon's loop
+    handles a click exactly like `burnout pause` or `forget`.
+  - **Icons:** template images on macOS, colour icons on Windows (.ico)
+    and Linux (StatusNotifierItem over D-Bus), built into the binary from
+    `assets/icon/tray`.
 
 ---
 
