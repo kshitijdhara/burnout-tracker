@@ -29,6 +29,7 @@ func commands() []command {
 		{"daemon", "run the collector daemon in this terminal (the service runs it in the background)", runDaemon},
 		{"service", "run the daemon in the background from login: service install|uninstall|status", runService},
 		{"status", "show today's summary", runStatus},
+		{"dashboard", "open the local dashboard in your browser (data stays on this device)", runDashboard},
 		{"timeline", "show a day minute by minute: timeline [YYYY-MM-DD]", runTimeline},
 		{"pause", "stop recording for a while: pause [1h | tomorrow] (default: until resume)", runPause},
 		{"resume", "start recording again after a pause", runResume},

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/dashboard"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/export"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
@@ -331,62 +332,9 @@ func runPrivacy(ctx context.Context, _ []string) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
-	if hasConsent() {
-		fmt.Println("  Consent:          given (`burnout setup`)")
-	} else {
-		fmt.Println("  Consent:          not given; nothing is collected")
+	for _, row := range privacySettings(ctx, dataDir) {
+		fmt.Printf("  %-18s%s\n", row.Name+":", row.Value)
 	}
-	cfg, cfgPath, cfgErr := loadConfig()
-	if cfgErr != nil {
-		fmt.Printf("  Config file:      INVALID, see `burnout config validate`; showing the defaults\n")
-		cfg = config.Default()
-	} else {
-		fmt.Printf("  Config file:      %s\n", printable(cfgPath))
-	}
-	fmt.Printf("  Profile:          %s, core hours %s\n", cfg.Profile.Role, cfg.Profile.CoreHours)
-	collecting := "not running"
-	if daemonAnswers(ctx) {
-		collecting = "running"
-	}
-	if paused, p := control.PauseState(dataDir, now); paused {
-		collecting += ", paused " + describePause(p, now)
-	} else if w, ok := privateNow(cfg, now); ok {
-		collecting += ", private hours now (" + w + ")"
-	}
-	fmt.Printf("  Collection:       %s\n", collecting)
-	fmt.Println("  Window titles:    off (not collected)")
-	fmt.Println("  Keystroke counts: off (not collected)")
-	hours := "none"
-	if len(cfg.Privacy.PrivateHours) > 0 {
-		hours = strings.Join(cfg.Privacy.PrivateHours, "; ")
-	}
-	fmt.Printf("  Private hours:    %s\n", printable(hours))
-	excluded := ""
-	if n := len(cfg.Privacy.ExcludeApps); n > 0 {
-		excluded = fmt.Sprintf(" and %d you excluded", n)
-	}
-	fmt.Printf("  Always private:   %d sensitive apps (password managers, finance, crypto wallets, health)%s;\n", len(classify.SensitiveApps()), excluded)
-	fmt.Println("                    their time counts, their names aren't kept")
-	if cfg.Privacy.AggregateOnly {
-		fmt.Println("  Aggregate-only:   on: time per category only, no app names or per-window detail")
-	} else {
-		fmt.Println("  Aggregate-only:   off: app names are kept for each minute")
-	}
-	fmt.Printf("  Hooks:            %s\n", hookSummary())
-	fmt.Printf("  Calendar:         %s\n", calendarLine(dataDir))
-	fmt.Println("  Network:          only the calendar feed, if you added one by URL. Update checks and")
-	fmt.Println("                    model downloads aren't built; each will be opt-in")
-	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
-	fmt.Printf("  Data folder:      %s (owner-only; disk encryption %s)\n", printable(dataDir), state)
-	exports := "none on disk"
-	if left, err := export.Existing(dataDir); err == nil && len(left) > 0 {
-		exports = fmt.Sprintf("%d still on disk (plaintext), latest %s", len(left), printable(left[len(left)-1].Path))
-	}
-	fmt.Printf("  Exports:          %s\n", exports)
-	r := cfg.Retention
-	fmt.Printf("  Kept for:         raw events %s, minutes %s, intervals %s,\n", days(r.RawEventsDays), days(r.MinutesDays), days(r.IntervalsDays))
-	fmt.Printf("                    features and scores %s, check-ins %s\n", days(r.DailyDays), days(r.CheckinsDays))
 	fmt.Print(`
 Your controls:
   burnout pause [1h | tomorrow]     stop recording for a while (or until resume)
@@ -402,6 +350,70 @@ Your controls:
 Details: docs/privacy-and-security.md
 `)
 	return nil
+}
+
+// privacySettings are the user's current privacy settings, for
+// `burnout privacy` and the dashboard's Privacy page (privacy & security
+// §5.1 "Privacy view"). Values are single lines, printable.
+func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
+	var rows []dashboard.Setting
+	add := func(name, value string) { rows = append(rows, dashboard.Setting{Name: name, Value: printable(value)}) }
+	now := time.Now()
+	if hasConsent() {
+		add("Consent", "given (`burnout setup`)")
+	} else {
+		add("Consent", "not given; nothing is collected")
+	}
+	cfg, cfgPath, cfgErr := loadConfig()
+	if cfgErr != nil {
+		add("Config file", "INVALID, see `burnout config validate`; showing the defaults")
+		cfg = config.Default()
+	} else {
+		add("Config file", cfgPath)
+	}
+	add("Profile", fmt.Sprintf("%s, core hours %s", cfg.Profile.Role, cfg.Profile.CoreHours))
+	collecting := "not running"
+	if daemonAnswers(ctx) {
+		collecting = "running"
+	}
+	if paused, p := control.PauseState(dataDir, now); paused {
+		collecting += ", paused " + describePause(p, now)
+	} else if w, ok := privateNow(cfg, now); ok {
+		collecting += ", private hours now (" + w + ")"
+	}
+	add("Collection", collecting)
+	add("Window titles", "off (not collected)")
+	add("Keystroke counts", "off (not collected)")
+	hours := "none"
+	if len(cfg.Privacy.PrivateHours) > 0 {
+		hours = strings.Join(cfg.Privacy.PrivateHours, "; ")
+	}
+	add("Private hours", hours)
+	excluded := ""
+	if n := len(cfg.Privacy.ExcludeApps); n > 0 {
+		excluded = fmt.Sprintf(" and %d you excluded", n)
+	}
+	add("Always private", fmt.Sprintf("%d sensitive apps (password managers, finance, crypto wallets, health)%s; "+
+		"their time counts, their names aren't kept", len(classify.SensitiveApps()), excluded))
+	if cfg.Privacy.AggregateOnly {
+		add("Aggregate-only", "on: time per category only, no app names or per-window detail")
+	} else {
+		add("Aggregate-only", "off: app names are kept for each minute")
+	}
+	add("Hooks", hookSummary())
+	add("Calendar", calendarLine(dataDir))
+	add("Network", "only the calendar feed, if you added one by URL. Update checks and model downloads aren't built; each will be opt-in")
+	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
+	add("Data folder", fmt.Sprintf("%s (owner-only; disk encryption %s)", dataDir, state))
+	exports := "none on disk"
+	if left, err := export.Existing(dataDir); err == nil && len(left) > 0 {
+		exports = fmt.Sprintf("%d still on disk (plaintext), latest %s", len(left), left[len(left)-1].Path)
+	}
+	add("Exports", exports)
+	r := cfg.Retention
+	add("Kept for", fmt.Sprintf("raw events %s, minutes %s, intervals %s, features and scores %s, check-ins %s",
+		days(r.RawEventsDays), days(r.MinutesDays), days(r.IntervalsDays), days(r.DailyDays), days(r.CheckinsDays)))
+	return rows
 }
 
 // hookSummary lists which hooks are installed.

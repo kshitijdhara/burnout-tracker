@@ -92,6 +92,7 @@ On macOS, Terminal starts bash as a login shell, which reads
 ```sh
 ~/.local/bin/burnout doctor     # permissions, disk encryption, daemon health, calls/video right now
 ~/.local/bin/burnout status     # strain score and today's summary
+~/.local/bin/burnout dashboard  # the same, and more, in your browser
 ~/.local/bin/burnout timeline   # today minute by minute
 ```
 
@@ -141,6 +142,23 @@ hours decide what counts as after-hours work. Change either later with
 `burnout config set profile.role pm` or
 `burnout config set profile.core_hours 08:00-16:30`. New core hours
 recompute the days whose detail is still kept (180 days by default).
+
+**The dashboard.** `burnout dashboard` opens a page in your browser with:
+- your strain over the last 90 days, with what stood out and the limits
+  crossed;
+- today, minute by minute: categories, apps, meetings, terminal and AI
+  agents;
+- the weekly review;
+- a privacy page listing what is collected and your settings.
+
+"Blur numbers" hides the figures while you share your screen.
+
+It runs only while the command does (Ctrl-C stops it), on 127.0.0.1, and
+reads your data without changing it. The link it opens works once, within
+a minute; after that the tab uses a cookie that only this browser holds. A
+website you visit can't read it: the page refuses other sites and
+host names, and nothing is ever fetched from the internet. If the browser
+doesn't open, `burnout dashboard --no-open` prints the link.
 
 **Your calendar (optional).** Meetings away from the screen count too if
 you add your calendar's ICS feed:
