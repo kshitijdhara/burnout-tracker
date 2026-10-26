@@ -3,12 +3,16 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -255,6 +259,10 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("status missing shell commands:\n%s", status)
 	}
 
+	// The dashboard serves the same data over its one-time link, and none
+	// of the canaries reach it.
+	checkDashboard(t, bin, env, canary)
+
 	// Annotations, against the real database.
 	if out, _, err := run("", "annotate", "vacation", "2026-11-02", "2026-11-06", "--note", "away"); err != nil || !strings.Contains(out, "left out of your baseline") {
 		t.Fatalf("annotate: %v %s", err, out)
@@ -453,4 +461,69 @@ func waitFor(t *testing.T, log *bytes.Buffer, ok func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for the daemon; its log:\n%s", log.String())
+}
+
+// checkDashboard runs `burnout dashboard --no-open`, redeems its one-time
+// link and reads every API view.
+func checkDashboard(t *testing.T, bin string, env []string, canary string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "dashboard", "--no-open")
+	cmd.Env = env
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { cancel(); _ = cmd.Wait() }()
+	var link string
+	sc := bufio.NewScanner(out)
+	for sc.Scan() {
+		if l := strings.TrimSpace(sc.Text()); strings.HasPrefix(l, "http://127.0.0.1:") {
+			link = l
+			break
+		}
+	}
+	if link == "" {
+		t.Fatal("dashboard printed no link")
+	}
+	go func() { _, _ = io.Copy(io.Discard, out) }()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	resp, err := client.Get(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(string(page), "<title>burnout") {
+		t.Fatalf("dashboard page: %d\n%s", resp.StatusCode, page)
+	}
+	base := strings.SplitN(link, "/launch", 2)[0]
+	for _, path := range []string{"/api/overview", "/api/day", "/api/week", "/api/privacy"} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 || !json.Valid(body) {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, body)
+		}
+		if strings.Contains(string(body), canary) {
+			t.Errorf("canary in %s", path)
+		}
+		if path == "/api/day" && !strings.Contains(string(body), `"agent_sessions":1`) {
+			t.Errorf("today's view lacks the agent session: %s", body)
+		}
+	}
+	if resp, err := http.Get(link); err == nil { // the link works once
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("reused link: %d", resp.StatusCode)
+		}
+	}
 }

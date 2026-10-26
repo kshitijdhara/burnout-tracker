@@ -943,6 +943,21 @@ These, plus §7.5, are the alpha exit criteria.
     rebinding.
   - No CORS, a strict CSP, `X-Frame-Options: DENY`, and CSRF tokens on
     state-changing requests.
+- **Phase 1 so far:** `burnout dashboard` serves the page from the CLI
+  while it runs (`internal/adapters/dashboard`), hardened as in Privacy &
+  Security §8.2. It is read-only for now, so the POST and DELETE routes
+  above aren't built.
+  - **Overview:** 90-day strain with drivers, limits and calibration.
+  - **Today:** categories, apps, a 10-minute timeline with calendar
+    meetings, terminal and agents.
+  - **This week:** the weekly review.
+  - **Privacy:** the same rows as `burnout privacy`.
+  - **Accessibility:** WCAG work covers keyboard and screen-reader
+    navigation, tables behind every chart, colour never the only cue,
+    dark mode, reduced motion and "blur numbers".
+  - **Preview:** `BURNOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview
+    ./internal/adapters/dashboard/` serves it with made-up data for UI
+    work.
 - **UI:** a tray icon (always visible while collecting) and an embedded SPA
   via `go:embed`. A native webview (Wails) is a Phase 2 option, which would
   remove the TCP listener entirely.

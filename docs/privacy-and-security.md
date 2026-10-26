@@ -280,7 +280,10 @@ Phase 1 so far (CLI; the tray and dashboard come later):
   - Busy blocks are intervals: `forget` deletes them, and later syncs
     never re-import meetings from before the last forget.
   - `calendar remove --forget` deletes everything stored from the feed.
-- **Still to do:** the tray and the dashboard page.
+- **Dashboard:** its Privacy page shows the same settings as
+  `burnout privacy`, from the same code. "Blur numbers" covers screen
+  sharing.
+- **Still to do:** the tray.
 
 ### 5.2 Anti-coercion requirements
 
@@ -397,6 +400,39 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 - No CORS headers. Strict CSP (`default-src 'self'`, no inline script),
   `X-Frame-Options: DENY`, `frame-ancestors 'none'`, and a CSRF token on
   every state-changing request.
+
+Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
+- **Lifecycle:** the CLI runs the server for as long as the command runs,
+  until Ctrl-C. Each run has its own port and launch token, and it opens
+  the browser itself (the tray will later).
+- **Launch token:** 256 bits, compared in constant time, single-use, and
+  valid for 60 s.
+- **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
+  named after the port.
+  - It is not `Secure`. The server is plain HTTP on loopback, and Safari
+    refuses `Secure` cookies from `http://127.0.0.1`.
+- **Every request** must:
+  - carry an allowed `Host` (`127.0.0.1:<port>` or `localhost:<port>`);
+  - be GET or HEAD;
+  - not be marked cross-site or same-site by `Sec-Fetch-Site`. `none` (a
+    typed URL) is allowed only for the page and the launch link, never the
+    API.
+- **Responses** carry:
+  - `default-src 'none'; script-src 'self'; style-src 'self'; …;
+    frame-ancestors 'none'`;
+  - `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, `no-store`, and
+    same-origin COOP/CORP;
+  - no CORS headers.
+- **Data access:** reads only. No endpoint changes data yet, so there is
+  nothing for CSRF to forge. Endpoints that change data will carry CSRF
+  tokens.
+- **Errors:** API errors are logged to the terminal, never sent to the
+  page, since they can name paths.
+- **The page itself:**
+  - plain embedded HTML, CSS and JS: no external resources, no inline
+    script or style;
+  - data is inserted with `textContent` only, never parsed as HTML;
+  - a test enforces all of this.
 
 ### 8.3 GNOME Shell extension and KWin script
 

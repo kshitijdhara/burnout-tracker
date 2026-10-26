@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>burnout · dashboard</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header>
+  <h1>burnout</h1>
+  <nav aria-label="Sections">
+    <ul>
+      <li><a href="#overview" data-view="overview">Overview</a></li>
+      <li><a href="#today" data-view="today">Today</a></li>
+      <li><a href="#week" data-view="week">This week</a></li>
+      <li><a href="#privacy" data-view="privacy">Privacy</a></li>
+    </ul>
+  </nav>
+  <button type="button" id="blur" aria-pressed="false">Blur numbers</button>
+</header>
+<main id="main" tabindex="-1">
+  <p id="error" role="alert" hidden></p>
+
+  <section id="overview" aria-labelledby="overview-h" hidden>
+    <h2 id="overview-h">Strain</h2>
+    <div id="notices"></div>
+    <div id="latest"></div>
+    <figure id="trend-fig">
+      <div id="trend"></div>
+      <figcaption id="trend-caption"></figcaption>
+    </figure>
+    <details>
+      <summary>The last 90 days as a table</summary>
+      <table id="trend-table">
+        <caption>Strain by day, compared with your own usual days</caption>
+        <thead><tr><th scope="col">Day</th><th scope="col">Strain</th><th scope="col">Notes</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+    <p class="fine">Strain compares each day with your own usual weekdays and weekends. It is a signal for
+      reflection, not a diagnosis. <span id="profile"></span></p>
+  </section>
+
+  <section id="today" aria-labelledby="today-h" hidden>
+    <h2 id="today-h">Today</h2>
+    <div id="today-body"></div>
+  </section>
+
+  <section id="week" aria-labelledby="week-h" hidden>
+    <h2 id="week-h">This week</h2>
+    <div id="week-body"></div>
+  </section>
+
+  <section id="privacy" aria-labelledby="privacy-h" hidden>
+    <h2 id="privacy-h">Privacy</h2>
+    <div id="privacy-body"></div>
+  </section>
+</main>
+<footer>
+  <p>Everything here comes from this device. Nothing leaves it.</p>
+</footer>
+</body>
+</html>
