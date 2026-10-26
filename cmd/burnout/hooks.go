@@ -41,12 +41,26 @@ func runEmit(args []string) {
 	if len(args) != 1 || args[0] != "shell" {
 		return
 	}
+	defer holdForTest()
 	cwd, _ := os.Getwd()
 	m, err := shell.EmitFromEnv(os.Getenv, cwd, time.Now())
 	if err != nil {
 		return
 	}
 	_ = send(m)
+}
+
+// envEmitHold, set to a duration of at most a second, keeps each emitter
+// running that long after it has sent. TestPSLeak uses it so its process
+// sampler reliably sees emitters on a busy CI runner; an emitter normally
+// lives a few milliseconds. Emitters run in the background, so setting it
+// delays nothing the user waits on.
+const envEmitHold = "BURNOUT_TEST_EMIT_HOLD"
+
+func holdForTest() {
+	if d, err := time.ParseDuration(os.Getenv(envEmitHold)); err == nil && d > 0 && d <= time.Second {
+		time.Sleep(d)
+	}
 }
 
 // runHook handles `burnout hook claude`, called by Claude Code for every

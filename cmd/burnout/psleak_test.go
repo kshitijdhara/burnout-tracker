@@ -170,7 +170,9 @@ func TestPSLeak(t *testing.T) {
 		typed = append(typed, "exit")
 		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 		cmd := exec.CommandContext(ctx, python, append([]string{"-c", testsupport.PTYType}, sh.argv...)...) //nolint:gosec // test tools
-		cmd.Env, cmd.Dir = append(env, "BT_TYPE_DELAY=0.05"), home
+		// Each emitter stays up 200 ms, so the sampler sees some even on a
+		// loaded runner, where a few milliseconds slip between its scans.
+		cmd.Env, cmd.Dir = append(env, "BT_TYPE_DELAY=0.05", envEmitHold+"=200ms"), home
 		cmd.Stdin = strings.NewReader(strings.Join(typed, "\n") + "\n")
 		out, _ := cmd.CombinedOutput()
 		cancel()
