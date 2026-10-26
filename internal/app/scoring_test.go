@@ -15,6 +15,7 @@ import (
 
 type fakeScoreStore struct {
 	stored   []strain.Day
+	key      string // the params key stored days were computed with
 	withData []string
 	loaded   []string
 	notes    []annotation.Annotation
@@ -45,7 +46,10 @@ func (f *fakeScoreStore) DayInput(_ context.Context, day string) (features.Day, 
 	return features.Day{Date: day, Minutes: minutes, Coverage: 1, Present: 2 * time.Hour}, nil
 }
 
-func (f *fakeScoreStore) FeatureDays(_ context.Context, from, to string) ([]strain.Day, error) {
+func (f *fakeScoreStore) FeatureDays(_ context.Context, from, to, key string) ([]strain.Day, error) {
+	if key != f.key {
+		return nil, nil
+	}
 	var out []strain.Day
 	for _, d := range f.stored {
 		if d.Date >= from && d.Date <= to {
@@ -63,8 +67,10 @@ func TestScoreDays(t *testing.T) {
 			{Date: "2026-10-23", Coverage: 1, Present: time.Hour, Values: map[string]float64{"attended_hours": 1}}, // recomputed
 		},
 		withData: []string{"2026-10-20", "2026-10-21", "2026-10-23", "2026-10-24", "2026-10-25"},
+		key:      features.DefaultKey,
 	}
-	sc, err := ScoreDays(context.Background(), st, now, 4*time.Hour, false)
+	opts := DefaultScoreOptions()
+	sc, err := ScoreDays(context.Background(), st, now, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +99,7 @@ func TestScoreDays(t *testing.T) {
 	// A vacation annotation excludes a day already stored, and the day is
 	// reported as missing, not rest.
 	st.notes = []annotation.Annotation{{From: "2026-10-20", To: "2026-10-20", Kind: annotation.Vacation}}
-	sc, err = ScoreDays(context.Background(), st, now, 4*time.Hour, false)
+	sc, err = ScoreDays(context.Background(), st, now, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +108,21 @@ func TestScoreDays(t *testing.T) {
 	}
 	st.notes = nil
 
+	// New core hours: stored days were computed with the old ones, so every
+	// day with raw data is computed again.
 	st.loaded = nil
-	sc, err = ScoreDays(context.Background(), st, now, 4*time.Hour, true)
+	changed := opts
+	changed.Features.CoreStart = 7 * time.Hour
+	if _, err := ScoreDays(context.Background(), st, now, changed); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(st.loaded, []string{"2026-10-20", "2026-10-21", "2026-10-23", "2026-10-24"}) {
+		t.Errorf("after a core-hours change computed %v", st.loaded)
+	}
+
+	st.loaded = nil
+	opts.IncludeToday = true
+	sc, err = ScoreDays(context.Background(), st, now, opts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 )
 
@@ -33,8 +34,18 @@ const maxFileSize = 64 << 10
 
 // Config is the whole file.
 type Config struct {
+	Profile   Profile   `toml:"profile"`
 	Privacy   Privacy   `toml:"privacy"`
 	Retention Retention `toml:"retention"`
+}
+
+// Profile is who the user is, for scoring (system design §4.6, §8.1).
+type Profile struct {
+	// Role picks the feature weights: developer, student, researcher or pm.
+	Role string `toml:"role"`
+	// CoreHours are the usual working hours on weekdays, "HH:MM-HH:MM" in
+	// local time. Work outside them counts as after-hours.
+	CoreHours string `toml:"core_hours"`
 }
 
 // Privacy holds the user's privacy controls (privacy & security §5.1).
@@ -63,6 +74,7 @@ type Retention struct {
 // Default returns the documented defaults.
 func Default() Config {
 	return Config{
+		Profile: Profile{Role: string(features.RoleDeveloper), CoreHours: "09:00-18:00"},
 		Privacy: Privacy{PrivateHours: []string{}, ExcludeApps: []string{}},
 		Retention: Retention{
 			RawEventsDays: 7,
@@ -105,6 +117,16 @@ const (
 // Validate reports every problem in c, one per line, naming the key.
 func (c Config) Validate() error {
 	var errs []error
+	if !features.Role(c.Profile.Role).Valid() {
+		names := make([]string, 0, len(features.Roles()))
+		for _, r := range features.Roles() {
+			names = append(names, string(r))
+		}
+		errs = append(errs, fmt.Errorf("profile.role: %q isn't a role (%s)", c.Profile.Role, strings.Join(names, ", ")))
+	}
+	if _, err := parseCoreHours(c.Profile.CoreHours); err != nil {
+		errs = append(errs, fmt.Errorf("profile.core_hours: %w", err))
+	}
 	if len(c.Privacy.PrivateHours) > maxWindows {
 		errs = append(errs, fmt.Errorf("privacy.private_hours: at most %d windows", maxWindows))
 	}
@@ -146,6 +168,38 @@ func checkAppID(app string) error {
 		return fmt.Errorf("%.40q is not an app id", app)
 	}
 	return nil
+}
+
+// minCore is the shortest core-hours span accepted.
+const minCore = time.Hour
+
+// parseCoreHours reads "HH:MM-HH:MM": one span within a day, every day.
+func parseCoreHours(spec string) (schedule.Window, error) {
+	w, err := schedule.Parse(spec)
+	switch {
+	case err != nil || !strings.Contains(spec, ":"):
+		return w, fmt.Errorf("%q: want a time range like 09:00-18:00", spec)
+	case w.Days != [7]bool{true, true, true, true, true, true, true} || strings.ContainsAny(strings.TrimSpace(spec), " "):
+		return w, fmt.Errorf("%q: give times only; core hours apply on weekdays", spec)
+	case w.End <= w.Start:
+		return w, fmt.Errorf("%q: core hours can't run past midnight", spec)
+	case w.End-w.Start < minCore:
+		return w, fmt.Errorf("%q: core hours must span at least an hour", spec)
+	}
+	return w, nil
+}
+
+// Role returns the profile's role. Call it on a valid config.
+func (c Config) Role() features.Role { return features.Role(c.Profile.Role) }
+
+// FeatureParams returns the feature definitions for this profile: the
+// defaults with the user's core hours. Call it on a valid config.
+func (c Config) FeatureParams() features.Params {
+	p := features.DefaultParams()
+	if w, err := parseCoreHours(c.Profile.CoreHours); err == nil {
+		p.CoreStart, p.CoreEnd = w.Start, w.End
+	}
+	return p
 }
 
 // PrivateHours returns the parsed private hours. Call it on a valid config.
@@ -232,6 +286,10 @@ func (c *Config) normalize() {
 		}
 	}
 	c.Privacy.PrivateHours = dedupe(hours, strings.TrimSpace)
+	c.Profile.Role = strings.ToLower(strings.TrimSpace(c.Profile.Role))
+	if w, err := parseCoreHours(c.Profile.CoreHours); err == nil {
+		c.Profile.CoreHours = w.String()
+	}
 	c.Privacy.ExcludeApps = dedupe(c.Privacy.ExcludeApps, func(s string) string { return strings.ToLower(strings.TrimSpace(s)) })
 }
 
@@ -288,6 +346,17 @@ func Render(c Config) []byte {
 # file: the daemon picks up changes within a few seconds. Check an edited
 # file with ` + "`burnout config validate`" + `. Secrets never go in this file.
 
+[profile]
+# What your work looks like, so the strain score weighs the right things:
+# developer, student, researcher or pm (project or product manager).
+`)
+	fmt.Fprintf(&b, "role = %s\n", quote(c.Profile.Role))
+	b.WriteString(`
+# Your usual weekday working hours, in local time. Work outside them counts
+# as after-hours. Changing them recomputes the days whose detail is kept.
+`)
+	fmt.Fprintf(&b, "core_hours = %s\n", quote(c.Profile.CoreHours))
+	b.WriteString(`
 [privacy]
 # Recurring times when nothing is recorded, in your local time. Examples:
 #   "Mon-Fri 19:00-08:00"  weekday evenings into the next morning
@@ -371,10 +440,13 @@ type key struct {
 	list func(*Config) *[]string
 	flag func(*Config) *bool
 	num  func(*Config) *int
+	text func(*Config) *string
 }
 
 var keys = func() []key {
 	k := []key{
+		{name: "profile.role", text: func(c *Config) *string { return &c.Profile.Role }},
+		{name: "profile.core_hours", text: func(c *Config) *string { return &c.Profile.CoreHours }},
 		{name: "privacy.private_hours", list: func(c *Config) *[]string { return &c.Privacy.PrivateHours }},
 		{name: "privacy.exclude_apps", list: func(c *Config) *[]string { return &c.Privacy.ExcludeApps }},
 		{name: "privacy.aggregate_only", flag: func(c *Config) *bool { return &c.Privacy.AggregateOnly }},
@@ -412,6 +484,8 @@ func (c Config) Get(name string) ([]string, error) {
 		return slices.Clone(*k.list(&c)), nil
 	case k.flag != nil:
 		return []string{fmt.Sprint(*k.flag(&c))}, nil
+	case k.text != nil:
+		return []string{*k.text(&c)}, nil
 	default:
 		return []string{fmt.Sprint(*k.num(&c))}, nil
 	}
@@ -433,6 +507,11 @@ func (c *Config) Set(name string, values []string) error {
 		return fmt.Errorf("config: %s takes one value", name)
 	}
 	v := values[0]
+	if k.text != nil {
+		*k.text(c) = v
+		c.normalize()
+		return nil
+	}
 	if k.flag != nil {
 		switch strings.ToLower(v) {
 		case "true", "on", "yes":

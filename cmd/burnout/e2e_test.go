@@ -292,8 +292,22 @@ func TestEndToEnd(t *testing.T) {
 	if b, err := os.ReadFile(filepath.Join(exportDir, "csv", "intervals.csv")); err != nil || !strings.HasPrefix(string(b), "start,end,day,kind") { //nolint:gosec // test file
 		t.Fatalf("intervals.csv: %v\n%s", err, b)
 	}
-	if out, _, _ := run("", "privacy"); !strings.Contains(out, "2 still on disk") {
-		t.Fatalf("privacy doesn't list the exports:\n%s", out)
+	if out, _, err := run("", "config", "set", "profile.core_hours", "7:30-16:30"); err != nil || !strings.Contains(out, "07:30-16:30") {
+		t.Fatalf("set core hours: %v %s", err, out)
+	}
+	if out, _, err := run("", "config", "set", "profile.role", "manager"); err == nil {
+		t.Fatalf("an unknown role was accepted: %s", out)
+	}
+	if _, _, err := run("", "config", "set", "profile.role", "researcher"); err != nil {
+		t.Fatal(err)
+	}
+	if out, errOut, err := run("", "status"); err != nil || errOut != "" {
+		t.Fatalf("status with a profile: %v %s", err, errOut)
+	} else if !strings.Contains(out, "Strain") {
+		t.Fatalf("status:\n%s", out)
+	}
+	if out, _, _ := run("", "privacy"); !strings.Contains(out, "2 still on disk") || !strings.Contains(out, "researcher, core hours 07:30-16:30") {
+		t.Fatalf("privacy doesn't list the exports or the profile:\n%s", out)
 	}
 
 	// A daemon doesn't start on an invalid config file.

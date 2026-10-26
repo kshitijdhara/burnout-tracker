@@ -54,6 +54,24 @@ func settingsFrom(c config.Config) app.Settings {
 	}
 }
 
+// scoreOptions scores with the user's role and core hours.
+func scoreOptions(c config.Config) app.ScoreOptions {
+	o := app.DefaultScoreOptions()
+	o.Features, o.Role = c.FeatureParams(), c.Role()
+	return o
+}
+
+// profileConfig is the config for read-only commands: an invalid file
+// gets a warning and the defaults, so status and review still work.
+func profileConfig() config.Config {
+	c, _, err := loadConfig()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "burnout: the config file is invalid, so the default profile is used (see `burnout config validate`)\n")
+		return config.Default()
+	}
+	return c
+}
+
 // retentionFrom is the store's retention for c.
 func retentionFrom(c config.Config) sqlite.Retention {
 	var r sqlite.Retention

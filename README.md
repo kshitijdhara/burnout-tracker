@@ -48,7 +48,7 @@ mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 **2. Set up and start.**
 
 ```sh
-~/.local/bin/burnout setup            # shows what is collected, asks for consent
+~/.local/bin/burnout setup            # shows what is collected, asks for consent, your role and core hours
 ~/.local/bin/burnout install-hooks    # shell hooks + Claude Code hooks (backs up files first)
 ~/.local/bin/burnout doctor           # first run: answer the keychain prompt (below)
 ~/.local/bin/burnout service install  # runs the daemon in the background, from login
@@ -132,6 +132,15 @@ result is high, the check-in shows support resources for your region
   days work the same way: such days are left out of your baseline and get
   no score. `on_call`, `release` and `exam` mark busy stretches, which are
   still scored. `annotate list` and `annotate remove ID` manage them.
+
+**Your profile.** `setup` asks what best describes your work (developer,
+student, researcher or project/product manager) and your usual weekday
+hours. The role decides what the strain score weighs most: for a PM, a
+day full of meetings and switching is the job, not a warning sign. Core
+hours decide what counts as after-hours work. Change either later with
+`burnout config set profile.role pm` or
+`burnout config set profile.core_hours 08:00-16:30`. New core hours
+recompute the days whose detail is still kept (180 days by default).
 
 **Settings** live in one file, `config.toml` (`burnout config path` shows
 where). `burnout config get` shows them all with comments, and

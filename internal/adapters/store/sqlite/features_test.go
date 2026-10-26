@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,14 +88,14 @@ func TestFeatureAndScoreRoundTrip(t *testing.T) {
 		{Date: "2026-10-20", Coverage: 0.9, Present: 5 * time.Hour, Values: map[string]float64{"attended_hours": 6.5}},
 		{Date: "2026-10-21", Coverage: 0.4, Present: time.Hour, Values: map[string]float64{}},
 	}
-	if err := s.SaveFeatureDays(ctx, days); err != nil {
+	if err := s.SaveFeatureDays(ctx, days, features.DefaultKey); err != nil {
 		t.Fatal(err)
 	}
 	days[0].Values["attended_hours"] = 7 // a recompute replaces the row
-	if err := s.SaveFeatureDays(ctx, days[:1]); err != nil {
+	if err := s.SaveFeatureDays(ctx, days[:1], features.DefaultKey); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.FeatureDays(ctx, "2026-10-01", "2026-10-31")
+	got, err := s.FeatureDays(ctx, "2026-10-01", "2026-10-31", features.DefaultKey)
 	if err != nil || len(got) != 2 {
 		t.Fatalf("feature days: %+v %v", got, err)
 	}
@@ -105,8 +106,28 @@ func TestFeatureAndScoreRoundTrip(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `UPDATE daily_features SET registry_ver = 0 WHERE logical_day = '2026-10-21'`); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.FeatureDays(ctx, "2026-10-01", "2026-10-31"); len(got) != 1 {
+	if got, _ := s.FeatureDays(ctx, "2026-10-01", "2026-10-31", features.DefaultKey); len(got) != 1 {
 		t.Errorf("old registry version returned: %+v", got)
+	}
+	// Days computed with other core hours aren't returned, so they are
+	// recomputed. Days stored before keys existed count as the defaults.
+	if err := s.SaveFeatureDays(ctx, []strain.Day{{Date: "2026-10-22", Coverage: 1}}, "other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO daily_features (logical_day, registry_ver, coverage, features)
+		VALUES ('2026-10-19', ?, 1, '{"present_s":60,"values":{}}')`, features.RegistryVersion); err != nil {
+		t.Fatal(err)
+	}
+	var dates []string
+	got, _ = s.FeatureDays(ctx, "2026-10-01", "2026-10-31", features.DefaultKey)
+	for _, d := range got {
+		dates = append(dates, d.Date)
+	}
+	if strings.Join(dates, ",") != "2026-10-19,2026-10-20" {
+		t.Errorf("default-key days %v", dates)
+	}
+	if got, _ := s.FeatureDays(ctx, "2026-10-01", "2026-10-31", "other"); len(got) != 1 || got[0].Date != "2026-10-22" {
+		t.Errorf("other-key days %+v", got)
 	}
 
 	scores := []strain.Score{
@@ -137,7 +158,7 @@ func TestReadOnlyStoreRefusesFeatureWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ro.Close() }()
-	if err := ro.SaveFeatureDays(context.Background(), []strain.Day{{Date: "2026-10-20"}}); err == nil {
+	if err := ro.SaveFeatureDays(context.Background(), []strain.Day{{Date: "2026-10-20"}}, features.DefaultKey); err == nil {
 		t.Error("read-only store saved features")
 	}
 	if _, err := ro.DayInput(context.Background(), "2026-10-20"); err != nil {

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 )
 
 var start = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) // a Monday
@@ -252,4 +254,27 @@ func texts(sc Score) []string {
 		out = append(out, d.Text())
 	}
 	return out
+}
+
+// The same meeting-heavy fortnight weighs less for a PM, whose job is
+// meetings and switching, than for a developer.
+func TestRoleWeights(t *testing.T) {
+	values := func(i int) map[string]float64 {
+		v := routine(i)
+		if i >= 60 && !isWeekend(start.AddDate(0, 0, i)) {
+			v["meeting_hours"], v["switches_per_hour"], v["comms_share"], v["longest_focus_block"] = 4.5, 32, 0.3, 35
+		}
+		return v
+	}
+	days := history(75, values)
+	dev := last(Compute(days, DefaultParams()))
+	p := DefaultParams()
+	p.Role = features.RolePM
+	pm := last(Compute(days, p))
+	if dev.Strain-pm.Strain < 10 {
+		t.Errorf("developer %.0f, PM %.0f: the PM's meeting-heavy weeks should weigh clearly less", dev.Strain, pm.Strain)
+	}
+	if !features.Role("student").Valid() || features.Role("manager").Valid() {
+		t.Error("role validation")
+	}
 }

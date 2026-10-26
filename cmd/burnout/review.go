@@ -34,7 +34,7 @@ func runReview(ctx context.Context, _ []string) error {
 
 	now := time.Now()
 	rollover := app.DefaultConfig().Rollover
-	sc, err := app.ScoreDays(ctx, store, now, rollover, false)
+	sc, err := app.ScoreDays(ctx, store, now, scoreOptions(profileConfig()))
 	if err != nil {
 		return err
 	}

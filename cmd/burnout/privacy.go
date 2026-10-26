@@ -344,6 +344,7 @@ func runPrivacy(ctx context.Context, _ []string) error {
 	} else {
 		fmt.Printf("  Config file:      %s\n", printable(cfgPath))
 	}
+	fmt.Printf("  Profile:          %s, core hours %s\n", cfg.Profile.Role, cfg.Profile.CoreHours)
 	collecting := "not running"
 	if daemonAnswers(ctx) {
 		collecting = "running"
