@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="crust" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C98642"/>
+      <stop offset="1" stop-color="#9A5A26"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="512" cy="872" rx="250" ry="26" fill="#B5602A" opacity=".35"/>
+  <path d="M512 300 C 330 300 240 360 250 450 C 256 500 300 520 300 540 V800 Q300 850 350 850 H674 Q724 850 724 800 V540 C724 520 768 500 774 450 C 784 360 694 300 512 300 Z" fill="url(#crust)"/>
+  <path d="M330 420 C 360 360 430 334 512 332" stroke="#E7A962" stroke-width="14" fill="none" stroke-linecap="round" opacity=".8"/>
+</svg>
