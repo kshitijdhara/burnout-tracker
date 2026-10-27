@@ -34,18 +34,17 @@ $BurnoutRepo = 'kshitijdhara/burnout-tracker'
 
 # Pinned release keys, current then next. Keep in step with install.sh and
 # internal/release/keys.go (a test checks).
-# PLACEHOLDER keys until the key ceremony in packaging/README.md.
 $BurnoutKeys = @(
     @'
 -----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8SWkP4fESmdwPU6RS6MaGrtL7OP
-NsOyRNsSrsKFL05ePQxaew10J1Z+OW/Iza6IjmogozwXeH314JGJjpkEEQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtWf8TGinleBqdY/75gHXSfsVXUuK
+PuYDXdvc3bdwWiTeyPyeL2NDltsJmDXSb1gMESB8mpfKXWEn/dJEyn1LKQ==
 -----END PUBLIC KEY-----
 '@,
     @'
 -----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEinX0Slhy6+TMIgTbJLbzeaxhXtYn
-tPFyZNyYDQHrGNPPc2/fsyjxaEr+DEasJXoVs4l1S+aiIF0Z29NV7HrOxQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWo5NAi/5+LFyDfLNDJgXviM2feAz
+ovmH7aazyDKIhfdZqXAWi1tg88tGXgFk7tbfwAwZ/PKUUYi4RPP8Pfrgow==
 -----END PUBLIC KEY-----
 '@
 )

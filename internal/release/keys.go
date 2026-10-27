@@ -22,22 +22,16 @@ import (
 )
 
 // CurrentPublicKey signs releases today.
-//
-// PLACEHOLDER: a throwaway key whose private half was discarded. It is
-// replaced at the key ceremony (packaging/README.md); until then nothing
-// verifies, so the release workflow refuses to publish.
 const CurrentPublicKey = `-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/8SWkP4fESmdwPU6RS6MaGrtL7OP
-NsOyRNsSrsKFL05ePQxaew10J1Z+OW/Iza6IjmogozwXeH314JGJjpkEEQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtWf8TGinleBqdY/75gHXSfsVXUuK
+PuYDXdvc3bdwWiTeyPyeL2NDltsJmDXSb1gMESB8mpfKXWEn/dJEyn1LKQ==
 -----END PUBLIC KEY-----
 `
 
 // NextPublicKey takes over when the current key is retired.
-//
-// PLACEHOLDER, like CurrentPublicKey.
 const NextPublicKey = `-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEinX0Slhy6+TMIgTbJLbzeaxhXtYn
-tPFyZNyYDQHrGNPPc2/fsyjxaEr+DEasJXoVs4l1S+aiIF0Z29NV7HrOxQ==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWo5NAi/5+LFyDfLNDJgXviM2feAz
+ovmH7aazyDKIhfdZqXAWi1tg88tGXgFk7tbfwAwZ/PKUUYi4RPP8Pfrgow==
 -----END PUBLIC KEY-----
 `
 
