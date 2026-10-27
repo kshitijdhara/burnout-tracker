@@ -245,7 +245,11 @@ Phase 1 so far:
   - Only bundled browsers' titles are used; other apps' titles are
     ignored.
   - In memory, the site is read from the raw title: a site name the
-    page puts in its title ("Inbox - Gmail") or a host name in it.
+    page puts in its title ("Inbox - Gmail") or a host name in it. A
+    page is recognised only when its title names its site. Sensitive
+    and excluded sites are matched more widely: their names (each
+    sensitive site has one; an excluded site's main label, such as
+    "mybank" for mybank.com) as whole words anywhere in the title.
   - The title is redacted (`internal/domain/redact`, fuzzed in CI):
     emails, URLs, paths, 3+ digit numbers and 20+ character id- or
     secret-like tokens become placeholders.

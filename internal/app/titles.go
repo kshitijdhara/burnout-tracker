@@ -26,7 +26,8 @@ func newTitleRules(rules *classify.Rules, h Hasher) *titleRules {
 
 // category returns w's category. Without a title, or for an app other than
 // a browser, it is the app's category. A browser title goes through the
-// cascade: the app's exclusion, then the site's (exclusions and sensitive
+// cascade: the app's exclusion, then a sensitive or excluded site named
+// anywhere in the title, then the title's site (exclusions and sensitive
 // sites are private, whatever the user's overrides say), the user's site
 // overrides and the bundled sites, then the cache of earlier results, then
 // the app's own category.
@@ -35,6 +36,9 @@ func (t *titleRules) category(w model.Window) model.Category {
 	title := w.Title.Reveal()
 	if cat == model.CategoryPrivate || title == "" || !t.rules.IsBrowser(w.AppID) {
 		return cat
+	}
+	if t.rules.PrivateTitle(title) {
+		return model.CategoryPrivate
 	}
 	domain := classify.DomainFromTitle(title)
 	if c, ok := t.rules.Domain(domain); ok {

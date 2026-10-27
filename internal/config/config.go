@@ -519,8 +519,9 @@ func Render(c Config) []byte {
 	fmt.Fprintf(&b, "exclude_apps = %s\n", list(c.Privacy.ExcludeApps))
 	b.WriteString(`
 # Sites recorded as private, like excluded apps ("example.com" covers its
-# subdomains). They apply when title_classification is on. Banking,
-# payment, health, dating and password-manager sites are always private.
+# subdomains). They apply when title_classification is on, to pages whose
+# title names the site ("example" or "example.com"). Banking, payment,
+# health, dating and password-manager sites are always private.
 `)
 	fmt.Fprintf(&b, "exclude_domains = %s\n", list(c.Privacy.ExcludeDomains))
 	b.WriteString(`

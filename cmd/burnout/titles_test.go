@@ -146,12 +146,13 @@ func TestTitleCanary(t *testing.T) {
 		}
 	}
 
+	// The parts of doctor's report that read the config; the rest probes
+	// the machine (service, disk encryption, the live desktop).
 	var report bytes.Buffer
-	if err := doctor(ctx, &report, true); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(report.String(), "title classification: on") {
-		t.Errorf("doctor doesn't list title classification:\n%s", report.String())
+	shown := reportConfig(&report, true)
+	report.WriteString("  -  title classification: " + titlesLine(shown) + "\n")
+	if !strings.HasPrefix(titlesLine(shown), "on:") || !strings.HasPrefix(titlesLine(config.Default()), "off") {
+		t.Errorf("titles line: %q", report.String())
 	}
 	files, err := collectBundle(ctx, report.Bytes())
 	if err != nil {

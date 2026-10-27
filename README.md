@@ -236,8 +236,8 @@ settings, and won't start on it.
   count as `private`. On macOS this needs the Screen Recording
   permission.
 - `burnout config add privacy.exclude_domains example.com`: that site
-  (and its subdomains) counts as `private`, when title classification
-  is on.
+  (and its subdomains) counts as `private` when title classification is
+  on and a page's title names it ("Example" or "example.com").
 - `burnout config add classify.overrides com.spotify.client=other
   domain:example.com=docs`: your own category for an app or a site.
   Overrides never beat exclusions or the sensitive lists.

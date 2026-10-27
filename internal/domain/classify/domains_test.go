@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,6 +83,46 @@ func TestBundledDomainsAreHostnames(t *testing.T) {
 		check(d)
 		if name != strings.ToLower(name) {
 			t.Errorf("site name %q is not lower case", name)
+		}
+	}
+}
+
+func TestPrivateTitle(t *testing.T) {
+	r := New([]string{"domain:mybank.com", "domain:wiki.example.co.uk"}, nil)
+	for title, want := range map[string]bool{
+		"Bank of America | Online Banking | Accounts Overview": true,
+		"Accounts - Wells Fargo":                               true,
+		"CHASE: sign in":                                       true,
+		"Inbox (2) - LastPass":                                 true,
+		"MyBank - Statements":                                  true, // the excluded site's own word
+		"Page on mybank.com":                                   true,
+		"Team page · Example":                                  true,  // wiki.example.co.uk
+		"A match report - Sport":                               false, // ambiguous words need the domain
+		"Chasers of the light":                                 false, // whole words only
+		"Pull request · owner/repo · GitHub":                   false,
+	} {
+		if got := r.PrivateTitle(title); got != want {
+			t.Errorf("PrivateTitle(%q) = %t, want %t", title, got, want)
+		}
+	}
+}
+
+// Every sensitive site has a name its titles are matched by, so a page
+// that never shows its host name is still private.
+func TestSensitiveDomainsHaveNames(t *testing.T) {
+	named := map[string]bool{}
+	for name, d := range sensitiveNames {
+		named[d] = true
+		if !slices.Contains(sensitiveDomains, d) {
+			t.Errorf("name %q points at %q, which isn't a sensitive domain", name, d)
+		}
+		if name != words(name) && !strings.Contains(name, ".") {
+			t.Errorf("name %q isn't lower-case words", name)
+		}
+	}
+	for _, d := range sensitiveDomains {
+		if !named[d] {
+			t.Errorf("%s has no name in sensitiveNames", d)
 		}
 	}
 }

@@ -68,7 +68,29 @@ var siteNames = map[string]string{
 	"overleaf": "overleaf.com", "google scholar": "scholar.google.com", "wikipedia": "wikipedia.org",
 	"youtube": "youtube.com", "netflix": "netflix.com", "twitch": "twitch.tv", "spotify": "open.spotify.com",
 	"reddit": "reddit.com", "x": "x.com", "instagram": "instagram.com", "facebook": "facebook.com",
-	"paypal": "paypal.com", "revolut": "revolut.com", "monzo": "monzo.com", "coinbase": "coinbase.com",
-	"mychart": "mychart.com", "betterhelp": "betterhelp.com", "tinder": "tinder.com", "bumble": "bumble.com",
-	"hinge": "hinge.co", "okcupid": "okcupid.com", "1password": "1password.com", "bitwarden": "bitwarden.com",
+}
+
+// sensitiveNames are the words a sensitive site's titles carry. A title
+// with one of them anywhere, as whole words and in any case, is private:
+// matching too much loses detail, never privacy. Every sensitive domain
+// has at least one; ambiguous words are given as the domain ("wise.com").
+var sensitiveNames = map[string]string{
+	"paypal": "paypal.com", "venmo": "venmo.com", "wise.com": "wise.com", "revolut": "revolut.com",
+	"monzo": "monzo.com", "n26": "n26.com", "starling bank": "starlingbank.com", "chase": "chase.com",
+	"bank of america": "bankofamerica.com", "wells fargo": "wellsfargo.com", "citi": "citi.com",
+	"citibank": "citi.com", "capital one": "capitalone.com", "us bank": "usbank.com",
+	"american express": "americanexpress.com", "amex": "americanexpress.com", "discover card": "discover.com",
+	"hsbc": "hsbc.com", "barclays": "barclays.co.uk", "lloyds bank": "lloydsbank.com", "natwest": "natwest.com",
+	"santander": "santander.co.uk", "ing.com": "ing.com", "intuit": "intuit.com", "turbotax": "intuit.com",
+	"quickbooks": "intuit.com", "irs": "irs.gov", "hmrc": "hmrc.gov.uk",
+	"schwab": "schwab.com", "fidelity": "fidelity.com", "vanguard": "vanguard.com", "robinhood": "robinhood.com",
+	"etrade": "etrade.com", "e trade": "etrade.com", "coinbase": "coinbase.com", "binance": "binance.com",
+	"kraken":  "kraken.com",
+	"mychart": "mychart.com", "mychart.org": "mychart.org", "zocdoc": "zocdoc.com", "webmd": "webmd.com",
+	"betterhelp": "betterhelp.com", "talkspace": "talkspace.com", "headspace": "headspace.com",
+	"calm.com": "calm.com", "teladoc": "teladoc.com", "patient.info": "patient.info",
+	"tinder": "tinder.com", "bumble": "bumble.com", "hinge": "hinge.co", "okcupid": "okcupid.com",
+	"match.com": "match.com", "grindr": "grindr.com", "feeld": "feeld.co",
+	"1password": "1password.com", "bitwarden": "bitwarden.com", "lastpass": "lastpass.com",
+	"dashlane": "dashlane.com", "keeper security": "keepersecurity.com",
 }
