@@ -11,6 +11,16 @@
 > resolves, so a `.deb`/`.rpm` running as root can't call it; packages will
 > tell the user to run it instead. The Windows logon task is deferred.
 
+> **Update 2026-10-27 (release pipeline):** `.goreleaser.yaml`,
+> `.github/workflows/release.yml`, `packaging/install.sh`/`install.ps1` and
+> `internal/release` implement items 1, 2 and 4, and item 3 up to the key
+> ceremony: the embedded keys are placeholders until a maintainer runs it
+> (`packaging/README.md`). Deviations: the `.dmg` is built by
+> `packaging/macos/build-dmg.sh` (GoReleaser's dmg support is Pro-only);
+> GoReleaser runs with `--skip=publish` and the workflow publishes only
+> after the protected job has signed; the installers print the service
+> step instead of running it; the MSI is not built yet.
+
 ## Context
 
 The agent ships to macOS, Windows and Linux. It needs OS permissions (macOS
@@ -83,7 +93,9 @@ keyless signing, and GitHub artifact attestations.
   3. **verifies the signature against the pinned key**, then the checksum;
   4. installs to a **user-owned prefix** (`~/.local/bin`,
      `%LOCALAPPDATA%\Programs\burnout`);
-  5. runs `burnout service install`.
+  5. prints `burnout setup` and `burnout service install` as next steps.
+     It runs neither: collection needs the user's interactive consent
+     (privacy & security §5.2), and there is no flag to skip it.
 
   The README tells people to read the script before piping it to a shell,
   and shows the manual verification steps.
@@ -225,10 +237,10 @@ authenticity. The OS-level gates are handled like this:
     gets embedded in the binary.
 
 ## Action Items
-1. [ ] `.goreleaser.yaml`: darwin (cgo, macOS runner, universal, dmg), linux (nfpm deb/rpm, tar.gz), windows (msi, zip); checksums, cosign keyless, SBOM.
-2. [ ] Release workflow on `v*` tags: pinned-key signing in a protected environment with required reviewers, `actions/attest-build-provenance`, Actions pinned by SHA, least-privilege `permissions:`.
-3. [ ] Generate the ECDSA P-256 *current* and *next* keys; embed both public keys; document rotation.
-4. [ ] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
+1. [x] `.goreleaser.yaml`: darwin (cgo, macOS runner, universal, dmg), linux (nfpm deb/rpm, tar.gz), windows (zip); checksums, cosign keyless, SBOM. [ ] Windows `.msi`.
+2. [x] Release workflow on `v*` tags: pinned-key signing in a protected environment with required reviewers, `actions/attest-build-provenance`, Actions pinned by SHA, least-privilege `permissions:`.
+3. [ ] Generate the ECDSA P-256 *current* and *next* keys (key ceremony, `packaging/README.md`). [x] Embed both public keys (placeholders until then); document rotation.
+4. [x] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
 5. [ ] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only.
 6. [x] `burnout service install|uninstall|status` for launchd and systemd `--user`, definitions rendered by the binary. [ ] Windows logon task.
 7. [ ] `burnout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
