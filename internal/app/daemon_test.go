@@ -6,15 +6,17 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
 
@@ -127,10 +129,8 @@ func TestDaemonEndToEnd(t *testing.T) {
 		Hasher:      fakeHasher{},
 		ProjectRoot: func(dir string) string { return dir },
 		Procs:       fakeProcs{},
-		Rules:       classify.New(nil, nil),
 		AgentKind:   agentKind,
 		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Indicator:   shown(),
 	})
 
 	d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
@@ -221,8 +221,8 @@ func newTestDaemon(t *testing.T, clock *fakeClock, sink Sink, collector ports.Co
 	deps := Deps{
 		Clock: clock, Collector: collector, Sink: sink, Hasher: fakeHasher{},
 		ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
-		Rules: classify.New(nil, nil), AgentKind: agentKind,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Indicator: shown(),
+		AgentKind: agentKind,
+		Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if mutate != nil {
 		mutate(&cfg, &deps)
@@ -348,93 +348,357 @@ func TestTopologyIsStable(t *testing.T) {
 	}
 }
 
-type fakeIndicator struct{ visible atomic.Bool }
+// scriptedCollector replays one browser window, one second per call, with
+// idle time and lock state from the script.
+type scriptedCollector struct {
+	clock  *fakeClock
+	idle   []time.Duration // IdleFor per tick
+	locked []bool
+	n      int
+}
 
-func (f *fakeIndicator) Visible() bool { return f.visible.Load() }
+func (f *scriptedCollector) Snapshot(context.Context) (model.Snapshot, error) {
+	i := f.n
+	f.n++
+	at := t0.Add(time.Duration(i) * time.Second)
+	f.clock.set(at)
+	return model.Snapshot{
+		At:       at,
+		Windows:  []model.Window{{ID: 1, AppID: "com.apple.Safari", Bounds: model.Rect{W: 800, H: 600}, Visible: 1, Focused: true}},
+		Monitors: []model.Rect{{W: 1920, H: 1080}},
+		IdleFor:  f.idle[i], Locked: f.locked[i],
+	}, nil
+}
+func (f *scriptedCollector) Capabilities() ports.Capabilities {
+	return ports.Capabilities{Name: "scripted"}
+}
+func (f *scriptedCollector) Close() error { return nil }
 
-func shown() *fakeIndicator {
-	f := &fakeIndicator{}
-	f.visible.Store(true)
+// readingScript: 10 s of input, then idle reading for idleS seconds, then
+// one tick of input or of a locked screen.
+func readingScript(idleS int, endLocked bool) *scriptedCollector {
+	f := &scriptedCollector{}
+	for range 10 {
+		f.idle, f.locked = append(f.idle, 0), append(f.locked, false)
+	}
+	for s := 1; s <= idleS; s++ {
+		f.idle, f.locked = append(f.idle, time.Duration(s)*time.Second), append(f.locked, false)
+	}
+	f.idle, f.locked = append(f.idle, 0), append(f.locked, endLocked)
 	return f
 }
 
-// Without a visible indicator nothing is recorded (AC-1): hook events are
-// dropped and counted, and the collector is not sampled.
-func TestNoIndicatorRecordsNothing(t *testing.T) {
-	clock := &fakeClock{now: t0}
-	sink := &fakeSink{}
-	col := &fakeCollector{clock: clock}
-	ind := &fakeIndicator{} // hidden
-	cfg := DefaultConfig()
-	cfg.TickInterval = time.Millisecond
-	cfg.FlushInterval = 5 * time.Millisecond
-	d := New(cfg, Deps{
-		Clock:       clock,
-		Collector:   col,
-		Sink:        sink,
-		Hasher:      fakeHasher{},
-		ProjectRoot: func(dir string) string { return dir },
-		Procs:       fakeProcs{},
-		Rules:       classify.New(nil, nil),
-		AgentKind:   agentKind,
-		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Indicator:   ind,
-	})
-
-	if !d.Submit(wire.Message{V: 1}) {
-		t.Fatal("a ping must still be answered without an indicator")
+// The daemon holds an idle stretch until it ends, then records it: in full
+// when the user comes back (reading), by the grace rule when the screen
+// locks. Nothing is lost either way, including at shutdown mid-stretch.
+func TestDaemonResolvesIdleStretches(t *testing.T) {
+	cases := []struct {
+		name         string
+		script       *scriptedCollector
+		ticks        int // ticks to run before shutdown; 0 = the whole script
+		minS, maxS   float64
+		wantReadingS bool
+	}{
+		{"user returns", readingScript(300, false), 0, 309, 311, true},
+		{"screen locks", readingScript(300, true), 0, 9 + 30 + 59, 9 + 30 + 61, false},
+		{"shutdown mid-stretch", readingScript(300, false), 200, 9 + 30 + 59, 9 + 30 + 61, false},
 	}
-	if d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
-		Argv0: "git", StartMs: t0.UnixMilli(), EndMs: t0.UnixMilli() + 5,
-	}}) {
-		t.Fatal("shell event queued without an indicator")
-	}
-	if d.Submit(wire.Message{V: 1, Kind: wire.KindAgentHook, Agent: &wire.AgentHook{
-		Agent: "claude", Event: "UserPromptSubmit", SessionID: "s", AtMs: t0.UnixMilli(),
-	}}) {
-		t.Fatal("agent event queued without an indicator")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- d.Run(ctx) }()
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	sink.mu.Lock()
-	defer sink.mu.Unlock()
-	if col.n != 0 || len(sink.rollups) != 0 || len(sink.intervals) != 0 || len(sink.topology) != 0 {
-		t.Fatalf("recorded without an indicator: snapshots=%d rollups=%d intervals=%d topology=%d",
-			col.n, len(sink.rollups), len(sink.intervals), len(sink.topology))
-	}
-	var h struct {
-		NoIndicatorTicks int               `json:"no_indicator_ticks"`
-		Hooks            map[string]uint64 `json:"hooks"`
-	}
-	if err := json.Unmarshal([]byte(sink.health), &h); err != nil {
-		t.Fatalf("health: %v", err)
-	}
-	if h.Hooks["no_indicator"] != 2 || h.NoIndicatorTicks == 0 {
-		t.Fatalf("drops not counted: %s", sink.health)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clock := &fakeClock{now: t0}
+			tc.script.clock = clock
+			sink := &fakeSink{}
+			d := New(DefaultConfig(), Deps{
+				Clock: clock, Collector: tc.script, Sink: sink, Hasher: fakeHasher{},
+				ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
+				AgentKind: agentKind,
+				Log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+			})
+			n := tc.ticks
+			if n == 0 {
+				n = len(tc.script.idle)
+			}
+			for i := range n {
+				d.onTick(context.Background())
+				if i%40 == 0 { // the daemon flushes every 15 s, mid-stretch too
+					d.flush(context.Background(), clock.Now(), clock.Now())
+				}
+			}
+			if err := d.shutdown(); err != nil {
+				t.Fatal(err)
+			}
+			// Minutes written early and topped up late add up, as the
+			// store's additive upsert does.
+			attended := 0.0
+			for _, r := range sink.rollups {
+				attended += r.AttendedS
+			}
+			if attended < tc.minS || attended > tc.maxS {
+				t.Fatalf("attended %.1fs, want %.0f–%.0f", attended, tc.minS, tc.maxS)
+			}
+			var h healthJSON
+			if err := json.Unmarshal([]byte(sink.health), &h); err != nil {
+				t.Fatal(err)
+			}
+			if (h.ConfirmedIdleS > 0) != tc.wantReadingS {
+				t.Fatalf("health confirmed_idle_s = %.0f, want reading=%v", h.ConfirmedIdleS, tc.wantReadingS)
+			}
+		})
 	}
 }
 
-// Without an indicator the daemon records nothing and refuses to run (AC-1).
-func TestNilIndicatorRefusesToRun(t *testing.T) {
-	d := New(DefaultConfig(), Deps{
-		Clock:       &fakeClock{now: t0},
-		Hasher:      fakeHasher{},
-		ProjectRoot: func(dir string) string { return dir },
-	})
-	if d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
-		Argv0: "git", StartMs: t0.UnixMilli(), EndMs: t0.UnixMilli() + 5,
-	}}) {
-		t.Fatal("shell event queued without an indicator")
+// Ticks held across the 04:00 rollover and released after it belong to the
+// previous day, whose counters are already written: they are not added to
+// the new day.
+func TestHealthSkipsTicksFromEarlierDays(t *testing.T) {
+	h := newHealth()
+	h.json("2026-10-22", nil, nil) // the new day has started
+	tick := attention.Result{Dt: time.Second, Presence: 1, Reason: attention.ReasonConfirmedIdle}
+	h.observe(tick, "2026-10-21")
+	h.observe(tick, "2026-10-22")
+	if h.presentS != 1 || h.confirmedIdleS != 1 {
+		t.Fatalf("present %v, confirmed idle %v: want only today's tick", h.presentS, h.confirmedIdleS)
 	}
-	if err := d.Run(context.Background()); !errors.Is(err, ErrNoIndicator) {
-		t.Fatalf("Run without an indicator: %v", err)
+}
+
+// fakeControls is a pause switch and at most one forget request.
+type fakeControls struct {
+	mu     sync.Mutex
+	paused bool
+	forget *time.Time
+	done   []error
+}
+
+func (f *fakeControls) Paused(time.Time) bool { f.mu.Lock(); defer f.mu.Unlock(); return f.paused }
+func (f *fakeControls) set(p bool)            { f.mu.Lock(); f.paused = p; f.mu.Unlock() }
+func (f *fakeControls) TakeForget() (time.Time, func(error), bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.forget == nil {
+		return time.Time{}, nil, false
+	}
+	since := *f.forget
+	f.forget = nil
+	return since, func(err error) { f.mu.Lock(); f.done = append(f.done, err); f.mu.Unlock() }, true
+}
+
+func agentMsg(event string, at time.Time) wire.Message {
+	return wire.Message{V: 1, Kind: wire.KindAgentHook, Agent: &wire.AgentHook{
+		Agent: "claude", Event: event, SessionID: "s1", AtMs: at.UnixMilli(),
+	}}
+}
+
+// While paused, collectors aren't sampled and hook events are discarded.
+func TestPausedDaemonCollectsNothing(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	collector := &fakeCollector{clock: clock}
+	controls := &fakeControls{paused: true}
+	d := newTestDaemon(t, clock, sink, collector, func(c *Config, deps *Deps) {
+		c.ControlInterval = time.Millisecond
+		deps.Controls = controls
+		deps.Forget = func(context.Context, time.Time) error { return nil }
+	})
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		if !d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+			Argv0: "ls", StartMs: t0.Add(-time.Second).UnixMilli(), EndMs: t0.UnixMilli(),
+		}}) {
+			t.Error("a hook got an error while paused")
+		}
+	}()
+	runFor(t, d, 100*time.Millisecond)
+	if collector.n != 0 {
+		t.Errorf("collector sampled %d times while paused", collector.n)
+	}
+	if got := d.counters.paused.Load(); got != 1 {
+		t.Errorf("paused counter %d", got)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.intervals) != 0 || len(sink.rollups) != 0 {
+		t.Errorf("recorded while paused: %d intervals, %d rollups", len(sink.intervals), len(sink.rollups))
+	}
+}
+
+// An agent session open across a pause records nothing for the paused span.
+func TestPauseLeavesAGap(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	controls := &fakeControls{}
+	d := newTestDaemon(t, clock, sink, nil, func(_ *Config, deps *Deps) {
+		deps.Controls = controls
+		deps.Forget = func(context.Context, time.Time) error { return nil }
+	})
+	ctx := context.Background()
+	step := func(at time.Time, msg *wire.Message) {
+		clock.set(at)
+		if msg != nil {
+			if !d.Submit(*msg) {
+				t.Fatalf("message at %v not accepted", at)
+			}
+			d.apply(<-d.inbox)
+		}
+		d.checkControls(ctx)
+	}
+	start := agentMsg("UserPromptSubmit", t0)
+	step(t0, &start)
+	controls.set(true)
+	step(t0.Add(time.Minute), nil) // pause
+	controls.set(false)
+	step(t0.Add(31*time.Minute), nil) // resume
+	stop := agentMsg("Stop", t0.Add(32*time.Minute))
+	step(t0.Add(32*time.Minute), &stop)
+	d.flush(ctx, clock.Now(), clock.Now())
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	var working []string
+	for _, iv := range sink.intervals {
+		if iv.Kind == model.IntervalAgentState && iv.Attrs.State == "working" {
+			working = append(working, iv.Start.Sub(t0).String()+"–"+iv.End.Sub(t0).String())
+			if iv.Start.Before(t0.Add(31*time.Minute)) && iv.End.After(t0.Add(time.Minute)) {
+				t.Errorf("interval covers the pause: %v–%v", iv.Start, iv.End)
+			}
+		}
+	}
+	if strings.Join(working, ",") != "0s–1m0s,31m0s–32m0s" {
+		t.Errorf("working segments %v, want the minute before the pause and the one after", working)
+	}
+}
+
+// A forget request writes out everything held in memory first, so the
+// deletion removes it, and nothing older reaches the store afterwards.
+func TestForgetSettlesThenDeletes(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	controls := &fakeControls{}
+	var seenAtForget int
+	var forgotSince time.Time
+	d := newTestDaemon(t, clock, sink, nil, func(_ *Config, deps *Deps) {
+		deps.Controls = controls
+		deps.Forget = func(_ context.Context, since time.Time) error {
+			sink.mu.Lock()
+			seenAtForget = len(sink.intervals)
+			sink.mu.Unlock()
+			forgotSince = since
+			return nil
+		}
+	})
+	ctx := context.Background()
+	start := agentMsg("UserPromptSubmit", t0)
+	d.Submit(start)
+	d.apply(<-d.inbox)
+	clock.set(t0.Add(10 * time.Minute))
+	since := t0.Add(5 * time.Minute)
+	controls.mu.Lock()
+	controls.forget = &since
+	controls.mu.Unlock()
+	d.checkControls(ctx)
+	if seenAtForget == 0 || !forgotSince.Equal(since) {
+		t.Fatalf("forget ran with %d intervals written, since %v", seenAtForget, forgotSince)
+	}
+	if len(controls.done) != 1 || controls.done[0] != nil {
+		t.Fatalf("done: %v", controls.done)
+	}
+	if len(d.pendingIntervals)+len(d.pendingRollups) != 0 {
+		t.Fatal("data still held in memory after forgetting")
+	}
+}
+
+// Private hours pause collection like a pause does, with or without the
+// pause controls, and collection resumes when they end.
+func TestPrivateHours(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	// t0 is a Wednesday at 10:00 UTC.
+	private := schedule.Window{Start: 10*time.Hour + time.Minute, End: 10*time.Hour + 31*time.Minute}
+	private.Days[time.Wednesday] = true
+	d := newTestDaemon(t, clock, sink, nil, func(c *Config, _ *Deps) {
+		c.Settings.PrivateHours = schedule.Schedule{private}
+	})
+	ctx := context.Background()
+	shell := func(at time.Time) wire.Message {
+		return wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+			Argv0: "ls", StartMs: at.Add(-time.Second).UnixMilli(), EndMs: at.UnixMilli(),
+		}}
+	}
+	for _, step := range []struct {
+		at      time.Duration
+		private bool
+	}{{0, false}, {time.Minute, true}, {20 * time.Minute, true}, {31 * time.Minute, false}} {
+		at := t0.Add(step.at)
+		clock.set(at)
+		d.checkControls(ctx)
+		if d.paused.Load() != step.private {
+			t.Fatalf("at +%v: paused %v", step.at, d.paused.Load())
+		}
+		if !d.Submit(shell(at)) {
+			t.Fatalf("at +%v: hook got an error", step.at)
+		}
+		if !step.private {
+			d.apply(<-d.inbox)
+		}
+	}
+	d.flush(ctx, clock.Now(), clock.Now())
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.intervals) != 2 || d.counters.paused.Load() != 2 {
+		t.Errorf("%d commands recorded, %d discarded; want 2 and 2", len(sink.intervals), d.counters.paused.Load())
+	}
+}
+
+// Changed settings apply on the loop: minutes recorded before the change
+// are written under the old settings, later ones under the new.
+func TestReloadAppliesSettings(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	collector := &fakeCollector{clock: clock}
+	var next *Settings
+	d := newTestDaemon(t, clock, sink, collector, func(_ *Config, deps *Deps) {
+		deps.Reload = func() (Settings, bool) {
+			if next == nil {
+				return Settings{}, false
+			}
+			s := *next
+			next = nil
+			return s, true
+		}
+	})
+	ctx := context.Background()
+	minute := func() {
+		for range 60 {
+			d.onTick(ctx)
+		}
+	}
+	minute() // 10:00, defaults: the terminal is recorded by name
+	next = &Settings{Exclusions: []string{"com.googlecode.iterm2"}}
+	d.checkControls(ctx)
+	minute() // 10:01: the terminal is private
+	next = &Settings{AggregateOnly: true}
+	d.checkControls(ctx)
+	minute() // 10:02: one row per category
+	d.settle(ctx, clock.Now())
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	byMinute := map[int][]string{}
+	for _, r := range sink.rollups {
+		m := int(r.Minute.Sub(t0) / time.Minute)
+		byMinute[m] = append(byMinute[m], r.WindowKey+"/"+r.AppID+"/"+string(r.Category))
+	}
+	terminal := fakeHasher{}.Key("window", "com.googlecode.iterm2", "1") + "/com.googlecode.iterm2/terminal"
+	private := fakeHasher{}.Key("window", "private") + "//private"
+	for m, want := range map[int][]string{
+		0: {terminal, private},
+		1: {private},
+		2: {"category:terminal//terminal", private},
+	} {
+		got := byMinute[m]
+		sort.Strings(got)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("minute %d: %q, want %q", m, got, want)
+		}
 	}
 }

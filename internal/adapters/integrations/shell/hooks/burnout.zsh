@@ -41,11 +41,21 @@ __burnout_preexec() {
   while (( i <= n )); do
     case $w[i] in
       ([A-Za-z_][A-Za-z0-9_]#=*) (( i++ )) ;;
-      (sudo|command|builtin|exec|nocorrect|noglob|time|nohup|coproc|-|\!|\{|\(|\;|do) (( i++ )) ;;
+      (command|builtin|exec|nocorrect|noglob|time|nohup|coproc|-|\!|\{|\(|\;|do) (( i++ )) ;;
       (repeat) (( i += 2 )) ;;
+      # Options are skipped too; those that take a value (sudo -u user,
+      # env -u NAME) skip the value as well.
+      (sudo|doas)
+        (( i++ ))
+        while (( i <= n )) && [[ $w[i] == -* ]]; do
+          [[ $w[i] == -- ]] && { (( i++ )); break }
+          [[ $w[i] == -[A-Za-z]#[ugUpCDrtTh] ]] && (( i++ ))
+          (( i++ ))
+        done ;;
       (env)
         (( i++ ))
         while (( i <= n )) && [[ $w[i] == -* || $w[i] == [A-Za-z_][A-Za-z0-9_]#=* ]]; do
+          [[ $w[i] == -[A-Za-z]#[uCS] ]] && (( i++ ))
           (( i++ ))
         done ;;
       (*) break ;;

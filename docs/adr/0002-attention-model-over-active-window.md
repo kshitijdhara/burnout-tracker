@@ -1,6 +1,8 @@
 # ADR-0002: Measure attention, not active-window time
 
-**Status:** Proposed
+**Status:** Proposed; presence amended by
+[ADR-0008](0008-retroactive-idle-resolution.md) (idle stretches decided
+after they end, and how calls and video are detected on macOS)
 **Date:** 2026-10-20
 **Deciders:** Project maintainers
 

@@ -9,7 +9,9 @@ ADRs [0001](adr/0001-local-first-go-agent.md) ·
 [0004](adr/0004-modelling-strategy.md) ·
 [0005](adr/0005-packaging-and-distribution.md) ·
 [0006](adr/0006-decision-model-for-classification.md) ·
-[0007](adr/0007-data-protection-at-rest.md)
+[0007](adr/0007-data-protection-at-rest.md) ·
+[0008](adr/0008-retroactive-idle-resolution.md) ·
+[0009](adr/0009-defer-laya-spike.md)
 
 ---
 
@@ -184,7 +186,7 @@ Every cross-process message is versioned:
 - hook messages (one per stream connection);
 - the GNOME/KWin bridge protocol;
 - the sidecar's stdin/stdout protocol;
-- the export format.
+- the export format (`schemas/v1/export.schema.json`, `burnout export`).
 
 The rules:
 - Every message carries `"v": <int>`, with a JSON Schema in `schemas/`.
@@ -198,7 +200,12 @@ The rules:
 
 - There is one TOML file at `<config dir>/burnout/config.toml`. Its schema,
   defaults and validation live in code.
-- `burnout config get|set|validate` manages it, and it reloads when changed.
+- `burnout config get|set|add|remove|unset|validate` manages it, and the
+  daemon reloads it within a second of a change. Unknown keys are an
+  error, so a typo never silently leaves a privacy control off. An invalid
+  file is never half-applied: a running daemon keeps its current settings
+  and logs a warning, a starting one refuses to start, and `doctor`
+  reports it.
 - **Secrets never go in the config file.** The ICS URL and the HMAC key live
   in the OS keystore (ADR-0007). `burnout keys rotate` rotates the HMAC key,
   which starts new identities (Privacy & Security §4.5).
@@ -244,7 +251,7 @@ So we model **attention as a distribution over visible windows** (ADR-0002).
 | Pointer position + window-at-point | 1 Hz | never persisted |
 | Idle / lock | 5 s + lock events | |
 | Input counts (keys, scroll, clicks) | per tick, counter only; **opt-in**, never persisted | macOS listen-only `CGEventTap` whose callback only increments a counter; Windows **Raw Input** (`RIDEV_INPUTSINK`) on a locked OS thread; key codes are never read. Without the opt-in, idle-time deltas stand in |
-| Media / call | event | video in a visible window, or mic in use |
+| Media / call | 3 s poll on macOS, on its own goroutine | a call: a regular app (with a Dock icon, so not a voice trigger or dictation utility) capturing audio (cameras are not queried, see ADR-0008); video: a display-sleep assertion from an app or a helper in its bundle (not command-line tools like `caffeinate`). macOS reads these without any permission (CoreAudio process objects, IOKit assertions) and maps helper processes to their app. Windows and Linux: not yet (ADR-0008) |
 
 Everything pauses when the screen is locked or the user is idle, and runs at
 half rate on battery. On macOS the sampling thread opts out of App Nap
@@ -266,13 +273,21 @@ else:                            attention(w) = softmax(s / T)(w) * presence
 
 presence ∈ [0,1]:
   1.0 while input within the last 30 s, or a call is active, or video plays in a visible window
-  then decays over an app-aware grace window:
-     terminal with fresh agent output (Stop < 3 min ago): 3 min
-     documents/PDF/browser:                               2 min
-     default:                                             60 s
+  then an idle stretch, decided when it ends (ADR-0008):
+     ended by the user's own input within its cap, no lock or sleep → 1.0 throughout (confirmed idle)
+     the cap is measured by OS idle time and grows if the window gets fresh agent output
+     otherwise (lock, display sleep, sleep gap, past the cap)      → decays over a grace window
+                                          grace   cap
+     terminal with fresh agent output:    3 min   8 min
+     documents/PDF/browser:               2 min   8 min
+     default:                             60 s    4 min
   audio-only media does NOT hold presence
-  0 when locked / asleep / paused
+  0 when locked / paused, or display asleep unless a call is active
 ```
+
+Idle ticks are held until their stretch ends, so rollups for those minutes
+are written late (additive upserts merge them). `burnout timeline` shows a
+day minute by minute for checking against a hand-written log.
 
 - The weights `a_*`, the temperature `T`, and the constants `τ`, `θ` and `k`
   are config with documented defaults. They will be fitted from opt-in
@@ -330,8 +345,8 @@ PowerShell `$PROFILE`. The rules for that block:
 | Shell | Mechanism |
 |-------|-----------|
 | zsh | `add-zsh-hook preexec/precmd` |
-| bash (3.2+) | vendored `bash-preexec` |
-| fish | `fish_preexec` / `fish_postexec` |
+| bash (3.2+) | vendored `bash-preexec` (loaded only if no other tool has; `HISTCONTROL` left as the user set it; the command comes from `$BASH_COMMAND`, not history) |
+| fish | `fish_preexec` / `fish_postexec`, in a file in `conf.d`, so `config.fish` isn't edited |
 | PowerShell 7 | `prompt` wrapper + PSReadLine; writes to the pipe **in-process** (`NamedPipeClientStream`), never spawns |
 
 **Hook rules:**
@@ -344,7 +359,9 @@ PowerShell `$PROFILE`. The rules for that block:
    `ps`/`/proc` or process auditing. A CI test checks `ps` during hooked
    commands.
 3. On zsh/bash/fish the emitter runs in the background (`&!` / `disown`)
-   with a 50 ms socket timeout, and always exits 0.
+   with a 50 ms socket timeout, and always exits 0. Shells without a
+   millisecond clock (bash before 5, fish) send the command's duration
+   instead of its start and end, and the emitter takes the end as now.
 4. A command that doesn't resolve (a typo or a pasted token) is sent with
    an empty name and its exit code, so failure loops still count without
    recording anything the user typed.
@@ -461,6 +478,27 @@ Mozilla-signed `.xpi`.
 - Target effort is about 30 s a week. High-band results trigger the safety
   flow (§8.4).
 
+Phase 1 implementation (`internal/domain/checkin`, `burnout checkin`):
+- **Weekly:** both CBI subscales in English (6 personal and 7
+  work-related items, original wording and response scales). Each is
+  scored as the mean of 0–100 item values, with the leisure-energy item
+  reversed.
+- **Bands:** the CBI has no official cut-offs. The commonly used ones
+  are: below 50 low, 50–74 moderate, 75–99 high, 100 severe.
+- **Safety:** the flow (§8.4) shows for a subscale in the high band or
+  above.
+- **Due:** six days after the last weekly check-in, so it is due on the
+  same weekday a week later. `status` reminds; nothing interrupts.
+- **Daily:** energy (reversed) and "how drained" on a 5-point scale. It
+  is unvalidated and optional.
+- **Storage:** only complete check-ins are stored. Both subscales are
+  saved in one transaction.
+- **Process:** the CLI writes through `OpenExisting`, which never
+  creates or migrates the database, so it is safe beside a running
+  daemon.
+- **Before the alpha:** the item wording must be checked against the
+  published instrument, and the copy reviewed (§8.4).
+
 ### 4.6 Activity classification (role-aware)
 
 Onboarding sets a **role profile**. Each profile defines a category taxonomy
@@ -482,6 +520,30 @@ redacted before any rule or Laya sees them. The redaction rules are in
 [Privacy & Security §4.1](privacy-and-security.md). Titles and title hashes
 are **never persisted**.
 
+Phase 1 so far:
+- **Roles:** developer, student, researcher and PM (`profile.role`; `setup` asks).
+- **One taxonomy:** every role uses the same categories. The bundled rules
+  also cover study, research and planning apps, such as RStudio, MATLAB,
+  Zotero, Anki, OneNote and Linear. A role changes the feature weights
+  (§3.5), not how activity is classified.
+- **Starting weights:**
+  - developer: as in §7.1;
+  - PM: meetings, app switching, short focus blocks and chat weigh less;
+  - student: after-hours work, meetings and switching weigh less;
+  - researcher: after-hours work weighs less, short focus blocks more.
+
+  They are starting points for Phase 4 to fit.
+- **Changing role** rescores all of history at once, because weights are
+  applied at scoring time.
+- **Core hours** (`profile.core_hours`, default 09:00-18:00, weekdays)
+  define after-hours work. Changing them changes the features themselves:
+  - each stored day records the feature parameters it was computed with;
+  - days stored under other parameters are recomputed while their minutes
+    and intervals are kept (180 days by default), so baselines compare
+    like with like;
+  - older days keep their stored values;
+  - with the default profile, nothing is recomputed.
+
 ### 4.7 Calendar busy blocks
 
 Calendar data covers in-person meetings and meeting-heavy days, which
@@ -495,6 +557,37 @@ matter for PMs and researchers.
 - **Phase 3:** the OS calendar (macOS EventKit).
 - **Features:** meeting hours, back-to-back chains, free-time
   fragmentation, after-hours meetings.
+
+Phase 1 so far (`internal/domain/calendar`, `internal/adapters/egress/ics`):
+- **Setup:** `burnout calendar add URL|FILE` accepts https:// or webcal://
+  feeds, or a local `.ics` file. Plain http:// is refused.
+  - The URL goes into the OS keystore, after a confirmation that it is a
+    key to the whole calendar.
+  - The feed is test-fetched before it is kept.
+- **Syncing:** the daemon fetches the feed a minute after it starts, then
+  every 3 hours.
+  - It skips fetching while paused, or when `calendar.ics.enabled = false`.
+  - Each sync replaces the busy blocks from 60 days back to 2 days ahead.
+  - It records which days it covered, so a day without meetings counts as
+    0 rather than missing.
+  - Meetings starting in private hours are dropped.
+  - Nothing that starts before the last `forget` is ever imported again.
+  - `burnout calendar sync | status | remove [--forget]` manage it.
+- **Parsing:** the parser streams the feed. It expands RRULE (DAILY,
+  WEEKLY, MONTHLY and YEARLY, with INTERVAL, COUNT, UNTIL, BYDAY with
+  ordinals, BYMONTHDAY, BYMONTH and BYSETPOS), EXDATE and RECURRENCE-ID
+  overrides.
+  - Repeats keep their local wall-clock time across DST changes.
+  - TZIDs resolve as IANA names, then common Windows names, then local time.
+  - These are not meetings: all-day events, free (TRANSPARENT) events,
+    cancelled events, and events longer than 12 hours. Tentative ones count
+    and are marked tentative.
+  - A kept property over 8 KB drops its event.
+  - Caps: 20,000 events, and 5,000 instances per recurring event.
+- **Fetching:** a 20 MB size cap and a 60 s timeout. Redirects must stay on
+  https. No cookies are sent, the User-Agent is generic, and errors name
+  only the host.
+- Free-time fragmentation isn't built yet.
 
 ---
 
@@ -528,7 +621,7 @@ CREATE TABLE raw_events (id INTEGER PRIMARY KEY, recv_ms INTEGER NOT NULL, v INT
 -- per-minute attention rollups per window (default 180 days)
 CREATE TABLE attention_minutes (
   minute_ms INTEGER NOT NULL, utc_offset_min INTEGER NOT NULL, logical_day TEXT NOT NULL,
-  window_key TEXT NOT NULL,            -- HMAC(key, app id + window identity)
+  window_key TEXT NOT NULL,            -- HMAC(key, app id + window identity); 'category:<c>' in aggregate-only mode
   app_id TEXT,                         -- NULL when category = 'private' or aggregate-only
   category TEXT NOT NULL, monitor INTEGER,
   attended_s REAL NOT NULL, focused_s REAL NOT NULL, visible_s REAL NOT NULL,
@@ -562,7 +655,7 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 - the main loop writes in batched transactions every 15 s; maintenance
   (retention in 5,000-row chunks, recovery copies) runs on its own goroutine,
   and SQLite serialises the two writers (`busy_timeout` covers the overlap);
-- `status` and `doctor` open the database read-only and never migrate;
+- `status`, `timeline` and `doctor` open the database read-only and never migrate;
 - `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, prepared
   statements;
 - `secure_delete=ON` and `auto_vacuum=INCREMENTAL`, with an incremental
@@ -605,6 +698,29 @@ device wasn't used, is **missing, not rest**. Work on another machine is
 indistinguishable from rest, so we say so in the UI and rely on import
 (F17) for multi-device users.
 
+v1 implementation notes (`internal/domain/features`, registry version 2):
+- Built: attended hours, after-hours share (weekdays), meeting hours,
+  app switches per hour, longest focus block (code, terminal, docs; gaps
+  up to 2 min), comms share, breaks and longest break, overnight gap,
+  shell failure rate and failure loops, late-night infra/ssh commands,
+  agent parallelism, minutes agents waited on you, and reading share
+  (exploratory, weight 0).
+- Weekend work is covered by the weekend baseline and the weekend
+  guardrail rather than a separate feature.
+- Registry version 2 adds the calendar:
+  - meeting hours now count calendar meetings too, unioned per minute with
+    meeting-app and call time, so in-person meetings count and nothing
+    counts twice;
+  - back-to-back meetings: meetings starting within 5 minutes of the last
+    one ending;
+  - after-hours meetings: a weekday's meeting hours outside core hours;
+  - the last two apply only on days a calendar sync covered.
+- Not yet: comms interrupt
+  rate, days since a light day, human switches while agents work, and
+  approval latency.
+- Coverage is the share of present time attributed to a window, from the
+  day's health record. A day with under 30 min of presence is "not used".
+
 ### 7.2 Strain score v1 (cold start, no labels)
 
 1. **Calibration:** 14 days. The UI explains why there's no score yet, and
@@ -638,6 +754,34 @@ indistinguishable from rest, so we say so in the UI and rely on import
    counters baselines drifting upward during long overwork.
 8. **Explainability:** the top 3 drivers in plain language ("after-hours
    work +2.1σ vs. your usual weekdays").
+
+v1 implementation choices (`internal/domain/strain`, `strain-v1`):
+- **Annotations** (`burnout annotate`): vacation and sick days are
+  excluded at scoring time, so an annotation added later also applies to
+  days already stored. Planned crunch is scored and listed in the weekly
+  review.
+- **Smoothing:** EWMA with a 7-day half-life, so one long day moves the
+  score a little and a sustained week moves it a lot.
+- **Baselines:** need at least 5 weekdays or 2 weekend days in the
+  window. A feature with fewer has no deviation yet.
+- **Group caps:** ±2 per group, in both directions.
+- **Mapping:** `c0 = 3`, `s = 1.25`. An ordinary day is about 10, a
+  moderately heavier fortnight about 60, and a crunch week above 90.
+- **Guardrail penalties:** weekly hours +1.5, short night +1, weekend
+  work +1.
+- **Anchor:** the 28-day window with the lowest mean composite (at least
+  14 scored days), ending before the rolling window and starting within
+  180 days. Its medians and MADs are averaged with the rolling ones.
+  Until it exists, the guardrails alone counter drift.
+- **Drivers:** shown at a contribution of 0.5 or more. The text says
+  "than usual lately", because the smoothed deviation spans both
+  weekdays and weekends.
+- **Determinism:** each day sees only earlier days, so past scores never
+  change. Same input, same score.
+- **Storage:** the daemon stores completed days' features and scores
+  during maintenance, recomputing the last two days. `burnout status`
+  computes missing days in memory, so it is current even before
+  maintenance runs.
 
 ### 7.3 Trajectory (Phase 2)
 
@@ -690,6 +834,11 @@ indistinguishable from rest, so we say so in the UI and rely on import
 4. Offer the optional integrations: shell hooks, Claude Code hooks, ICS.
 5. Explain the 14-day calibration and the data-quality badge.
 
+Built (CLI): `burnout setup` covers steps 1 and 2. After consent it asks
+for a role and core hours, and Enter keeps the defaults. It saves them to
+the config file, where `burnout config set profile.role|profile.core_hours`
+changes them later.
+
 The first run must be completed **interactively by the logged-in user**
 (anti-coercion; see Privacy & Security).
 
@@ -703,6 +852,20 @@ The first run must be completed **interactively by the logged-in user**
   22:00 on 4 days; want a shutdown reminder at 21:30?";
 - the user sets or edits **boundaries** (shutdown time, no-weekend rule,
   deep-work blocks), and adherence is tracked gently.
+
+Phase 1 so far (`burnout review`, `internal/domain/review`):
+- **Built:**
+  - the last 7 completed days against the 7 before (average and peak
+    strain);
+  - drivers by the number of days they appeared;
+  - limits crossed;
+  - the latest weekly check-in against the previous one;
+  - up to two suggestions, guardrails first, from a fixed table tied to
+    features.
+- **Not yet:**
+  - labelling uncategorized items (with classification);
+  - annotating the week (with annotations);
+  - boundaries and adherence.
 
 ### 8.3 Nudges
 
@@ -718,6 +881,14 @@ When CBI is in the high band, or free text suggests distress, the app shows
 supportive copy and **regional mental-health resources**. It doesn't send
 alarming forecasts. A mental-health professional reviews all
 score, forecast and safety copy before alpha.
+
+Phase 1 implementation:
+- **Resources:** a built-in table of free national lines, picked by the
+  locale's territory (`LC_ALL`, `LC_MESSAGES`, `LANG`), plus
+  findahelpline.com for every region. There is no network call.
+- **Covered so far:** US, CA, GB, IE, AU, NZ, IN and DE.
+- **Not yet:** free-text distress detection, which needs the Laya
+  classifier.
 
 ### 8.5 Accessibility and i18n
 
@@ -772,9 +943,39 @@ These, plus §7.5, are the alpha exit criteria.
     rebinding.
   - No CORS, a strict CSP, `X-Frame-Options: DENY`, and CSRF tokens on
     state-changing requests.
+- **Phase 1 so far:** `burnout dashboard` serves the page from the CLI
+  while it runs (`internal/adapters/dashboard`), hardened as in Privacy &
+  Security §8.2. The tray's "Open dashboard" serves the same page from the
+  daemon, read-only, with a new launch token per click. It is read-only for now, so the POST and DELETE routes
+  above aren't built.
+  - **Overview:** 90-day strain with drivers, limits and calibration.
+  - **Today:** categories, apps, a 10-minute timeline with calendar
+    meetings, terminal and agents.
+  - **This week:** the weekly review.
+  - **Privacy:** the same rows as `burnout privacy`.
+  - **Accessibility:** WCAG work covers keyboard and screen-reader
+    navigation, tables behind every chart, colour never the only cue,
+    dark mode, reduced motion and "blur numbers".
+  - **Preview:** `BURNOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview
+    ./internal/adapters/dashboard/` serves it with made-up data for UI
+    work.
 - **UI:** a tray icon (always visible while collecting) and an embedded SPA
   via `go:embed`. A native webview (Wails) is a Phase 2 option, which would
   remove the TCP listener entirely.
+- **Phase 1 so far:** the tray (`internal/adapters/tray`, on
+  `fyne.io/systray`) runs inside the daemon:
+  - **Threads:** on macOS it owns the main thread, as AppKit requires,
+    and the daemon's work runs beside it. On Windows and Linux it runs on
+    a goroutine of its own.
+  - **Ordering:** the icon shows first, and the daemon collects nothing,
+    hooks included, unless it does; without an icon it exits (Privacy &
+    Security §5.2 AC-1).
+  - **Menu:** pause and resume, delete the last hour or today, and open
+    the dashboard. It reuses the CLI's control files, so the daemon's loop
+    handles a click exactly like `burnout pause` or `forget`.
+  - **Icons:** template images on macOS, colour icons on Windows (.ico)
+    and Linux (StatusNotifierItem over D-Bus), built into the binary from
+    `assets/icon/tray`.
 
 ---
 
@@ -819,9 +1020,9 @@ Days below the coverage threshold aren't scored (§7.1).
 
 | Failure | Behaviour |
 |---------|-----------|
-| Crash | launchd `KeepAlive` + `ThrottleInterval`; systemd `Restart=on-failure` + `StartLimitBurst`; Windows task restart |
-| Crash loop (3 in 10 min) | Start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray |
-| Hang | systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
+| Crash | launchd `KeepAlive` (on failure only) + `ThrottleInterval` 30 s; systemd `Restart=on-failure` + `RestartSec=30`, no start limit. Conditions a restart can't fix (no consent, a newer schema, an unusable data folder) exit 0 and stay down. Windows task restart: not yet |
+| Crash loop (3 in 10 min) | Not yet: start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray. Phase 0 keeps restarting every 30 s |
+| Hang | Not yet: systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
 | DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |
 | Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |
@@ -980,9 +1181,9 @@ burnout-tracker/
 
 | Phase | Scope | Exit criteria |
 |-------|-------|---------------|
-| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. **Laya spike** in parallel (accuracy on ~500 labelled samples vs. rules/kNN, CPU latency, RAM) | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green; Laya go/no-go |
-| **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
-| **2: Personalised** | Trend forecast; per-user model; optional Laya classifier; KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
+| **0: Spike (2–3 wks)** | Domain skeleton with ports and arch lint; macOS + Windows collectors (focus, geometry, pointer, idle, Raw Input / counter tap); zsh hook with in-shell extraction; Claude Code hooks; SQLite (0600, FDE check); `status` and `doctor`; canary test. | One developer's 2-monitor day within 10% of a hand-annotated timeline; canary and ps-leak tests green (Laya spike deferred to Phase 2, ADR-0009) |
+| **1: MVP (6–8 wks)** | Attention v1 + input profiles; one-human/N-agent timelines; all shells; Linux X11 + GNOME bridge; role profiles + rules; window-title opt-in + redactor; opt-in classification labels (input to the Laya spike, ADR-0009); privacy controls; annotations; ICS; features + strain v1 with guardrails and coverage; dashboard (hardened); weekly review + check-ins + safety flow; onboarding; release pipeline, installers, `update`; SLIs | ≥ 8-week alpha, 10–20 mixed-role users; SLOs met; rmcorr analysis run; < 1% CPU; no shell regressions; professional copy review done |
+| **2: Personalised** | Trend forecast; per-user model; Laya spike on the alpha's labelled samples, then the optional Laya classifier if it beats rules/kNN (ADR-0009); KDE / wlroots; backup/restore/import; native webview; process isolation for native collectors if crash data warrants it | rmcorr r ≥ 0.4; false-alarm rate documented |
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
 | **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |
 

@@ -199,8 +199,8 @@ func TestZshHookSilentWhenNotInteractive(t *testing.T) {
 
 // TestZshHookResolvesLikeZsh checks the hook names the command zsh would
 // actually run: an unquoted ~/ path resolves, a quoted one does not; the
-// shell's prefix words (!, coproc, repeat N, grouping) are skipped to the
-// real command; reserved words are never recorded as commands. It also pins
+// shell's prefix words (!, coproc, repeat N, grouping) and sudo's and
+// env's options, with their values, are skipped to the real command; reserved words are never recorded as commands. It also pins
 // that the hook prints nothing: it once evaluated the typed word as
 // arithmetic, printing "bad math expression" before ~/ commands.
 func TestZshHookResolvesLikeZsh(t *testing.T) {
@@ -213,6 +213,9 @@ func TestZshHookResolvesLikeZsh(t *testing.T) {
 		"repeat 2 git status >/dev/null 2>&1",
 		"{ git status } >/dev/null 2>&1",
 		"if true; then :; fi",
+		"sudo() { : }", // a stand-in, so the test never runs the real sudo
+		"sudo -n -u nobody git status",
+		"env -u HOME git status >/dev/null 2>&1",
 	}
 	recs, out := runZsh(t, true, commands, len(commands))
 	if strings.Contains(out, "__burnout_preexec:") || strings.Contains(out, "__burnout_precmd:") {
@@ -222,13 +225,14 @@ func TestZshHookResolvesLikeZsh(t *testing.T) {
 	if len(got["tool"]) != 1 {
 		t.Errorf("~/bin/tool: want one record named tool: %v", keys(got))
 	}
-	// The quoted ~/ path, the missing ~/CANARYEEE and the if statement.
-	if len(got[""]) != 3 {
-		t.Errorf("unresolved commands: want 3 with an empty name, got %d: %v", len(got[""]), keys(got))
+	// The quoted ~/ path, the missing ~/CANARYEEE, the if statement and the
+	// function definition.
+	if len(got[""]) != 4 {
+		t.Errorf("unresolved commands: want 4 with an empty name, got %d: %v", len(got[""]), keys(got))
 	}
 	gits := got["git"]
-	if len(gits) != 3 {
-		t.Errorf("prefixed git commands: want 3, got %d: %v", len(gits), keys(got))
+	if len(gits) != 5 {
+		t.Errorf("prefixed git commands: want 5, got %d: %v", len(gits), keys(got))
 	}
 	for _, r := range gits {
 		if r.env[EnvSubcmd] != "status" {

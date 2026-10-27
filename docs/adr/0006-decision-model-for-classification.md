@@ -1,6 +1,7 @@
 # ADR-0006: Use a local System One model (Laya) for activity classification, not for scoring
 
-**Status:** Proposed
+**Status:** Proposed; the spike (action item 1) is deferred to Phase 2 by
+[ADR-0009](0009-defer-laya-spike.md)
 **Date:** 2026-10-20
 **Deciders:** Project maintainers
 

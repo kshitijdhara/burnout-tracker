@@ -23,24 +23,18 @@ every field that is collected.
 
 ## Trying Phase 0
 
-Phase 0 is a developer preview: no installer, tray icon or dashboard yet.
-
-> **Collection is off until the tray ships (Phase 1).** burnout records
-> only while its tray icon is visible ([AC-1](docs/privacy-and-security.md)),
-> and Phase 0 has no tray, so `burnout daemon` exits with an error instead of
-> starting. The steps below still build, set up and install the hooks; the
-> hooks do nothing while no daemon is running.
-
-Once the tray lands, desktop collection works on macOS and Windows; on Linux
-only shell and Claude Code hooks are recorded for now.
+Phase 0 is a developer preview: there is no installer yet.
+Desktop collection works on macOS and Windows; on Linux only shell and
+Claude Code hooks are recorded for now.
 
 ### macOS
 
 You need Go 1.26.10 or newer and the Xcode command-line tools (the macOS
 collector uses cgo).
 
-**1. Build and install to a stable path.** The hooks record the binary's
-absolute path, so copy it somewhere it will stay before installing them.
+**1. Build and install to a stable path.** The hooks and the service record
+the binary's absolute path, so install it somewhere it will stay, in a
+folder only you can write to.
 
 ```sh
 xcode-select --install          # skip if already installed
@@ -48,41 +42,189 @@ git clone https://github.com/kshitijdhara/burnout-tracker
 cd burnout-tracker
 go test ./...
 go build -o bin/burnout ./cmd/burnout
-mkdir -p ~/.local/bin && cp bin/burnout ~/.local/bin/
+mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 ```
 
 **2. Set up and start.**
 
 ```sh
-~/.local/bin/burnout setup          # shows what is collected, asks for consent
-~/.local/bin/burnout install-hooks  # zsh hook + Claude Code hooks (backs up files first)
-~/.local/bin/burnout daemon         # in its own terminal tab; leave it running
+~/.local/bin/burnout setup            # shows what is collected, asks for consent, your role and core hours
+~/.local/bin/burnout install-hooks    # shell hooks + Claude Code hooks (backs up files first)
+~/.local/bin/burnout doctor           # first run: answer the keychain prompt (below)
+~/.local/bin/burnout service install  # runs the daemon in the background, from login
 ```
 
 `setup` must run in an interactive terminal. burnout keeps its key in your
-keychain through macOS's own `security` tool, so the first `daemon` (or
-`doctor`) run may show a keychain prompt that names `security` rather than
-burnout. Choose **Always Allow**, and answer within a few seconds: if the
-keychain doesn't respond in about 3 s, burnout keeps its key in an
-owner-only file in the data folder instead, and stays on that choice.
+keychain through macOS's own `security` tool, so the first `doctor` run may
+show a keychain prompt that names `security` rather than burnout. Choose
+**Always Allow**, and answer within a few seconds: if the keychain doesn't
+respond in about 3 s, burnout keeps its key in an owner-only file in the
+data folder instead, and stays on that choice. Running `doctor` before
+`service install` makes the prompt appear while you're looking.
 
-**3. Pick up the hooks.** Open a new terminal tab so zsh loads the hook, and
-start a new Claude Code session (`/hooks` inside Claude Code lists them).
-Sessions that were already open are not tracked.
+The service starts the daemon at every login and restarts it if it
+crashes. Its log is `logs/daemon.log` in the data folder (three files of at
+most 10 MB); crash output goes to `logs/stderr.log`. To update, rebuild,
+run the same `install -m 0755` line (it replaces the file, so the running
+daemon isn't disturbed), then `service install` again to restart on the
+new binary. To watch the daemon's log in a terminal instead,
+skip the service and run `~/.local/bin/burnout daemon`.
+
+**3. Pick up the hooks.** Open a new terminal tab so your shell loads the
+hook, and start a new Claude Code session (`/hooks` inside Claude Code
+lists them). Sessions that were already open are not tracked.
+
+`install-hooks` sets up zsh, plus bash and fish if you use them (their
+config exists, or one is your login shell). Force either with `--bash` or
+`--fish`, or skip one with `--zsh=false`.
+- **bash:** a block in `~/.bashrc`. It loads bash-preexec, the library
+  starship, atuin and iTerm2 also use, unless one of them already has. It
+  keeps your `HISTCONTROL` as it is.
+- **fish:** a file in `~/.config/fish/conf.d`, so your `config.fish` isn't
+  touched.
+
+On macOS, Terminal starts bash as a login shell, which reads
+`~/.bash_profile`. If yours doesn't already source `~/.bashrc`, add
+`[ -r ~/.bashrc ] && . ~/.bashrc` to it. PowerShell isn't supported yet.
 
 **4. Check it works.**
 
 ```sh
-~/.local/bin/burnout doctor   # permissions, disk encryption, daemon health
-~/.local/bin/burnout status   # today's summary
+~/.local/bin/burnout doctor     # permissions, disk encryption, daemon health, calls/video right now
+~/.local/bin/burnout status     # strain score and today's summary
+~/.local/bin/burnout dashboard  # the same, and more, in your browser
+~/.local/bin/burnout timeline   # today minute by minute
 ```
 
-Minutes appear in `status` after a minute or two of use.
+`status` starts with a **strain score** (0–100) for the last completed
+day, the top reasons behind it, and the last 7 days. It compares each day
+with your own usual weekdays or weekends, so it needs 14 days with enough
+data first; until then it says how far calibration has come. Days the
+computer was barely used count as missing, never as rest. The score is a
+signal for reflection, not a diagnosis. On Linux, where there is no
+desktop collector yet, every day counts as barely used, so there is no
+score.
+
+**Weekly check-in and review.** Once a week, `burnout checkin` asks the
+13 questions of the Copenhagen Burnout Inventory (about a minute); `status`
+reminds you when it's due. `burnout checkin --daily` asks two quick
+questions about today. `burnout review` compares the last 7 days with the
+7 before: strain, what kept coming up, limits crossed, your check-ins, and
+one or two things to try. Check-in answers stay on this device. If a
+result is high, the check-in shows support resources for your region
+(from your locale) and a worldwide directory.
+
+**Privacy controls.**
+- `burnout privacy` shows what's collected, your current settings and
+  your controls.
+- `burnout pause 1h` (or `pause tomorrow`, or `pause` alone until
+  `burnout resume`) stops recording. Hook events sent meanwhile are
+  discarded.
+- `burnout forget --last 1h`, `--today`, `--since 2026-10-20` or `--all`
+  deletes recorded data for good, including recovery copies made since
+  then. Your annotations, consent and hooks stay.
+- `burnout export --out burnout.json` writes your data out as one JSON
+  file; `--format csv --out DIR` writes a new folder with one CSV per kind
+  of data; `--since` and `--until` take dates. The format is described in
+  [`schemas/v1/export.schema.json`](schemas/v1/export.schema.json).
+  Exports are plaintext and `forget` can't delete them: `forget` and
+  `privacy` list the ones still on disk.
+- `burnout annotate vacation 2026-11-02 2026-11-06` marks time off. Sick
+  days work the same way: such days are left out of your baseline and get
+  no score. `on_call`, `release` and `exam` mark busy stretches, which are
+  still scored. `annotate list` and `annotate remove ID` manage them.
+
+**Your profile.** `setup` asks what best describes your work (developer,
+student, researcher or project/product manager) and your usual weekday
+hours. The role decides what the strain score weighs most: for a PM, a
+day full of meetings and switching is the job, not a warning sign. Core
+hours decide what counts as after-hours work. Change either later with
+`burnout config set profile.role pm` or
+`burnout config set profile.core_hours 08:00-16:30`. New core hours
+recompute the days whose detail is still kept (180 days by default).
+
+**The dashboard.** `burnout dashboard` opens a page in your browser with:
+- your strain over the last 90 days, with what stood out and the limits
+  crossed;
+- today, minute by minute: categories, apps, meetings, terminal and AI
+  agents;
+- the weekly review;
+- a privacy page listing what is collected and your settings.
+
+"Blur numbers" hides the figures while you share your screen.
+
+It runs only while the command does (Ctrl-C stops it), on 127.0.0.1, and
+reads your data without changing it. The link it opens works once, within
+a minute; after that the tab uses a cookie that only this browser holds. A
+website you visit can't read it: the page refuses other sites and
+host names, and nothing is ever fetched from the internet. If the browser
+doesn't open, `burnout dashboard --no-open` prints the link.
+
+**The tray icon.** While the daemon runs, a slice of burnt toast sits in
+your menu bar (macOS) or notification area (Windows, Linux). Its menu says
+whether anything is being recorded, and pauses, resumes, deletes the last
+hour or today, and opens the dashboard. It has no hide option: while the
+daemon records anything, the icon shows. If it can't show (over ssh, or a
+Linux desktop without a tray), the daemon records nothing and exits. On
+Linux the desktop needs a tray; GNOME needs the AppIndicator extension.
+
+**Your calendar (optional).** Meetings away from the screen count too if
+you add your calendar's ICS feed:
+`burnout calendar add "https://calendar.google.com/calendar/ical/…/basic.ics"`.
+In Google Calendar that is Settings, your calendar, then "Secret address
+in iCal format"; Outlook publishes one under Settings, Calendar, Shared
+calendars. A local `.ics` file works too.
+- Only meeting start and end times and busy or free are kept. Titles,
+  attendees, places and notes are dropped as the feed is read.
+- The URL is a key to your calendar, so it stays in your OS keystore, and
+  it is fetched over HTTPS about every 3 hours. This is the only network
+  call burnout makes.
+- `burnout calendar status` shows the last sync, and
+  `burnout calendar remove [--forget]` stops it.
+- This adds back-to-back and after-hours meetings to what the strain score
+  weighs.
+
+**Settings** live in one file, `config.toml` (`burnout config path` shows
+where). `burnout config get` shows them all with comments, and
+`burnout config set|add|remove|unset KEY …` changes one; a running
+daemon picks changes up within a few seconds. You can also edit the file
+and check it with `burnout config validate`. A file with a typo or an
+unknown key is rejected, never half-applied: the daemon keeps its current
+settings, and won't start on it.
+- `burnout config set privacy.private_hours "Mon-Fri 19:00-08:00" "Sat,Sun"`:
+  nothing is recorded at those times, as if paused.
+- `burnout config add privacy.exclude_apps com.spotify.client`: that
+  app's time counts, under `private`, without its name. Password
+  managers, finance apps, crypto wallets and a few health apps are always
+  private.
+- `burnout config set privacy.aggregate_only true`: keep only time per
+  category (code, comms, browser, …), with no app names or per-window
+  rows. Days recorded before you turned it on are reduced overnight.
+- `burnout config set retention.minutes_days 30`: keep less. Every
+  retention period can be lowered (not raised); the nightly clean-up
+  applies it.
+
+Minutes appear in `status` after a minute or two of use. Time you spend
+reading without touching anything shows up once you next type, scroll or
+move the pointer (up to 8 minutes later), because only then is it clear
+you were there.
 
 **5. Things worth trying.**
 
-- Work across two monitors for a day and compare `status` with your own
-  sense of where your attention went; Phase 0 aims to be within about 10%.
+- **Measure a day.** Keep a rough log of what you do (meetings, reading,
+  coding, breaks, with times), then compare it with `burnout timeline`.
+  Phase 0 aims to be within about 10%. Note where they disagree.
+- **A meeting.** During a Google Meet, Zoom or Slack huddle, run
+  `burnout doctor`: "right now" should say you're in a call, and the
+  meeting should count even while you only listen. Run it again while
+  muted: calls are found from the microphone being in use, so this checks
+  your call app keeps it open. If it says "no call or video detected",
+  please report which app and browser you used, and whether you were muted.
+- **Reading.** Read an article for a few minutes without scrolling, then
+  scroll or type: the reading time should appear. Walk away and let the
+  screen lock instead: it shouldn't.
+- **Video.** Watch a video in a visible window without touching anything:
+  it should count.
 - Give Claude Code a task, switch to another window while it works, then
   come back and read its output. Reading time should count as yours, and
   the agent's working time as the agent's.
@@ -97,8 +239,8 @@ folder. Deleting it also deletes `hook-backups/`, the copies of the files
 `install-hooks` changed; copy that folder out first if you want to keep them.
 
 ```sh
-~/.local/bin/burnout uninstall-hooks   # removes exactly what install-hooks added
-# stop the daemon with Ctrl-C in its tab, then:
+~/.local/bin/burnout uninstall-hooks     # removes exactly what install-hooks added
+~/.local/bin/burnout service uninstall   # stops the daemon and removes the service
 rm -rf ~/Library/Application\ Support/burnout
 security delete-generic-password -s burnout -a hmac   # if the keychain was used
 rm ~/.local/bin/burnout
@@ -106,9 +248,10 @@ rm ~/.local/bin/burnout
 
 **Stopping things.**
 
-- The daemon: press Ctrl-C in its tab. If you've lost the tab, run
-  `pkill -INT -x burnout` from any terminal. Either way it saves what it
-  has and exits cleanly.
+- The daemon: `burnout service uninstall` stops it for good;
+  `pkill -INT -x burnout` stops it until the next login. If you run it in
+  a terminal instead, press Ctrl-C. Either way it saves what it has and
+  exits cleanly.
 - A stuck test run: press Ctrl-C. If it ignores that, run
   `pkill -f 'go-build.*/(burnout|shell)\.test'` from another tab; the pattern
   matches only this project's tests that start a shell, not other Go test
@@ -116,30 +259,36 @@ rm ~/.local/bin/burnout
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
-**Preview limits.** The daemon stops when its tab closes and does not start
-at login, and logs go to the terminal. Phase 0 needs
-no macOS privacy permissions, because window titles and input counts are
-off.
+**Preview limits.** There is no installer yet, and the
+background service is macOS and Linux only (on Windows, run `burnout
+daemon` in a terminal). Phase 0 needs no macOS privacy permissions,
+because window titles and input counts are off. Call and video detection
+is macOS-only for now.
 
 ### Windows and Linux
 
-Steps 2–5 are the same as on macOS. Building and removing differ:
+Steps 2–5 are the same as on macOS, except as noted below. Building and removing differ:
 
 - **Linux:** there is no desktop collector yet, so only shell and Claude
-  Code hooks are recorded. Build as on macOS without `xcode-select`. To
-  remove everything:
+  Code hooks are recorded. Build as on macOS without `xcode-select`.
+  The background service is a systemd user unit. Its log is
+  `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
+  burnout.service` shows only startup errors and crashes. To remove
+  everything:
 
   ```sh
   ~/.local/bin/burnout uninstall-hooks
-  # stop the daemon with Ctrl-C, then:
+  ~/.local/bin/burnout service uninstall
   rm -rf ~/.local/share/burnout ~/.config/burnout   # data (incl. hook-backups/) and config
   secret-tool clear service burnout username hmac    # if a keyring was used
   rm ~/.local/bin/burnout
   ```
 
 - **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
-  install hooks with `burnout install-hooks --zsh=false`. Stop the daemon
-  with Ctrl-C in its window (`pkill` and `pgrep` don't exist on Windows).
+  install hooks with `burnout install-hooks --zsh=false` (Git Bash works
+  with `--bash`). There is no
+  background service on Windows yet: run `burnout daemon` in a terminal and
+  stop it with Ctrl-C (`pkill` and `pgrep` don't exist on Windows).
   To remove everything, in Command Prompt:
 
   ```bat
@@ -167,6 +316,8 @@ Phase 0 (spike). Design docs:
   - [0005 packaging via GitHub Releases](docs/adr/0005-packaging-and-distribution.md)
   - [0006 Laya/Jev for classification](docs/adr/0006-decision-model-for-classification.md)
   - [0007 data protection at rest](docs/adr/0007-data-protection-at-rest.md)
+  - [0008 deciding idle stretches after they end](docs/adr/0008-retroactive-idle-resolution.md)
+  - [0009 deferring the Laya spike to Phase 2](docs/adr/0009-defer-laya-spike.md)
 - [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md):
   findings and how v0.2 resolves them.
 

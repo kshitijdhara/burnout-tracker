@@ -2,8 +2,10 @@ package claude
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -86,6 +88,9 @@ func FuzzParsePayload(f *testing.F) {
 	f.Add([]byte(`{"session_id":"s","prompt":"` + payloadCanary + `","hook_event_name":"Stop","cwd":"/x"}`))
 	f.Add([]byte(`{"tool_input":{"a":["` + payloadCanary + `",{"b":"\"` + payloadCanary + `"}]},"tool_name":"Bash"}`))
 	f.Add([]byte(`{"x":"\u0041` + payloadCanary + `\\"}`))
+	// Kept legitimately: a comma inside the value, an escaped key.
+	f.Add([]byte(`{"session_id":"0,0000` + payloadCanary + `"}`))
+	f.Add([]byte(`{"session\u005fid":"` + payloadCanary + `"}`))
 	f.Fuzz(func(t *testing.T, in []byte) {
 		p, err := ParsePayload(bytes.NewReader(in))
 		if err != nil {
@@ -102,22 +107,36 @@ func FuzzParsePayload(f *testing.F) {
 	})
 }
 
-// allowlistedHolds reports whether payloadCanary appears right after an
-// allowlisted key in the input (the only way it may legitimately be kept).
+// allowlistedHolds reports whether payloadCanary is in the string value of
+// an allowlisted key anywhere in the input (the only way it may
+// legitimately be kept). Keys and values are decoded, so escapes and
+// commas inside values don't fool it; matching nested keys too only makes
+// it more lenient.
 func allowlistedHolds(in []byte, payloadCanary string) bool {
 	s := string(in)
-	for _, k := range []string{`"session_id"`, `"hook_event_name"`, `"tool_name"`, `"cwd"`} {
-		for i := strings.Index(s, k); i >= 0; {
-			rest := s[i+len(k):]
-			if j := strings.Index(rest, payloadCanary); j >= 0 && !strings.ContainsAny(rest[:j], ",{}[]") {
-				return true
-			}
-			n := strings.Index(rest, k)
-			if n < 0 {
-				break
-			}
-			i += len(k) + n
+	decode := func(from string) (string, int, bool) {
+		d := json.NewDecoder(strings.NewReader(from))
+		var v string
+		if d.Decode(&v) != nil {
+			return "", 0, false
 		}
+		return v, int(d.InputOffset()), true
+	}
+	for i := strings.IndexByte(s, '"'); i >= 0; {
+		key, n, ok := decode(s[i:])
+		if ok && slices.Contains([]string{"session_id", "hook_event_name", "tool_name", "cwd"}, key) {
+			rest := strings.TrimLeft(s[i+n:], " \t\r\n")
+			if rest, ok := strings.CutPrefix(rest, ":"); ok {
+				if v, _, ok := decode(rest); ok && strings.Contains(v, payloadCanary) {
+					return true
+				}
+			}
+		}
+		j := strings.IndexByte(s[i+1:], '"')
+		if j < 0 {
+			break
+		}
+		i += 1 + j
 	}
 	return false
 }

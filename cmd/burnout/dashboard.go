@@ -1,0 +1,340 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"maps"
+	"os"
+	"os/exec"
+	"runtime"
+	"slices"
+	"sort"
+	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/dashboard"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
+	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/config"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/review"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+)
+
+// dashboardDays is how much history the overview shows.
+const dashboardDays = 90
+
+// runDashboard serves the local dashboard until interrupted and opens it
+// in the browser with a one-time link (privacy & security §8.2).
+func runDashboard(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
+	noOpen := fs.Bool("no-open", false, "print the one-time link instead of opening the browser")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		return err
+	}
+	store, err := sqlite.OpenReadOnly(ctx, dataDir)
+	if errors.Is(err, sqlite.ErrNoDatabase) {
+		return errors.New("nothing recorded yet: run `burnout setup`, then `burnout service install`")
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	srv, err := dashboard.Listen(dashSource{store: store, dataDir: dataDir}, log)
+	if err != nil {
+		return err
+	}
+	link := srv.LaunchURL()
+	opened := false
+	if !*noOpen {
+		opened = openBrowser(link) == nil
+	}
+	if opened {
+		fmt.Println("The dashboard is open in your browser.")
+	} else {
+		fmt.Printf("Open this one-time link within %d seconds:\n  %s\n", int(dashboard.TokenTTL.Seconds()), link)
+	}
+	fmt.Println("It shows data from this device only and stops when you press Ctrl-C.")
+	return srv.Serve(ctx)
+}
+
+// openBrowser opens url in the default browser. The URL is ours: a
+// loopback address and a random token, no user input.
+func openBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("/usr/bin/open", url) //nolint:gosec // see above
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url) //nolint:gosec // see above
+	default:
+		cmd = exec.Command("xdg-open", url) //nolint:gosec // see above
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }() // the daemon opens it too, and must reap it
+	return nil
+}
+
+// collected is what is and isn't collected, for the Privacy page.
+var collected = []string{
+	"Which apps and windows hold your attention, per minute. Window titles are not collected.",
+	"Whether you are present: idle time, screen lock, calls and visible video.",
+	"Shell commands: the command name and a known subcommand only, never arguments, plus exit code, duration and a keyed hash of the project.",
+	"Claude Code session timing: when it works, waits for you and stops. Never your prompts or its responses.",
+	"Calendar meetings, if you added a feed: start and end times only, never titles, attendees or places.",
+	"Check-in answers and annotations you enter.",
+	"Nothing leaves this device. There is no server and no telemetry.",
+}
+
+// dashSource reads the dashboard's views from the database, read-only,
+// with the same code as status, review and privacy.
+type dashSource struct {
+	store   *sqlite.Store
+	dataDir string
+}
+
+// config is the current config; an invalid file gives the defaults and a
+// notice.
+func (d dashSource) config() (config.Config, []string) {
+	c, _, err := loadConfig()
+	if err != nil {
+		return config.Default(), []string{"Your config file is invalid, so the default profile is shown. Run `burnout config validate`."}
+	}
+	return c, nil
+}
+
+func (d dashSource) Overview(ctx context.Context) (dashboard.Overview, error) {
+	now := time.Now()
+	cfg, notices := d.config()
+	opts := scoreOptions(cfg)
+	today := model.LogicalDay(now, opts.Rollover)
+	sc, err := app.ScoreDays(ctx, d.store, now, opts)
+	if err != nil {
+		return dashboard.Overview{}, err
+	}
+	t, _ := time.Parse(time.DateOnly, today)
+	from := t.AddDate(0, 0, -dashboardDays).Format(time.DateOnly)
+	notes, err := d.store.Annotations(ctx, from, today)
+	if err != nil {
+		return dashboard.Overview{}, err
+	}
+	o := dashboard.Overview{
+		Today:   today,
+		Profile: fmt.Sprintf("%s, core hours %s", cfg.Profile.Role, cfg.Profile.CoreHours),
+		Days:    []dashboard.DayScore{},
+		Notices: append(notices, d.notices(ctx, cfg, now)...),
+	}
+	for _, s := range sc.Scores {
+		if s.Date >= from {
+			o.Days = append(o.Days, dayScore(s, notes))
+		}
+	}
+	if n := len(sc.Scores); n > 0 {
+		latest := dayScore(sc.Scores[n-1], notes)
+		o.Latest = &latest
+		if !slices.ContainsFunc(sc.Scores, func(s strain.Score) bool { return s.Status == strain.StatusOK }) {
+			o.Calibrating = &dashboard.Calibration{UsableDays: sc.Scores[n-1].UsableDays, Needed: strain.DefaultParams().CalibrationDays}
+		}
+	}
+	return o, nil
+}
+
+// notices are what the user should know now.
+func (d dashSource) notices(ctx context.Context, cfg config.Config, now time.Time) []string {
+	var out []string
+	if paused, p := control.PauseState(d.dataDir, now); paused {
+		out = append(out, "Recording is paused "+describePause(p, now)+". `burnout resume` starts it again.")
+	} else if w, ok := privateNow(cfg, now); ok {
+		out = append(out, "Private hours now ("+w+"): nothing is being recorded.")
+	}
+	if !daemonAnswers(ctx) {
+		out = append(out, "The daemon isn't running, so nothing new is recorded. `burnout service install` starts it at login.")
+	}
+	if state, _, _ := fde.Status(ctx, d.dataDir); state == fde.Disabled {
+		out = append(out, "Disk encryption is off: your data is unprotected if this device is lost or stolen. Turn on FileVault, BitLocker or LUKS.")
+	}
+	return out
+}
+
+func dayScore(s strain.Score, notes []annotation.Annotation) dashboard.DayScore {
+	d := dashboard.DayScore{Date: s.Date, Status: string(s.Status), Reason: s.Reason}
+	if s.Status == strain.StatusOK {
+		v := s.Strain
+		d.Strain, d.Band = &v, strainBand(v)
+		for _, dr := range s.Drivers {
+			d.Drivers = append(d.Drivers, dr.Text())
+		}
+	}
+	for _, g := range s.Guardrails {
+		d.Guardrails = append(d.Guardrails, g.Text)
+	}
+	for _, a := range notes {
+		if a.Covers(s.Date) {
+			d.Marked = describeAnnotation(a)
+			break
+		}
+	}
+	return d
+}
+
+func (d dashSource) Day(ctx context.Context, date string) (dashboard.Day, error) {
+	if date == "" {
+		date = model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+	}
+	sum, err := d.store.DaySummary(ctx, date)
+	if err != nil {
+		return dashboard.Day{}, err
+	}
+	in, err := d.store.DayInput(ctx, date)
+	if err != nil {
+		return dashboard.Day{}, err
+	}
+	out := dashboard.Day{
+		Date: date, Unattended: sum.UnattributedSeconds,
+		Commands: sum.ShellCommands, Failures: sum.ShellFailures, Agents: sum.AgentSessions,
+		Categories: named(sum.CategorySeconds), AgentStates: named(sum.AgentStateSeconds), HumanStates: named(sum.HumanStateSeconds),
+		TopApps: []dashboard.Named{}, TopCommands: []dashboard.Named{}, Meetings: []dashboard.Meeting{}, Timeline: []dashboard.SlotEntry{},
+	}
+	for _, c := range out.Categories {
+		out.AttendedS += c.Value
+	}
+	for _, a := range sum.TopApps {
+		out.TopApps = append(out.TopApps, dashboard.Named{Name: printable(a.Name), Value: a.Seconds})
+	}
+	for _, c := range sum.TopCommands {
+		out.TopCommands = append(out.TopCommands, dashboard.Named{Name: printable(c.Name), Value: float64(c.Count)})
+	}
+	for _, b := range in.Busy {
+		out.Meetings = append(out.Meetings, dashboard.Meeting{
+			Start: b.Start.Format("15:04"), End: b.End.Format("15:04"), Tentative: b.State == "tentative",
+		})
+	}
+	// Ten-minute slots, each labelled with the category that held most
+	// attention in it.
+	type slot struct {
+		start time.Time
+		cats  map[string]float64
+	}
+	var slots []*slot
+	for _, m := range in.Minutes {
+		start := m.At.Truncate(10 * time.Minute)
+		if n := len(slots); n == 0 || !slots[n-1].start.Equal(start) {
+			slots = append(slots, &slot{start: start, cats: map[string]float64{}})
+		}
+		slots[len(slots)-1].cats[string(m.Category)] += m.AttendedS
+	}
+	for _, s := range slots {
+		best, total := "", 0.0
+		for _, c := range slices.Sorted(maps.Keys(s.cats)) {
+			total += s.cats[c]
+			if best == "" || s.cats[c] > s.cats[best] {
+				best = c
+			}
+		}
+		if total > 0 {
+			out.Timeline = append(out.Timeline, dashboard.SlotEntry{Start: s.start.Format("15:04"), Category: best, AttendedS: total})
+		}
+	}
+	return out, nil
+}
+
+// named turns seconds by name into a list, largest first.
+func named[K ~string](m map[K]float64) []dashboard.Named {
+	out := make([]dashboard.Named, 0, len(m))
+	for k, v := range m {
+		if v > 0 {
+			out = append(out, dashboard.Named{Name: string(k), Value: v})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Value != out[j].Value {
+			return out[i].Value > out[j].Value
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+func (d dashSource) Week(ctx context.Context) (dashboard.Week, error) {
+	now := time.Now()
+	cfg, _ := d.config()
+	opts := scoreOptions(cfg)
+	sc, err := app.ScoreDays(ctx, d.store, now, opts)
+	if err != nil {
+		return dashboard.Week{}, err
+	}
+	records, err := d.store.Checkins(ctx, now.AddDate(0, -3, 0))
+	if err != nil {
+		return dashboard.Week{}, err
+	}
+	today := model.LogicalDay(now, opts.Rollover)
+	t, _ := time.Parse(time.DateOnly, today)
+	notes, err := d.store.Annotations(ctx, t.AddDate(0, 0, -7).Format(time.DateOnly), today)
+	if err != nil {
+		return dashboard.Week{}, err
+	}
+	w := review.Build(sc.Scores, records, notes, today)
+	due, _ := review.WeeklyDue(records, now)
+	out := dashboard.Week{
+		From: w.From, To: w.To, Calibrating: w.Calibrating, Scored: w.Scored, CheckinDue: due,
+		Drivers: []dashboard.Count{}, Limits: []dashboard.Count{}, Checkins: []dashboard.Check{},
+		Marked: []string{}, Suggestions: w.Suggestions,
+	}
+	if out.Suggestions == nil {
+		out.Suggestions = []string{}
+	}
+	if !w.Calibrating {
+		avg := w.Average
+		out.Average = &avg
+		out.Peak = &dashboard.Peak{Date: w.Peak.Date, Strain: w.Peak.Strain, Band: strainBand(w.Peak.Strain)}
+		if w.PrevScored > 0 {
+			prev := w.PrevAverage
+			out.PrevAverage = &prev
+		}
+	}
+	for _, r := range w.Drivers[:min(5, len(w.Drivers))] {
+		out.Drivers = append(out.Drivers, dashboard.Count{Label: r.Label, Days: r.Days})
+	}
+	for _, g := range w.Guardrails {
+		out.Limits = append(out.Limits, dashboard.Count{Label: g.Label, Days: g.Days})
+	}
+	for _, id := range []string{checkin.CBIWorkID, checkin.CBIPersonalID} {
+		r, ok := w.Checkin[id]
+		if !ok {
+			continue
+		}
+		inst, _ := checkin.ByID(id)
+		c := dashboard.Check{Name: inst.Name, Score: r.Score, Band: string(checkin.BandOf(r.Score))}
+		if p, ok := w.PrevCheckin[id]; ok {
+			prev := p.Score
+			c.Previous = &prev
+		}
+		out.Checkins = append(out.Checkins, c)
+	}
+	for _, a := range w.Annotations {
+		out.Marked = append(out.Marked, describeAnnotation(a))
+	}
+	return out, nil
+}
+
+func (d dashSource) Privacy(ctx context.Context) (dashboard.Privacy, error) {
+	return dashboard.Privacy{Collected: collected, Settings: privacySettings(ctx, d.dataDir)}, nil
+}

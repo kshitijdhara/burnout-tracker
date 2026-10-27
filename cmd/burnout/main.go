@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata" // calendar feeds name time zones; Windows has no zone database
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -25,8 +26,21 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"setup", "interactive first-run: review what is collected and consent", runSetup},
-		{"daemon", "run the collector daemon (normally started by the OS service)", runDaemon},
+		{"daemon", "run the collector daemon in this terminal (the service runs it in the background)", runDaemon},
+		{"service", "run the daemon in the background from login: service install|uninstall|status", runService},
 		{"status", "show today's summary", runStatus},
+		{"dashboard", "open the local dashboard in your browser (data stays on this device)", runDashboard},
+		{"timeline", "show a day minute by minute: timeline [YYYY-MM-DD]", runTimeline},
+		{"pause", "stop recording for a while: pause [1h | tomorrow] (default: until resume)", runPause},
+		{"resume", "start recording again after a pause", runResume},
+		{"forget", "delete recorded data: forget --last 1h | --today | --since DATE | --all", runForget},
+		{"annotate", "mark days: annotate vacation FROM [TO] [--note TEXT] | list | remove ID", runAnnotate},
+		{"privacy", "what is collected, your current settings and your controls", runPrivacy},
+		{"config", "settings: config get|set|add|remove|unset|validate|path", runConfig},
+		{"calendar", "meetings from your calendar feed: calendar add URL|FILE | sync | status | remove", runCalendar},
+		{"export", "write your data out as JSON or CSV: export --out FILE [--format csv] [--since DATE]", runExport},
+		{"checkin", "answer the weekly check-in (or --daily for two quick questions)", runCheckin},
+		{"review", "the weekly review: this week against the last, and what to try", runReview},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
 		{"install-hooks", "install shell (zsh) and Claude Code hooks", runInstallHooks},
 		{"uninstall-hooks", "remove shell and Claude Code hooks", runUninstallHooks},

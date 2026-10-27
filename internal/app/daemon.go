@@ -10,14 +10,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/timeline"
 )
 
@@ -45,7 +48,7 @@ type Config struct {
 	Rollover      time.Duration // logical-day rollover, 4 h
 	Attention     attention.Params
 	Timeline      timeline.Params
-	AggregateOnly bool // drop app ids from rollups (privacy & security §5.1)
+	Settings      Settings // the user's settings at start; Deps.Reload changes them
 
 	// Bounds on memory while the store is unavailable.
 	MaxPending        int // unflushed intervals
@@ -62,6 +65,9 @@ type Config struct {
 	// (system design §4.1: sampling pauses when locked). Keep
 	// IdleStride × TickInterval below the attention engine's MaxGap.
 	IdleStride int
+
+	// ControlInterval is how often pause and forget requests are checked.
+	ControlInterval time.Duration // also how often settings and private hours are checked
 
 	// Maintenance (retention, vacuum, recovery copies) runs on its own
 	// goroutine, first MaintenanceDelay after start, then every
@@ -88,6 +94,7 @@ func DefaultConfig() Config {
 
 		IdleStride: 4,
 
+		ControlInterval:     time.Second,
 		MaintenanceDelay:    2 * time.Minute,
 		MaintenanceInterval: 24 * time.Hour,
 	}
@@ -105,17 +112,43 @@ type Deps struct {
 	// mount must not block the caller indefinitely).
 	ProjectRoot func(dir string) string
 	Procs       ports.ProcessInfo
-	Rules       *classify.Rules
 	AgentKind   AgentKind
 	Log         *slog.Logger
 
 	// Optional.
-	Maintain    func(ctx context.Context, now time.Time) error // runs on its own goroutine
+	Maintain func(ctx context.Context, now time.Time) error // runs on its own goroutine
+	// Controls carries the user's pause and forget requests; Forget deletes
+	// stored data from a time on (privacy & security §5.1). Both or neither.
+	Controls    Controls
+	Forget      func(ctx context.Context, since time.Time) error
 	LoadHealth  func(ctx context.Context, logicalDay string) (string, error)
 	IngestStats func() map[string]uint64
-	// Indicator gates all recording on a visible tray icon. Required: Run
-	// refuses to start without one (AC-1).
-	Indicator ports.Indicator
+	// Reload returns the user's settings when they have changed since the
+	// last call. It is called every ControlInterval on the loop.
+	Reload func() (Settings, bool)
+}
+
+// Settings are the user's privacy settings the loop applies (privacy &
+// security §5.1). They can change while the daemon runs.
+type Settings struct {
+	// PrivateHours are when nothing is recorded, as if paused.
+	PrivateHours schedule.Schedule
+	// Exclusions are app ids recorded as private, like the sensitive-apps
+	// denylist.
+	Exclusions []string
+	// AggregateOnly keeps one row per category per minute, without app ids
+	// or per-window keys.
+	AggregateOnly bool
+}
+
+// Controls are the user's requests to the daemon, checked every
+// ControlInterval.
+type Controls interface {
+	// Paused reports whether collection is paused at now.
+	Paused(now time.Time) bool
+	// TakeForget returns a pending request to forget everything from since
+	// on, once, and done to report how it went.
+	TakeForget() (since time.Time, done func(error), ok bool)
 }
 
 // Daemon is the main loop. Create it with New, feed it with Submit, and
@@ -123,12 +156,17 @@ type Deps struct {
 type Daemon struct {
 	cfg  Config
 	deps Deps
+	// settings and rules change only on the loop (Deps.Reload).
+	settings Settings
+	rules    *classify.Rules
 
 	inbox    chan event
 	counters counters // updated by Submit on ingest goroutines
 
 	// Loop-owned state.
 	engine           *attention.Engine
+	resolver         attention.Resolver[tickRecord]
+	lastHeld         []heldWindow // reused while windows don't change
 	rollups          *attention.Rollups
 	tracker          *timeline.Tracker
 	windows          *sessionWindows
@@ -138,6 +176,42 @@ type Daemon struct {
 	lastTopology     string
 	locked           bool
 	ticks            int
+	// paused is read by Submit on ingest goroutines.
+	paused atomic.Bool
+	// pausedFor says why, for the log: "pause" or "private hours".
+	pausedFor string
+}
+
+// tickRecord is what consuming a tick's result needs besides the result,
+// kept while the resolver holds the tick: compact window facts (no titles,
+// bounds or pointer state) and the agent context at sampling time.
+type tickRecord struct {
+	windows []heldWindow
+	ctx     timeline.TickContext
+}
+
+// heldWindow is what recording a tick needs from one window.
+type heldWindow struct {
+	id      model.WindowID
+	appID   string
+	cat     model.Category
+	monitor int
+	visible float64
+	focused bool
+}
+
+// heldWindows extracts the windows of snap, reusing the previous slice when
+// nothing changed (the usual case while the user is idle).
+func (d *Daemon) heldWindows(snap model.Snapshot, cats map[model.WindowID]model.Category) []heldWindow {
+	ws := make([]heldWindow, len(snap.Windows))
+	for i, w := range snap.Windows {
+		ws[i] = heldWindow{id: w.ID, appID: w.AppID, cat: cats[w.ID], monitor: w.Monitor, visible: w.Visible, focused: w.Focused}
+	}
+	if slices.Equal(ws, d.lastHeld) {
+		return d.lastHeld
+	}
+	d.lastHeld = ws
+	return ws
 }
 
 // event is a validated, enriched hook message, ready for the loop.
@@ -150,26 +224,21 @@ type event struct {
 func New(cfg Config, deps Deps) *Daemon {
 	cfg.Timeline.Rollover = cfg.Rollover
 	return &Daemon{
-		cfg:     cfg,
-		deps:    deps,
-		inbox:   make(chan event, cfg.QueueSize),
-		engine:  attention.New(cfg.Attention),
-		rollups: attention.NewRollups(cfg.Rollover),
-		tracker: timeline.New(cfg.Timeline),
-		windows: newSessionWindows(deps.Procs),
-		health:  newHealth(),
+		cfg:      cfg,
+		deps:     deps,
+		settings: cfg.Settings,
+		rules:    classify.New(cfg.Settings.Exclusions, nil),
+		inbox:    make(chan event, cfg.QueueSize),
+		engine:   attention.New(cfg.Attention),
+		rollups:  attention.NewRollups(cfg.Rollover),
+		tracker:  timeline.New(cfg.Timeline),
+		windows:  newSessionWindows(deps.Procs),
+		health:   newHealth(),
 	}
 }
 
-// ErrNoIndicator means there is no tray icon to show while collecting, so
-// the daemon must not run (privacy & security §5.2, AC-1).
-var ErrNoIndicator = errors.New("app: no collecting indicator (tray icon) available")
-
 // Run blocks until ctx is cancelled, then flushes everything it holds.
 func (d *Daemon) Run(ctx context.Context) error {
-	if d.deps.Indicator == nil {
-		return ErrNoIndicator
-	}
 	d.seedHealth(ctx)
 
 	var wg sync.WaitGroup
@@ -188,15 +257,25 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if d.deps.Collector != nil {
 		ticks = tick.C
 	}
+	controls := time.NewTicker(d.cfg.ControlInterval)
+	defer controls.Stop()
+	d.checkControls(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return d.shutdown()
 		case <-ticks:
-			d.onTick(ctx)
+			if !d.paused.Load() {
+				d.onTick(ctx)
+			}
 		case ev := <-d.inbox:
 			d.apply(ev)
+		case <-controls.C:
+			d.checkControls(ctx)
 		case <-flush.C:
+			if d.paused.Load() {
+				continue // everything was written when the pause began
+			}
 			now := d.deps.Clock.Now()
 			// Timeouts run here, not on collector ticks, so they also fire
 			// on platforms without a collector.
@@ -206,13 +285,83 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 }
 
+// checkControls applies changed settings, private hours and the user's
+// pause and forget requests.
+func (d *Daemon) checkControls(ctx context.Context) {
+	now := d.deps.Clock.Now()
+	d.reload(ctx, now)
+	reason := ""
+	switch {
+	case d.deps.Controls != nil && d.deps.Controls.Paused(now):
+		reason = "pause"
+	case d.settings.PrivateHours.Contains(now):
+		reason = "private hours"
+	}
+	switch paused := reason != ""; {
+	case paused && !d.paused.Load():
+		// Close and write everything open, then stop: collectors aren't
+		// sampled and hook events are discarded until the pause ends.
+		d.settle(ctx, now)
+		d.paused.Store(true)
+		d.pausedFor = reason
+		d.deps.Log.Info("collection paused", "for", reason)
+	case !paused && d.paused.Load():
+		// Agent sessions stayed open through the pause; their segments
+		// restart now, and the paused span they would claim is dropped.
+		d.tracker.Flush(now)
+		d.tracker.Drain()
+		d.paused.Store(false)
+		d.deps.Log.Info("collection resumed", "after", d.pausedFor)
+		d.pausedFor = ""
+	}
+	if d.deps.Controls == nil {
+		return
+	}
+	since, done, ok := d.deps.Controls.TakeForget()
+	if !ok {
+		return
+	}
+	// Write out everything held in memory first, so nothing from before
+	// the request can reach the store after the deletion.
+	d.settle(ctx, now)
+	err := d.deps.Forget(ctx, since)
+	if err == nil {
+		d.health = newHealth() // its counters covered the forgotten time
+	}
+	d.deps.Log.Info("forgot recorded data", "ok", err == nil)
+	done(err)
+}
+
+// reload applies changed settings. Everything recorded under the old
+// settings is written out first, so a new exclusion or aggregate-only mode
+// never mixes with minutes recorded before it.
+func (d *Daemon) reload(ctx context.Context, now time.Time) {
+	if d.deps.Reload == nil {
+		return
+	}
+	s, changed := d.deps.Reload()
+	if !changed {
+		return
+	}
+	if !d.paused.Load() {
+		d.settle(ctx, now)
+	}
+	d.settings = s
+	d.rules = classify.New(s.Exclusions, nil)
+	d.deps.Log.Info("settings changed", "private_hours", len(s.PrivateHours), "exclusions", len(s.Exclusions), "aggregate_only", s.AggregateOnly)
+}
+
+// settle closes every open span and held tick and writes them out, as at
+// shutdown, without stopping.
+func (d *Daemon) settle(ctx context.Context, now time.Time) {
+	d.consume(d.resolver.Flush())
+	d.tracker.Flush(now)
+	d.flush(ctx, now, now.Add(time.Minute))
+}
+
 func (d *Daemon) onTick(ctx context.Context) {
 	d.ticks++
 	if d.locked && d.ticks%d.cfg.IdleStride != 0 {
-		return
-	}
-	if !d.recording() {
-		d.health.noIndicatorTicks++
 		return
 	}
 	snap, err := d.deps.Collector.Snapshot(ctx)
@@ -221,10 +370,10 @@ func (d *Daemon) onTick(ctx context.Context) {
 		d.deps.Log.Debug("collector snapshot failed", "err", err)
 		return
 	}
-	d.locked = snap.Locked
+	d.locked = snap.Locked || snap.DisplayAsleep
 	cats := make(map[model.WindowID]model.Category, len(snap.Windows))
 	for _, w := range snap.Windows {
-		cats[w.ID] = d.deps.Rules.App(w.AppID)
+		cats[w.ID] = d.rules.App(w.AppID)
 	}
 	sessions := d.windows.resolve(snap, d.tracker.Sessions())
 	res := d.engine.Tick(attention.Input{
@@ -232,10 +381,26 @@ func (d *Daemon) onTick(ctx context.Context) {
 		Categories:  cats,
 		FreshOutput: d.tracker.FreshOutput(snap.At, sessions),
 	})
-	d.rollups.Add(res, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
-	d.tracker.OnTick(res, sessions)
-	d.health.observe(res)
+	// Idle ticks are held until the stretch ends and its presence is known.
+	rec := tickRecord{windows: d.heldWindows(snap, cats), ctx: d.tracker.Context(sessions)}
+	d.consume(d.resolver.Push(res, rec))
 	d.recordTopology(ctx, snap)
+}
+
+// consume records ticks whose presence is final, in order.
+func (d *Daemon) consume(ticks []attention.Held[tickRecord]) {
+	for _, t := range ticks {
+		rec := t.Payload
+		snap := model.Snapshot{At: t.Result.At, Windows: make([]model.Window, len(rec.windows))}
+		cats := make(map[model.WindowID]model.Category, len(rec.windows))
+		for i, w := range rec.windows {
+			snap.Windows[i] = model.Window{ID: w.id, AppID: w.appID, Monitor: w.monitor, Visible: w.visible, Focused: w.focused}
+			cats[w.id] = w.cat
+		}
+		d.rollups.Add(t.Result, snap, func(w model.Window) attention.Identity { return d.identify(w, cats[w.ID]) })
+		d.tracker.OnTick(t.Result, rec.ctx)
+		d.health.observe(t.Result, model.LogicalDay(t.Result.At, d.cfg.Rollover))
+	}
 }
 
 func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity {
@@ -244,12 +409,15 @@ func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity
 		AppID:    w.AppID,
 		Category: cat,
 	}
-	if cat == model.CategoryPrivate || d.cfg.AggregateOnly {
-		id.AppID = ""
-	}
-	if cat == model.CategoryPrivate {
+	switch {
+	case cat == model.CategoryPrivate:
 		// Private windows share one identity so no per-window trail exists.
+		id.AppID = ""
 		id.Key = d.deps.Hasher.Key("window", "private")
+	case d.settings.AggregateOnly:
+		// One row per category per minute: no app, no window.
+		id.AppID = ""
+		id.Key = model.CategoryWindowKey(cat)
 	}
 	return id
 }
@@ -364,6 +532,7 @@ func (d *Daemon) maintenanceLoop(ctx context.Context) {
 
 func (d *Daemon) shutdown() error {
 	now := d.deps.Clock.Now()
+	d.consume(d.resolver.Flush()) // an unfinished idle stretch keeps the grace rule
 	d.tracker.Flush(now)
 	// Use a fresh context: the run context is already cancelled.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

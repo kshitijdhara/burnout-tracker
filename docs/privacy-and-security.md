@@ -74,7 +74,7 @@ user's account and protected at rest by OS full-disk encryption
 | Attention ticks (1 Hz) | Attention engine | on (in memory) | **Never persisted.** Only minute rollups are written | — | Never |
 | Input activity counts (keys, clicks, scroll) | Windows Raw Input; macOS listen-only event tap (Input Monitoring); X11 XInput2 | **opt-in** | **Never persisted.** Rolling 5 s counters in memory feed the attention engine only. Key codes are **never read** (§8.6). Without this opt-in, attention uses idle-time deltas | — | Never |
 | Idle / lock / sleep state | OS idle and session APIs | on | State-change intervals | 180 d | Never |
-| Media / call state | NowPlaying / SMTC / MPRIS; mic-in-use indicator | on | Folded into presence intervals as the reason presence was held (`input` / `video` / `call`). No track, title, URL or audio content | 180 d | Never |
+| Media / call state | macOS: which app captures audio (CoreAudio process objects), which app keeps the display awake (IOKit assertions), all without a permission. Other platforms: not yet | on | Which app is in a call or playing video is used in memory only, to hold presence and attribute attention. Persisted only as the reason presence was held (`input` / `video` / `call`). No audio, video, track, title or URL is ever read. Cameras are not queried: on older macOS that would load third-party camera plugins into the agent | 180 d | Never |
 
 ### 3.2 Terminal
 
@@ -123,11 +123,12 @@ user's account and protected at rest by OS full-disk encryption
 
 | Field | Source | Default | Stored as | Retention | Leaves device? |
 |-------|--------|---------|-----------|-----------|----------------|
-| Logs | Agent | on | Structured `slog`, PII-free by construction (§10) | Size-capped rotation (default 3 × 10 MB) | Never |
-| Health metrics (SLIs: coverage, drops, hook delivery) | Agent | on | Counters per day | 180 d | Never |
+| Logs | Agent | on | Structured `slog`, PII-free by construction (§10); the home folder is shown as `~`. Crash output (panics, failed starts) goes to `logs/stderr.log` on macOS and the user journal on Linux | Size-capped rotation (default 3 × 10 MB); `stderr.log` rotated at 1 MB on each start; the journal follows the system's settings | Never |
+| Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed idle time) | Agent | on | Counters per day | 180 d | Never |
 | Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
 | Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |
+| Exports | `burnout export` | on demand | Plaintext JSON or CSV at a user-chosen path, owner-only; the data folder keeps only a list of export paths and times, so `forget` and `privacy` can point at them | User-managed; a path leaves the list once its file is gone | Only where the user puts it |
 | Spool (events buffered while the DB is busy) | Agent | on | Same redaction as raw events | Until flushed (minutes) | Never |
 | Raw events | Collectors / hooks | on | Only already-redacted events (classification and redaction happen before persistence) | 7 d | Never |
 
@@ -176,10 +177,14 @@ model's context.
 
 ### 4.4 ICS feeds
 
-The parser keeps only `DTSTART`, `DTEND`, `TRANSP` and `STATUS` (plus
-`RRULE`/`EXDATE` for expansion). It drops `SUMMARY`, `DESCRIPTION`,
-`LOCATION`, `ATTENDEE`, `ORGANIZER` and everything else while streaming,
-without holding the full feed in memory.
+The parser keeps only `DTSTART`, `DTEND`/`DURATION`, `TRANSP` and
+`STATUS`. For expanding repeats it also uses `RRULE`, `EXDATE`,
+`RECURRENCE-ID` and `UID`; the UID is held in memory only, to match a moved
+instance to its series, and is never stored.
+
+It drops `SUMMARY`, `DESCRIPTION`, `LOCATION`, `ATTENDEE`, `ORGANIZER` and
+everything else while streaming, without holding the full feed in memory.
+A canary test confirms none of them reach the database.
 
 ### 4.5 Identity hashing
 
@@ -206,11 +211,90 @@ The agent MUST provide:
 | **Sensitive-apps denylist** | On by default: password managers, banking, health, dating and similar apps are recorded as `private` |
 | **Delete recent** | "Delete last hour" and "Delete today", one click from the tray |
 | **Forget** | `burnout forget --since <date>` / `--all`. Also removes backups, spools, logs, caches and exports created by the app (§7.2) |
-| **Aggregate-only mode** | When a logical day closes, keep only category rollups and daily features; drop per-app/per-window detail |
+| **Aggregate-only mode** | Keep only category rollups and daily features; drop per-app/per-window detail. New minutes are recorded per category; days recorded before the mode was on are reduced at the next nightly maintenance |
 | **Retention** | Every retention period in §3 is configurable downwards |
 | **Export** | `burnout export` (JSON/CSV) with a warning that the export is plaintext |
 | **Privacy view** | `burnout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
 | **Screen-share safety** | Nudges are suppressed in Do Not Disturb / Focus mode or while a screen share is active; the dashboard has a "blur numbers" option |
+
+Phase 1 so far:
+- **Pause** is built: `burnout pause [DURATION|tomorrow]` and `resume`.
+  - The daemon checks a pause file in the data folder every second.
+  - While paused it samples nothing, discards hook events, and drops
+    the paused span from agent sessions that stay open.
+  - An unreadable pause file counts as paused.
+- **Delete recent and Forget** are built: `burnout forget --last D |
+  --today | --since DATE | --all`. A running daemon does the deleting:
+  1. It writes out what it holds in memory.
+  2. It deletes rows from then on and the derived rows of those days,
+     plus every recovery and pre-migration copy made since then.
+  3. It overwrites freed pages and truncates the WAL.
+  - Annotations, consent and hooks are kept.
+  - Logs aren't touched: they hold no activity data (§10).
+- **Privacy view** is built: `burnout privacy`.
+- **Sensitive-apps denylist** is built for desktop apps: password
+  managers, finance and tax apps, crypto wallets and a few health apps.
+  Banking, health and dating mostly happen in a browser, where only the
+  window title says what a page is; those sites are covered when opt-in
+  title classification arrives.
+- **The config file** is built (system design §3.4): `burnout config
+  get|set|add|remove|unset|validate`. It carries:
+  - **private hours** (`privacy.private_hours`): the daemon treats them
+    exactly as a pause;
+  - **exclusions** (`privacy.exclude_apps`): per app; per domain comes
+    with title classification;
+  - **aggregate-only mode** (`privacy.aggregate_only`): new minutes are
+    written as one row per category, with no app id or window key, and
+    the nightly maintenance reduces days recorded before the mode was on.
+    Terminal commands and agent sessions keep their detail: they hold
+    command names and keyed session ids, not apps or windows;
+  - **retention** (`retention.*`): each period can be lowered from its
+    default down to a floor the scoring needs, never raised.
+  - An invalid file is never half-applied. A running daemon keeps its
+    current settings, and a starting one refuses to run on defaults,
+    which could silently drop private hours or exclusions.
+- **Export** is built: `burnout export --out FILE [--format csv]
+  [--since DATE] [--until DATE]`.
+  - It reads one consistent snapshot, read-only, so the daemon keeps
+    running.
+  - It warns that the export is plaintext before writing. Files are
+    new and owner-only: it never overwrites one, and a failed export
+    leaves nothing behind.
+  - CSV text fields that a spreadsheet would run as a formula are
+    prefixed with `'`.
+  - The format is versioned (`schemas/v1/export.schema.json`).
+  - Exports hold what the database holds: app ids, command names,
+    category minutes, features, scores, check-in answers and
+    annotations. Keyed hashes stay opaque.
+  - Exports live wherever the user saved them, so `forget` can't delete
+    them. The data folder keeps a list of export paths (no contents), and
+    `forget` and `privacy` show the ones still on disk.
+- **Calendar** is built: `burnout calendar add|sync|status|remove`.
+  - The feed URL is kept in the OS keystore only. It is never in config,
+    logs, errors or the sync status file, which names only the host.
+  - The ICS fetch is the only network call so far. `doctor` and `privacy`
+    show it.
+  - `calendar.ics.enabled = false` stops it.
+  - No fetch happens while paused, and meetings in private hours are
+    dropped.
+  - Busy blocks are intervals: `forget` deletes them, and later syncs
+    never re-import meetings from before the last forget.
+  - `calendar remove --forget` deletes everything stored from the feed.
+- **Dashboard:** its Privacy page shows the same settings as
+  `burnout privacy`, from the same code. "Blur numbers" covers screen
+  sharing.
+- **The tray** is built (`internal/adapters/tray`): a menu-bar icon on
+  macOS, a notification-area icon on Windows and Linux. The daemon shows
+  it. Its menu has:
+  - a first line saying whether anything is recorded: "Recording",
+    "Paused until 15:30" or "Private hours: nothing is recorded". The icon
+    changes too;
+  - pause for an hour, until tomorrow or until resumed, and resume;
+  - "Delete the last hour" and "Delete today", one click each. They go
+    through the daemon like `burnout forget`, and the first line says
+    whether they worked;
+  - "Open dashboard" (§8.2).
+  - There is no hide or quit item (§5.2).
 
 ### 5.2 Anti-coercion requirements
 
@@ -231,6 +315,22 @@ them. These are requirements, not intentions:
    is restricted to the same OS user (§8.1).
 6. **AC-6** The README and the first-run screen MUST state that the tool is
    for self-use only and must not be used to monitor others.
+
+AC-1 in Phase 1:
+- The daemon shows the icon before it collects anything. Shell and Claude
+  Code hooks count as collectors too: if no icon can be shown, the daemon
+  records nothing and exits, and its log says why:
+  - macOS: no login session at the screen, e.g. started over ssh;
+  - Linux: the desktop has no tray (GNOME needs the AppIndicator
+    extension);
+  - Windows: the icon didn't appear within 10 seconds.
+  The background service retries every 30 s, so a tray that appears after
+  login is picked up. Hook-only use without an icon (servers, ssh, GNOME
+  without the extension) is therefore not supported.
+- The menu has no hide or quit item. On macOS the icon can't be
+  ⌘-dragged off the menu bar.
+- The end-to-end test binary, built with `-tags e2e`, skips the tray.
+  Release builds have no flag, setting or variable that does.
 
 ---
 
@@ -327,6 +427,41 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 - No CORS headers. Strict CSP (`default-src 'self'`, no inline script),
   `X-Frame-Options: DENY`, `frame-ancestors 'none'`, and a CSRF token on
   every state-changing request.
+
+Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
+- **Lifecycle:** `burnout dashboard` runs the server for as long as the
+  command runs, until Ctrl-C. The tray's "Open dashboard" starts one inside
+  the daemon on first use, which runs until the daemon stops; each click
+  opens it with a new launch token. Each server has its own port, and both
+  read the database read-only.
+- **Launch token:** 256 bits, compared in constant time, single-use, and
+  valid for 60 s.
+- **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
+  named after the port.
+  - It is not `Secure`. The server is plain HTTP on loopback, and Safari
+    refuses `Secure` cookies from `http://127.0.0.1`.
+- **Every request** must:
+  - carry an allowed `Host` (`127.0.0.1:<port>` or `localhost:<port>`);
+  - be GET or HEAD;
+  - not be marked cross-site or same-site by `Sec-Fetch-Site`. `none` (a
+    typed URL) is allowed only for the page and the launch link, never the
+    API.
+- **Responses** carry:
+  - `default-src 'none'; script-src 'self'; style-src 'self'; …;
+    frame-ancestors 'none'`;
+  - `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, `no-store`, and
+    same-origin COOP/CORP;
+  - no CORS headers.
+- **Data access:** reads only. No endpoint changes data yet, so there is
+  nothing for CSRF to forge. Endpoints that change data will carry CSRF
+  tokens.
+- **Errors:** API errors are logged to the terminal, never sent to the
+  page, since they can name paths.
+- **The page itself:**
+  - plain embedded HTML, CSS and JS: no external resources, no inline
+    script or style;
+  - data is inserted with `textContent` only, never parsed as HTML;
+  - a test enforces all of this.
 
 ### 8.3 GNOME Shell extension and KWin script
 
@@ -444,7 +579,8 @@ The APIs we use to count input are the same ones keyloggers use. So:
   `LogValue()` return `[redacted]`. Code that needs the raw value calls
   `.Reveal()`, which is greppable and flagged in review.
 - Never logged: window titles, command lines, paths, ICS URLs, keystore
-  material, check-in content.
+  material, check-in content. The app's own file locations can appear in
+  error messages, with the home folder shown as `~`.
 - `burnout doctor --bundle` builds a redacted diagnostics archive: versions,
   component compatibility, collector and permission states, SLIs, config
   with secrets removed, and the last N log lines. It **shows the user a full
@@ -490,7 +626,7 @@ The privacy guarantees above are only as good as their tests. CI MUST run:
 | Test | What it proves |
 |------|----------------|
 | **Canary test** | Secret-looking canary strings are injected into window titles, argv, cwd, Claude Code payloads (prompt, tool input), ICS fields and check-in free text. After a full trace replay, the DB file bytes, WAL, logs, exports, backups and spool are grepped. **Any hit fails the build** |
-| **ps-leak test** | While a hooked command with a canary in its arguments runs, process listings (`ps`, `/proc/*/cmdline`, Windows process command lines) contain no canary |
+| **ps-leak test** | While a hooked command with a canary in its arguments runs, process listings (`ps`, `/proc/*/cmdline`, Windows process command lines) contain no canary. `TestPSLeak` runs the real binary, daemon, zsh, bash and fish hooks, and Claude Code hook on Linux (`/proc` command lines and environments) and macOS (`ps -E`), and fails unless it saw the hook processes. Windows: not yet |
 | **Hook stdout test** | `burnout hook claude` produces zero bytes on stdout for every event type and for malformed input |
 | **Fuzzing** | Ingest parser, hook payload parser, ICS parser and the bridge protocol (`go test -fuzz`, run continuously) |
 | **Contract tests** | Recorded payloads per Claude Code version, per shell and per extension version parse correctly. The allowlisted fields are the only ones decoded |

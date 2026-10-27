@@ -181,7 +181,7 @@ func Install(o InstallOptions) error {
 	if o.SettingsPath == "" || o.Command == "" || o.BackupDir == "" || o.Now == nil {
 		return errors.New("claude: incomplete install options")
 	}
-	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), func(hooks *object) (bool, error) {
+	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), true, func(hooks *object) (bool, error) {
 		changed := false
 		for _, event := range Events(o.Version) {
 			var groups []json.RawMessage
@@ -227,7 +227,7 @@ func Uninstall(o InstallOptions) error {
 	if _, err := os.Stat(o.SettingsPath); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), func(hooks *object) (bool, error) {
+	return editSettings(o.SettingsPath, o.BackupDir, o.Now(), false, func(hooks *object) (bool, error) {
 		changed := false
 		for _, m := range append([]member(nil), hooks.members...) {
 			groups, err := decodeArray(m.val)
@@ -253,10 +253,17 @@ func Uninstall(o InstallOptions) error {
 	})
 }
 
+// emptyHooksMarker, in the backup directory, records that install found an
+// empty "hooks" object in the settings file it names, so uninstall can put
+// it back. Any other hooks object install finds is non-empty or absent, and
+// uninstall restores those without help.
+const emptyHooksMarker = "claude-settings.empty-hooks"
+
 // editSettings loads the settings file, lets edit change its "hooks"
 // object, and writes the result back (with a backup) only if edit reports a
-// change. An empty hooks object left behind by edit is removed.
-func editSettings(path, backupDir string, now time.Time, edit func(hooks *object) (bool, error)) error {
+// change. An empty hooks object left behind by an uninstall is removed,
+// unless install found it there (see emptyHooksMarker).
+func editSettings(path, backupDir string, now time.Time, install bool, edit func(hooks *object) (bool, error)) error {
 	target, err := fileedit.ResolveTarget(path)
 	if err != nil {
 		return fmt.Errorf("claude: resolve %s: %w", path, err)
@@ -282,21 +289,29 @@ func editSettings(path, backupDir string, now time.Time, edit func(hooks *object
 		return fmt.Errorf("%w: %w", ErrInvalidSettings, err)
 	}
 	hooks := &object{}
-	if raw, ok := top.get("hooks"); ok {
+	raw, hadHooks := top.get("hooks")
+	if hadHooks {
 		if hooks, err = decodeObject(raw); err != nil {
 			return fmt.Errorf("%w: hooks is not an object", ErrInvalidSettings)
 		}
 	}
+	foundEmpty := hadHooks && hooks.len() == 0
+	marker := filepath.Join(backupDir, emptyHooksMarker)
 
 	changed, err := edit(hooks)
 	if err != nil || !changed {
 		return err
 	}
 	// An edit only empties the hooks object by removing our own entries, so
-	// the key goes too and the file returns to its pre-install shape.
-	if hooks.len() == 0 {
+	// the file returns to its pre-install shape: no key, or the empty object
+	// install found.
+	keepEmpty := !install && markerNames(marker, target)
+	switch {
+	case hooks.len() == 0 && keepEmpty:
+		top.set("hooks", json.RawMessage("{}"))
+	case hooks.len() == 0:
 		top.del("hooks")
-	} else {
+	default:
 		raw, err := hooks.compact()
 		if err != nil {
 			return err
@@ -320,7 +335,21 @@ func editSettings(path, backupDir string, now time.Time, edit func(hooks *object
 	if err := fileedit.WriteAtomic(target, out, mode); err != nil {
 		return fmt.Errorf("claude: write %s: %w", target, err)
 	}
+	switch {
+	case install && foundEmpty:
+		if err := fileedit.WriteAtomic(marker, []byte(target), 0o600); err != nil {
+			return fmt.Errorf("claude: record empty hooks: %w", err)
+		}
+	case keepEmpty && hooks.len() == 0:
+		_ = os.Remove(marker) // restored; a stale marker only keeps an empty object
+	}
 	return nil
+}
+
+// markerNames reports whether the marker file exists and names target.
+func markerNames(marker, target string) bool {
+	b, err := os.ReadFile(marker) //nolint:gosec // our own file in the app's backup directory
+	return err == nil && string(b) == target
 }
 
 // ourCommands lists the commands of our hook entries in groups.

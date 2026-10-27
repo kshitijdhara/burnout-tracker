@@ -17,6 +17,9 @@ var bundledApps = map[model.Category][]string{
 		"Code.exe", "Cursor.exe", "Zed.exe", "sublime_text.exe", "devenv.exe", "idea64.exe", "goland64.exe",
 		"pycharm64.exe", "webstorm64.exe", "rider64.exe", "clion64.exe",
 		"code", "cursor", "zed", "zeditor", "sublime_text",
+		// Data and research environments.
+		"com.rstudio.desktop", "org.rstudio.RStudio", "com.mathworks.matlab", "org.jupyter.jupyterlab-desktop",
+		"rstudio.exe", "MATLAB.exe", "rstudio", "matlab",
 	},
 	model.CategoryBrowser: {
 		"com.google.Chrome", "org.mozilla.firefox", "com.apple.Safari", "com.microsoft.edgemac",
@@ -39,6 +42,10 @@ var bundledApps = map[model.Category][]string{
 		"com.adobe.Reader", "com.apple.Notes", "com.figma.Desktop",
 		"Notion.exe", "Obsidian.exe", "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE", "AcroRd32.exe", "Acrobat.exe",
 		"Figma.exe", "obsidian", "notion-app", "libreoffice", "soffice.bin", "evince", "okular", "zathura",
+		// Study, research and planning.
+		"org.zotero.zotero", "net.ankiweb.dtop", "com.microsoft.onenote.mac", "com.linear", "com.electron.logseq",
+		"zotero.exe", "anki.exe", "ONENOTE.EXE", "Linear.exe", "Logseq.exe", "texstudio.exe",
+		"zotero", "anki", "logseq", "texstudio",
 	},
 	model.CategoryMedia: {
 		"com.spotify.client", "com.apple.Music", "com.apple.TV", "org.videolan.vlc", "com.apple.QuickTimePlayerX",
@@ -60,12 +67,26 @@ var bundledPrefixes = []struct {
 }
 
 // sensitiveApps are recorded as private by default (privacy & security
-// §5.1): time is kept, identity is dropped.
+// §5.1): time is kept, identity is dropped. Matching ignores case. Most
+// banking, health and dating happens in a browser, where only the title
+// says what it is; those sites are covered once title classification
+// exists. Users add their own with privacy.exclude_apps.
 var sensitiveApps = []string{
+	// Password managers and keychains.
 	"com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop", "org.keepassxc.keepassxc",
 	"com.apple.keychainaccess", "com.apple.Passwords", "com.dashlane.dashlanephonefinal",
-	"1Password.exe", "Bitwarden.exe", "KeePassXC.exe", "KeePass.exe", "Dashlane.exe",
-	"1password", "bitwarden", "keepassxc", "seahorse",
+	"com.lastpass.LastPass", "in.sinew.Enpass-Desktop", "me.proton.pass.electron", "com.keepersecurity.passwordmanager",
+	"1Password.exe", "Bitwarden.exe", "KeePassXC.exe", "KeePass.exe", "Dashlane.exe", "Enpass.exe",
+	"Proton Pass.exe", "NordPass.exe", "keeperpasswordmanager.exe",
+	"1password", "bitwarden", "keepassxc", "seahorse", "enpass",
+	// Banking, budgeting and tax.
+	"com.moneymoney-app.retail", "com.iggsoftware.banktivity7", "com.quicken.Quicken", "com.moneydance.Moneydance",
+	"org.gnucash.Gnucash", "qw.exe", "Moneydance.exe", "gnucash.exe", "gnucash", "kmymoney", "homebank",
+	// Crypto wallets.
+	"com.ledger.live", "io.trezor.TrezorSuite", "com.electron.exodus",
+	"Ledger Live.exe", "Trezor Suite.exe", "Exodus.exe", "ledger-live-desktop", "exodus",
+	// Health and therapy.
+	"com.apple.Health", "com.headspace.Headspace", "com.calm.Calm",
 }
 
 var commandCategories = map[string]CommandCategory{

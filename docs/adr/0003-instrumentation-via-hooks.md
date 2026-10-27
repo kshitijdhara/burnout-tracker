@@ -95,8 +95,9 @@ The hook process follows these rules:
 
 ### Editing users' config files
 
-`install-hooks` edits `.zshrc`, `.bashrc`, `config.fish`, the PowerShell
-`$PROFILE` and `~/.claude/settings.json`.
+`install-hooks` edits `.zshrc`, `.bashrc`, the PowerShell `$PROFILE` and
+`~/.claude/settings.json`. For fish it adds a file to `conf.d` instead of
+editing `config.fish`.
 - **Dotfiles:** our lines go inside a marked block (`# >>> burnout >>>` …
   `# <<< burnout <<<`). Re-running is idempotent.
 - **Claude settings:** we *merge* into the existing JSON and preserve
@@ -157,8 +158,8 @@ in Phase 1.
   - allowlisted transcript/OTLP readers.
 
 ## Action Items
-1. [ ] Embedded hook scripts with interactive guard and in-function argv0/subcommand extraction; `install-hooks` / `uninstall-hooks` with marked blocks, backups, atomic writes.
-2. [ ] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the message, the DB or logs.
+1. [x] Embedded hook scripts with interactive guard and in-function argv0/subcommand extraction; `install-hooks` / `uninstall-hooks` with marked blocks, backups, atomic writes. zsh, bash (3.2+) and fish are done. [ ] PowerShell.
+2. [x] **ps-leak test:** run a hooked command containing a canary secret and assert the canary never appears in `ps`/`/proc` output, the message, the DB or logs. Process listings: `TestPSLeak` (Linux, macOS; zsh, bash, fish); the message: `TestZshHookNeverLeaksCommandLine`; the DB and logs: `TestEndToEnd`.
 3. [ ] Benchmarks in CI: p99 prompt overhead < 5 ms (zsh, bash 3.2, bash 5, fish); PowerShell in-process pipe write; Claude hook < 10 ms p99.
 4. [ ] Claude Code adapter: no-stdout test (any byte on stdout fails CI), version detection, `PermissionRequest`/`StopFailure`/timeout segment closing, parent-walk tty mapping.
 5. [ ] `internal/timeline`: one human timeline + N agent timelines, with property tests (non-overlapping human states; Σ human sub-states ≤ wall time).

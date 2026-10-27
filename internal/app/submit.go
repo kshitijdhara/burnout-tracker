@@ -20,27 +20,27 @@ var (
 
 // counters are updated by Submit on ingest goroutines and read by the loop.
 type counters struct {
-	accepted, rejected, queueFull, noIndicator atomic.Uint64
+	accepted, rejected, queueFull, paused atomic.Uint64
 }
 
 func (c *counters) snapshot() map[string]uint64 {
 	return map[string]uint64{
-		"accepted":     c.accepted.Load(),
-		"rejected":     c.rejected.Load(),
-		"queue_full":   c.queueFull.Load(),
-		"no_indicator": c.noIndicator.Load(),
+		"accepted":   c.accepted.Load(),
+		"rejected":   c.rejected.Load(),
+		"queue_full": c.queueFull.Load(),
+		"paused":     c.paused.Load(),
 	}
 }
 
 // Submit validates a hook message against the daemon's clock (system
 // design §5: the daemon stamps receipt time and rejects skew), enriches it
 // (project root, keyed identities) and hands it to the loop. It is safe for
-// concurrent use and never blocks: if the loop is far behind, or nothing
-// may be recorded (see recording), the event is dropped and counted. It reports whether the event was queued.
+// concurrent use and never blocks: if the loop is far behind, the event is
+// dropped and counted. It reports whether the event was queued.
 func (d *Daemon) Submit(m wire.Message) bool {
-	if (m.Shell != nil || m.Agent != nil) && !d.recording() {
-		d.counters.noIndicator.Add(1)
-		return false
+	if d.paused.Load() {
+		d.counters.paused.Add(1)
+		return true // discarded: nothing is recorded while paused
 	}
 	ev, err := d.accept(m, d.deps.Clock.Now())
 	if err != nil {
@@ -123,11 +123,4 @@ func (d *Daemon) projectKey(cwd string) string {
 		return ""
 	}
 	return d.deps.Hasher.Key("project", root)
-}
-
-// recording reports whether data may be recorded now: only while the
-// collecting indicator is visible (AC-1). It runs on ingest goroutines and
-// on the loop.
-func (d *Daemon) recording() bool {
-	return d.deps.Indicator != nil && d.deps.Indicator.Visible()
 }

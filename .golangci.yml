@@ -13,7 +13,7 @@ linters:
   settings:
     misspell:
       locale: UK
-      ignore-rules: [normalize, normalized, normalizes, initialize, initialized, serialize, serialized, color, behavior, analyze, organization, authorization, favor]
+      ignore-rules: [organizer, normalize, normalized, normalizes, initialize, initialized, serialize, serialized, color, behavior, analyze, organization, authorization, favor]
     depguard:
       rules:
         # The dependency rule (system design §3.2): the domain is pure and
@@ -37,9 +37,11 @@ linters:
             - pkg: database/sql
               desc: domain does no I/O
         # Only the three opt-in egress paths may use an HTTP client
-        # (privacy & security §6). None exist yet in Phase 0.
+        # (privacy & security §6), plus the local dashboard server, which
+        # serves 127.0.0.1 only and makes no outbound calls. Tests may use
+        # it to talk to local test servers.
         egress:
-          files: ["$all", "!**/internal/adapters/egress/**"]
+          files: ["$all", "!$test", "!**/internal/adapters/egress/**", "!**/internal/adapters/dashboard/**"]
           list-mode: lax
           deny:
             - pkg: net/http

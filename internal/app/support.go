@@ -91,32 +91,48 @@ func topology(monitors []model.Rect) string {
 type health struct {
 	day                                   string
 	presentS, attributedS                 float64
+	callS, videoS, confirmedIdleS         float64 // presence held by each signal
 	shellEvents, agentEvents              int
 	collectorErrors, flushErrors, dropped int
-	noIndicatorTicks                      int // collector ticks skipped: no visible indicator
 }
 
 // healthJSON is the stored shape of a day's SLIs.
 type healthJSON struct {
-	Coverage         float64           `json:"coverage"`
-	PresentS         float64           `json:"present_s"`
-	AttributedS      float64           `json:"attributed_s"`
-	ShellEvents      int               `json:"shell_events"`
-	AgentEvents      int               `json:"agent_events"`
-	CollectorErrors  int               `json:"collector_errors"`
-	FlushErrors      int               `json:"flush_errors"`
-	Dropped          int               `json:"dropped"`
-	NoIndicatorTicks int               `json:"no_indicator_ticks,omitempty"`
-	Hooks            map[string]uint64 `json:"hooks,omitempty"`  // this process: accepted, rejected, queue_full, no_indicator
-	Ingest           map[string]uint64 `json:"ingest,omitempty"` // this process: transport counters
+	Coverage        float64           `json:"coverage"`
+	PresentS        float64           `json:"present_s"`
+	AttributedS     float64           `json:"attributed_s"`
+	CallS           float64           `json:"call_s"`
+	VideoS          float64           `json:"video_s"`
+	ConfirmedIdleS  float64           `json:"confirmed_idle_s"`
+	ShellEvents     int               `json:"shell_events"`
+	AgentEvents     int               `json:"agent_events"`
+	CollectorErrors int               `json:"collector_errors"`
+	FlushErrors     int               `json:"flush_errors"`
+	Dropped         int               `json:"dropped"`
+	Hooks           map[string]uint64 `json:"hooks,omitempty"`  // this process: accepted, rejected, queue_full
+	Ingest          map[string]uint64 `json:"ingest,omitempty"` // this process: transport counters
 }
 
 func newHealth() *health { return &health{} }
 
-func (h *health) observe(res attention.Result) {
+// observe counts one tick that belongs to logical day. Ticks held across the
+// day rollover and released after it are skipped: they belong to an
+// earlier day whose counters have already been written.
+func (h *health) observe(res attention.Result, day string) {
+	if h.day != "" && day < h.day { // YYYY-MM-DD compares in date order
+		return
+	}
 	dt := res.Dt.Seconds()
 	h.presentS += res.Presence * dt
 	h.attributedS += (res.Presence - res.Unattributed) * dt
+	switch res.Reason {
+	case attention.ReasonCall:
+		h.callS += dt
+	case attention.ReasonVideo:
+		h.videoS += dt
+	case attention.ReasonConfirmedIdle:
+		h.confirmedIdleS += dt
+	}
 }
 
 // seed continues from a stored row for day. Malformed rows are ignored.
@@ -127,9 +143,9 @@ func (h *health) seed(day, stored string) {
 	}
 	*h = health{
 		day: day, presentS: j.PresentS, attributedS: j.AttributedS,
+		callS: j.CallS, videoS: j.VideoS, confirmedIdleS: j.ConfirmedIdleS,
 		shellEvents: j.ShellEvents, agentEvents: j.AgentEvents,
 		collectorErrors: j.CollectorErrors, flushErrors: j.FlushErrors, dropped: j.Dropped,
-		noIndicatorTicks: j.NoIndicatorTicks,
 	}
 }
 
@@ -149,10 +165,10 @@ func (h *health) json(day string, hooks, ingest map[string]uint64) string {
 	}
 	b, _ := json.Marshal(healthJSON{
 		Coverage: coverage, PresentS: h.presentS, AttributedS: h.attributedS,
+		CallS: h.callS, VideoS: h.videoS, ConfirmedIdleS: h.confirmedIdleS,
 		ShellEvents: h.shellEvents, AgentEvents: h.agentEvents,
 		CollectorErrors: h.collectorErrors, FlushErrors: h.flushErrors, Dropped: h.dropped,
-		NoIndicatorTicks: h.noIndicatorTicks,
-		Hooks:            hooks, Ingest: ingest,
+		Hooks: hooks, Ingest: ingest,
 	})
 	return string(b)
 }

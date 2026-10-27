@@ -82,3 +82,21 @@ func TestEpochMillis(t *testing.T) {
 		}
 	}
 }
+
+func TestEmitFromEnvWithDuration(t *testing.T) {
+	now := time.UnixMilli(1_800_000_000_000)
+	env := map[string]string{EnvArgv0: "go", EnvExit: "1", EnvDuration: "1500"}
+	m, err := EmitFromEnv(func(k string) string { return env[k] }, "/tmp", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Shell.EndMs != now.UnixMilli() || m.Shell.StartMs != now.UnixMilli()-1500 || m.Shell.Exit != 1 {
+		t.Errorf("times %d–%d", m.Shell.StartMs, m.Shell.EndMs)
+	}
+	for _, bad := range []string{"", "-5", "1.5", "x"} {
+		env[EnvDuration] = bad
+		if _, err := EmitFromEnv(func(k string) string { return env[k] }, "/tmp", now); err == nil {
+			t.Errorf("duration %q accepted", bad)
+		}
+	}
+}

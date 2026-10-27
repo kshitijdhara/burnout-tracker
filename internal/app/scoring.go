@@ -1,0 +1,126 @@
+package app
+
+import (
+	"context"
+	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+)
+
+// ScoreStore is where scoring reads its inputs.
+type ScoreStore interface {
+	DataDays(ctx context.Context, from, to string) ([]string, error)
+	DayInput(ctx context.Context, logicalDay string) (features.Day, error)
+	FeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error)
+	Annotations(ctx context.Context, from, to string) ([]annotation.Annotation, error)
+}
+
+// Scoring horizons: features are kept two years (privacy & security §3),
+// but can only be computed while the raw minutes and intervals behind them
+// are kept (180 days). The most recent days are always recomputed, because
+// a day's last minutes can reach the store after it ends.
+const (
+	featureHistory = 730
+	rawHistory     = 180
+	recomputeDays  = 2
+)
+
+// Scoring is one pass over the history.
+type Scoring struct {
+	// Scores has one score per day with data, oldest first; the last is
+	// today's when it was asked for.
+	Scores []strain.Score
+	// Computed are completed days whose features weren't stored yet (or
+	// were recomputed). The daemon saves them; read-only callers don't.
+	Computed []strain.Day
+}
+
+// ScoreOptions say how to score.
+type ScoreOptions struct {
+	Rollover time.Duration
+	// Features are the feature definitions (core hours come from the
+	// user's profile); Role weights the features in the score.
+	Features features.Params
+	Role     features.Role
+	// IncludeToday scores today's partial day too.
+	IncludeToday bool
+}
+
+// DefaultScoreOptions are the defaults: a developer with 09:00–18:00 core
+// hours, today left out.
+func DefaultScoreOptions() ScoreOptions {
+	return ScoreOptions{Rollover: DefaultConfig().Rollover, Features: features.DefaultParams(), Role: features.RoleDeveloper}
+}
+
+// ScoreDays scores every day with data up to now. Today's features are
+// partial, so it is only included with IncludeToday, and is never in
+// Computed. Stored features computed with other feature parameters (the
+// user changed their core hours) are recomputed while their raw data is
+// kept.
+func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions) (Scoring, error) {
+	rollover, includeToday := o.Rollover, o.IncludeToday
+	today := model.LogicalDay(now, rollover)
+	todayDate, _ := time.Parse(time.DateOnly, today)
+	day := func(back int) string { return todayDate.AddDate(0, 0, -back).Format(time.DateOnly) }
+	yesterday := day(1)
+
+	stored, err := st.FeatureDays(ctx, day(featureHistory), yesterday, o.Features.Key())
+	if err != nil {
+		return Scoring{}, err
+	}
+	have := make(map[string]bool, len(stored))
+	for _, d := range stored {
+		have[d.Date] = true
+	}
+	withData, err := st.DataDays(ctx, day(rawHistory), today)
+	if err != nil {
+		return Scoring{}, err
+	}
+	var out Scoring
+	days := make([]strain.Day, 0, len(stored)+recomputeDays+1)
+	recomputeFrom := day(recomputeDays)
+	for _, d := range stored {
+		if d.Date < recomputeFrom {
+			days = append(days, d)
+		}
+	}
+	for _, date := range withData {
+		isToday := date == today
+		if (isToday && !includeToday) || (!isToday && have[date] && date < recomputeFrom) {
+			continue
+		}
+		in, err := st.DayInput(ctx, date)
+		if err != nil {
+			return Scoring{}, err
+		}
+		d := strain.Day{
+			Date: date, Coverage: in.Coverage, Present: in.Present,
+			Values: features.Values(in, o.Features),
+		}
+		days = append(days, d)
+		if !isToday {
+			out.Computed = append(out.Computed, d)
+		}
+	}
+	// Vacation and sick days are applied at scoring time, so an annotation
+	// added later also covers days whose features are already stored.
+	notes, err := st.Annotations(ctx, day(featureHistory), today)
+	if err != nil {
+		return Scoring{}, err
+	}
+	dates := make([]string, len(days))
+	for i, d := range days {
+		dates[i] = d.Date
+	}
+	excluded := annotation.Excluded(notes, dates)
+	for i := range days {
+		days[i].Excluded = excluded[days[i].Date]
+	}
+	p := strain.DefaultParams()
+	p.Role = o.Role
+	out.Scores = strain.Compute(days, p)
+	return out, nil
+}

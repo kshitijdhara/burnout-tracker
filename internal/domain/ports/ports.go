@@ -41,11 +41,3 @@ type ProcessInfo interface {
 	// Ancestors returns pid's ancestors, nearest first, up to limit.
 	Ancestors(pid, limit int) ([]int, error)
 }
-
-// Indicator reports whether the "collecting" indicator (the tray or menubar
-// icon) is visible right now. Nothing is recorded while it isn't (privacy &
-// security §5.2, AC-1). Visible is called from several goroutines and must
-// be cheap and safe for concurrent use.
-type Indicator interface {
-	Visible() bool
-}

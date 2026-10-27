@@ -2,19 +2,20 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
+	"github.com/kshitijdhara/burnout-tracker/internal/config"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -38,10 +39,19 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("data dir is owner-only", true, "")
 	}
 
-	pctx, cancel := context.WithTimeout(ctx, time.Second)
-	err = ingest.Ping(pctx)
-	cancel()
-	checkFix("daemon is running", err == nil, "start it with `burnout daemon`")
+	checkFix("daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
+	reportService()
+	cfg, cfgPath, cfgErr := loadConfig()
+	switch {
+	case cfgErr != nil && cfgPath == "":
+		check("config file", false, cfgErr.Error())
+	case cfgErr != nil:
+		check("config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
+			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
+		cfg = config.Default()
+	default:
+		check("config file is valid", true, printable(cfgPath))
+	}
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
@@ -63,16 +73,11 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("keystore", false, err.Error())
 	}
 
-	if _, err := newIndicator(); err != nil {
-		check("tray indicator", false, err.Error())
-	} else {
-		check("tray indicator", true, "")
-	}
-
 	if c, err := newCollector(collectorOptions{Now: time.Now}); err != nil {
 		check("desktop collector", false, err.Error())
 	} else {
 		caps := c.Capabilities()
+		snap, snapErr := c.Snapshot(ctx)
 		_ = c.Close()
 		check("desktop collector", true, caps.Name)
 		for _, p := range caps.MissingPermits {
@@ -81,6 +86,9 @@ func runDoctor(ctx context.Context, _ []string) error {
 		for _, l := range caps.Limitations {
 			fmt.Printf("  -  limitation: %s\n", l)
 		}
+		if snapErr == nil {
+			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Privacy.ExcludeApps, nil)))
+		}
 	}
 
 	if store, err := sqlite.OpenReadOnly(ctx, dataDir); err == nil {
@@ -88,14 +96,13 @@ func runDoctor(ctx context.Context, _ []string) error {
 		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
 		if h, err := store.Health(ctx, day); err == nil && h != "" {
 			fmt.Println("  today's health:", h)
-			printNoIndicator(h)
 		}
 		check("database", store.QuickCheck(ctx) == nil, filepath.Join(dataDir, sqlite.FileName))
 	} else {
 		check("database", false, err.Error())
 	}
 
-	fmt.Println("\nNetwork: no outbound calls are configured (calendar, update checks and model download are all off).")
+	fmt.Println("\n" + networkSummary(dataDir))
 	return nil
 }
 
@@ -119,17 +126,55 @@ func checkFix(name string, ok bool, fix string) {
 	check(name, ok, fix)
 }
 
-// printNoIndicator explains drops made because no tray icon was visible
-// (privacy & security §5.2, AC-1), so "nothing recorded" has a reason.
-func printNoIndicator(health string) {
-	var h struct {
-		NoIndicatorTicks int               `json:"no_indicator_ticks"`
-		Hooks            map[string]uint64 `json:"hooks"`
+// mediaNow describes the calls and video the collector sees at this
+// moment, so detection can be checked during a meeting or a video. Apps
+// classified as private are not named, as everywhere else.
+func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
+	var calls, video []string
+	for _, w := range snap.Windows {
+		name := printable(w.AppID)
+		if rules.App(w.AppID) == model.CategoryPrivate {
+			name = "a private app"
+		}
+		if w.InCall && !slices.Contains(calls, name) {
+			calls = append(calls, name)
+		}
+		if w.HasVideo && !slices.Contains(video, name) {
+			video = append(video, name)
+		}
 	}
-	if json.Unmarshal([]byte(health), &h) != nil {
+	var parts []string
+	switch {
+	case len(calls) > 0:
+		parts = append(parts, "in a call in "+strings.Join(calls, ", "))
+	case snap.CallActive:
+		parts = append(parts, "in a call (its window isn't visible)")
+	}
+	if len(video) > 0 {
+		parts = append(parts, "video playing in "+strings.Join(video, ", "))
+	}
+	if len(parts) == 0 {
+		return "no call or video detected"
+	}
+	return strings.Join(parts, "; ")
+}
+
+// reportService shows whether the background service is set up. Platforms
+// without one yet say nothing.
+func reportService() {
+	m, _, err := serviceManager()
+	if err != nil {
 		return
 	}
-	if n := h.Hooks["no_indicator"]; n > 0 || h.NoIndicatorTicks > 0 {
-		fmt.Printf("  !  not recording while the tray icon is hidden: %d hook events dropped, %d collector ticks skipped\n", n, h.NoIndicatorTicks)
+	st, err := m.Status()
+	switch {
+	case err != nil:
+		return
+	case st.Running:
+		check("background service", true, st.Detail)
+	case st.Installed:
+		check("background service", false, describeService(st, m.LogHint()))
+	default:
+		fmt.Printf("  -  background service: %s\n", describeService(st, m.LogHint()))
 	}
 }
