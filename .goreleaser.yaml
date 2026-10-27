@@ -84,7 +84,7 @@ nfpms:
     homepage: https://github.com/kshitijdhara/burnout-tracker
     maintainer: Kshitij Dhara <69909428+kshitijdhara@users.noreply.github.com>
     description: Local-first burnout self-monitoring. Nothing is recorded until you run `burnout setup`.
-    license: Apache-2.0
+    license: Apache-2.0 AND GPL-2.0-or-later
     formats: [deb, rpm]
     bindir: /usr/bin
     mtime: "{{ .CommitDate }}"
@@ -92,6 +92,24 @@ nfpms:
       - src: LICENSE
         dst: /usr/share/doc/burnout/LICENSE
         file_info:
+          mtime: "{{ .CommitDate }}"
+      # The GNOME Shell bridge for Wayland (ADR-0010), GPL-2.0-or-later. The
+      # directory name must equal the uuid in metadata.json. It stays
+      # disabled until the user enables it (AC-2); postinstall says how.
+      - src: extensions/gnome-shell/metadata.json
+        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/metadata.json
+        file_info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: extensions/gnome-shell/extension.js
+        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/extension.js
+        file_info:
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: extensions/gnome-shell/COPYING
+        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/COPYING
+        file_info:
+          mode: 0644
           mtime: "{{ .CommitDate }}"
     # Prints next steps only. A package must never start collection or
     # register the service (privacy & security §5.2, AC-2); the service is

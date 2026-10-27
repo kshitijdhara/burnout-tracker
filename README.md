@@ -24,8 +24,9 @@ every field that is collected.
 ## Trying Phase 0
 
 Phase 0 is a developer preview: there is no installer yet.
-Desktop collection works on macOS, Windows and Linux X11 sessions; on
-Linux Wayland only shell and Claude Code hooks are recorded for now.
+Desktop collection works on macOS, Windows, Linux X11 sessions and GNOME
+on Wayland (through a GNOME Shell extension). On other Wayland desktops
+only shell and Claude Code hooks are recorded for now.
 
 > **Where it doesn't run.** burnout records only while its tray icon is
 > visible, hooks included ([AC-1](docs/privacy-and-security.md)). Where no
@@ -372,13 +373,31 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
   desktop with a tray (on GNOME, install the AppIndicator extension
   first). It reads the window list, pointer, idle time (XScreenSaver) and
   lock state (logind, or GNOME's screensaver) and needs no permissions.
-  On Wayland there is no desktop collector yet (a GNOME bridge is coming),
-  so only shell and Claude Code hooks are recorded; to collect, choose an
-  X11 session at the login screen. The service reads `DISPLAY` from the
-  systemd user manager, which GNOME, KDE and most desktops fill in; if
-  `burnout doctor` says `DISPLAY is not set`, run
-  `systemctl --user import-environment DISPLAY XDG_SESSION_TYPE` from the
-  desktop and restart the service. Build as on macOS without
+  **GNOME on Wayland** needs the burnout GNOME Shell extension
+  (`extensions/gnome-shell`, GNOME 45 or newer). It hands window geometry,
+  stacking, focus, monitors and the pointer to the agent over a private
+  owner-only socket. It sends window titles only while title
+  classification is on. Idle time comes from Mutter and lock state from
+  logind. The `.deb` and `.rpm` install the extension but leave it off. To
+  turn it on, log out and back in, then run:
+
+  ```sh
+  gnome-extensions enable burnout-bridge@kshitijdhara.github.io
+  ```
+
+  From a source build, copy `extensions/gnome-shell/` to
+  `~/.local/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/`
+  first. `burnout doctor` reports whether the extension is installed,
+  enabled and answering. While the screen is locked, GNOME turns
+  extensions off and burnout records the time as locked. On other Wayland
+  desktops (KDE, Sway) there is no desktop collector yet, so only shell
+  and Claude Code hooks are recorded; to collect there, choose an X11
+  session at the login screen. The service reads `DISPLAY`,
+  `WAYLAND_DISPLAY` and `XDG_CURRENT_DESKTOP` from the systemd user
+  manager, which GNOME, KDE and most desktops fill in. If `burnout doctor`
+  says `DISPLAY is not set`, run
+  `systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP`
+  from the desktop and restart the service. Build as on macOS without
   `xcode-select`.
   The background service is a systemd user unit. Its log is
   `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
@@ -438,6 +457,7 @@ Phase 0 (spike). Design docs:
   - [0007 data protection at rest](docs/adr/0007-data-protection-at-rest.md)
   - [0008 deciding idle stretches after they end](docs/adr/0008-retroactive-idle-resolution.md)
   - [0009 deferring the Laya spike to Phase 2](docs/adr/0009-defer-laya-spike.md)
+  - [0010 GNOME Wayland bridge over a private socket](docs/adr/0010-gnome-wayland-bridge.md)
 - [Design review 2026-10-20](docs/reviews/2026-10-20-design-review.md):
   findings and how v0.2 resolves them.
 

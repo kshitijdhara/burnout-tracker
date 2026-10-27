@@ -178,13 +178,6 @@ func appIDFromClass(b []byte) string {
 	return string(parts[0])
 }
 
-// isLocked combines logind's view of the user's graphical session: the
-// screen counts as locked while the session's LockedHint is set or while
-// another session is in the foreground (a switched user or VT).
-func isLocked(lockedHint, active bool) bool {
-	return lockedHint || !active
-}
-
 // capabilities reports what this collector observes, for doctor.
 func capabilities(opts Options, idle bool) ports.Capabilities {
 	return ports.Capabilities{

@@ -168,3 +168,5 @@ jobs:
         run: go test ./internal/domain/schedule/ -run='^$' -fuzz=FuzzParse -fuzztime=30s
       - name: Fuzz title redactor
         run: go test ./internal/domain/redact/ -run='^$' -fuzz=FuzzTitle -fuzztime=60s
+      - name: Fuzz GNOME bridge reply decoder
+        run: go test ./internal/adapters/collector/wayland/ -run='^$' -fuzz=FuzzDecodeReply -fuzztime=60s

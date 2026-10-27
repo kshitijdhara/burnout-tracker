@@ -11,7 +11,8 @@ ADRs [0001](adr/0001-local-first-go-agent.md) ·
 [0006](adr/0006-decision-model-for-classification.md) ·
 [0007](adr/0007-data-protection-at-rest.md) ·
 [0008](adr/0008-retroactive-idle-resolution.md) ·
-[0009](adr/0009-defer-laya-spike.md)
+[0009](adr/0009-defer-laya-spike.md) ·
+[0010](adr/0010-gnome-wayland-bridge.md)
 
 ---
 
@@ -132,7 +133,7 @@ component.
 | `burnout` | Go | Daemon (`burnout daemon`), hot-path ingest (`emit`, `hook`), CLI, dashboard server |
 | Shell hook scripts | zsh/bash/fish/PowerShell | Emit command events; embedded in `burnout`, installed by `install-hooks` |
 | `burnout-classify` | Go + ONNX Runtime | Optional Laya sidecar, sandboxed, on demand (ADR-0006) |
-| GNOME Shell extension | JS (GPL-2.0+) | Wayland window/pointer bridge over a private connection (§12) |
+| GNOME Shell extension | JS (GPL-2.0+) | Wayland window/pointer bridge over a private owner-only socket (§12, ADR-0010) |
 | KWin script | JS | Same, for KDE |
 
 ```
@@ -307,7 +308,8 @@ day minute by minute for checking against a hand-written log.
   | macOS Spaces / full-screen | Only the current Space |
   | Windows virtual desktops | Cloaked windows excluded |
   | Linux X11 workspaces | Only the current workspace (`_NET_WM_DESKTOP` vs `_NET_CURRENT_DESKTOP`), sticky windows included; minimised (`_NET_WM_STATE_HIDDEN`), desktop and dock windows excluded |
-  | Linux Wayland | No desktop collector until the GNOME bridge; hooks only |
+  | Linux GNOME Wayland | Through the GNOME Shell bridge: windows on the active workspace (`located_on_workspace`), minimised and `other`-type windows (menus, tooltips) excluded, desktop and dock windows used for occlusion only; nothing while the screen is locked (GNOME disables extensions there) |
+  | Other Wayland desktops | No desktop collector yet; hooks only |
   | Clamshell mode | External monitors only |
   | RDP/Citrix/VM | One window, classified as `remote-desktop` |
 
@@ -319,11 +321,11 @@ day minute by minute for checking against a hand-written log.
 
 | | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
-| Focus | `NSWorkspace` + AX | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` | bridge |
-| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` (reversed to topmost first), client origin translated to root plus `_NET_FRAME_EXTENTS`; monitors from RandR 1.5 | GNOME extension / KWin script; Sway/Hyprland IPC |
-| App + pid | bundle id + pid | exe name + pid | `WM_CLASS` class (else `/proc/<pid>/comm`) + `_NET_WM_PID` | bridge |
-| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` root position, hit-tested against the stacking order | bridge; wlroots limited |
-| Idle | `CGEventSourceSecondsSinceLastEventType` | `GetLastInputInfo` | XScreenSaver | `ext-idle-notify-v1` / Mutter IdleMonitor |
+| Focus | `NSWorkspace` + AX | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` | GNOME bridge: `display.focus_window` |
+| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` (reversed to topmost first), client origin translated to root plus `_NET_FRAME_EXTENTS`; monitors from RandR 1.5 | GNOME bridge: `sort_windows_by_stacking` (bottom first, reversed by the agent) and `get_frame_rect()` in logical coordinates; monitors from `get_monitor_geometry`. KWin script and Sway/Hyprland IPC not yet |
+| App + pid | bundle id + pid | exe name + pid | `WM_CLASS` class (else `/proc/<pid>/comm`) + `_NET_WM_PID` | GNOME bridge: Mutter WM class (the Wayland `app_id`, or the X class under Xwayland), else GNOME's app id; `get_pid()` |
+| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` root position, hit-tested against the stacking order | GNOME bridge: `global.get_pointer()`, hit-tested by the agent; wlroots limited |
+| Idle | `CGEventSourceSecondsSinceLastEventType` | `GetLastInputInfo` | XScreenSaver | Mutter `org.gnome.Mutter.IdleMonitor.GetIdletime` (session bus); `ext-idle-notify-v1` elsewhere, not yet |
 | Lock | `CGSessionCopyCurrentDictionary` | input desktop + `LockApp.exe` | logind `LockedHint`/`Active` (system bus), else `org.gnome.ScreenSaver.GetActive` | same as X11 |
 | Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw (not yet) | not available → idle deltas |
 
@@ -334,8 +336,24 @@ only X clients).
 
 The Wayland bridges talk to the daemon over a **private peer-to-peer
 connection** with a token handshake, never as a public session-bus service
-(§12). Without a bridge, Wayland falls back to app-level focus, and the
-dashboard says so.
+(§12). On GNOME (ADR-0010) the extension
+(`extensions/gnome-shell`) listens on the owner-only socket
+`$XDG_RUNTIME_DIR/burnout/gnome-bridge.sock`. The agent checks that the
+socket belongs to `gnome-shell` running as the same user. It then says
+hello with the token it wrote to `gnome-bridge.token` (mode 0600) and
+whether titles are wanted. The extension checks the caller's uid
+(`SO_PEERCRED`) and the token, then answers one newline-delimited JSON
+snapshot per tick (`schemas/v1/gnome-bridge.schema.json`). The snapshot
+holds raw facts only: occlusion, workspace filtering and pointer
+hit-testing happen in the agent's pure translate step, which uses the
+same geometry code as X11. The agent picks the bridge when the session is Wayland
+(`XDG_SESSION_TYPE` or `WAYLAND_DISPLAY`) and `XDG_CURRENT_DESKTOP`
+includes GNOME. When the extension doesn't answer, there is no desktop
+collector, and the error and `doctor` say how to enable it. The agent
+reads extension protocol versions N and N-1, because an upgraded extension
+loads only after the user logs out and back in. Other Wayland desktops
+have no collector yet. They will fall back to app-level focus, and the
+dashboard will say so.
 
 ### 4.2 Terminal instrumentation
 
@@ -1300,7 +1318,7 @@ burnout-tracker/
 │   │   ├── sessionize/  attention/  timeline/  classify/  features/  score/  review/
 │   │   └── ports/               # Collector, ProcessInfo, Clock
 │   ├── adapters/
-│   │   ├── collector/{darwin,windows,x11,wayland}/
+│   │   ├── collector/{darwin,windows,x11,wayland,desktopbus}/
 │   │   ├── ingest/              # socket/pipe server, schema validation, rate limits
 │   │   ├── store/sqlite/        # migrations, retention, secure deletion
 │   │   ├── keystore/{darwin,windows,secretservice,file}/

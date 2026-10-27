@@ -16,6 +16,7 @@ import (
 	"github.com/jezek/xgb/screensaver"
 	"github.com/jezek/xgb/xproto"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/desktopbus"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
@@ -47,7 +48,7 @@ type Collector struct {
 	mu        sync.Mutex
 	x         *display // nil after the connection drops; reopened by the next Snapshot
 	idle      bool     // the server has the MIT-SCREEN-SAVER extension
-	lock      lockReader
+	bus       desktopbus.Reader
 	apps      map[int]string // pid → comm for windows without WM_CLASS, pruned to live pids
 	lastX     int
 	lastY     int
@@ -136,7 +137,7 @@ func (c *Collector) Close() error {
 		c.x.conn.Close()
 		c.x = nil
 	}
-	c.lock.close()
+	_ = c.bus.Close()
 	return nil
 }
 
@@ -166,7 +167,7 @@ func (c *Collector) Snapshot(ctx context.Context) (model.Snapshot, error) {
 	if err != nil {
 		return model.Snapshot{}, err
 	}
-	s.locked = c.lock.locked(ctx)
+	s.locked = c.bus.Locked(ctx)
 	return buildSnapshot(s), nil
 }
 

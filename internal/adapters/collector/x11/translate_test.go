@@ -245,19 +245,6 @@ func TestAppIDFromClass(t *testing.T) {
 	}
 }
 
-func TestIsLocked(t *testing.T) {
-	tests := []struct{ hint, active, want bool }{
-		{false, true, false},
-		{true, true, true},
-		{false, false, true}, // another session is in the foreground
-	}
-	for _, tc := range tests {
-		if got := isLocked(tc.hint, tc.active); got != tc.want {
-			t.Errorf("isLocked(%v, %v) = %v", tc.hint, tc.active, got)
-		}
-	}
-}
-
 func TestCapabilities(t *testing.T) {
 	c := capabilities(Options{Titles: true}, true)
 	if c.Name != "x11" || !c.Windows || !c.Pointer || !c.Idle || !c.Titles || c.InputCounts {

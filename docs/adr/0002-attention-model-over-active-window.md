@@ -2,7 +2,8 @@
 
 **Status:** Proposed; presence amended by
 [ADR-0008](0008-retroactive-idle-resolution.md) (idle stretches decided
-after they end, and how calls and video are detected on macOS)
+after they end, and how calls and video are detected on macOS); the GNOME
+Wayland source in [ADR-0010](0010-gnome-wayland-bridge.md)
 **Date:** 2026-10-20
 **Deciders:** Project maintainers
 

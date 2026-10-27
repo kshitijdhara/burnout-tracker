@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/gnome-bridge.schema.json",
+  "title": "GNOME Shell bridge message, protocol version 1",
+  "description": "One line of newline-delimited JSON on the owner-only socket $XDG_RUNTIME_DIR/burnout/gnome-bridge.sock (ADR-0010). The agent sends requests ($defs/request); the extension answers each with one reply ($defs/reply). The first request is a hello carrying the token from gnome-bridge.token. Each side writes its own protocol version in v; the agent reads replies of its version and the one before. Unknown fields are ignored. Kept in step with internal/adapters/collector/wayland and extensions/gnome-shell by TestSchemaMatchesCode.",
+  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/reply" }],
+  "$defs": {
+    "version": { "type": "integer", "minimum": 1, "maximum": 1 },
+    "coord": { "type": "integer", "minimum": -1048576, "maximum": 1048576 },
+    "length": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+    "rect": {
+      "type": "object",
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": { "$ref": "#/$defs/coord" },
+        "y": { "$ref": "#/$defs/coord" },
+        "w": { "$ref": "#/$defs/length" },
+        "h": { "$ref": "#/$defs/length" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["v", "op"],
+      "properties": {
+        "v": { "$ref": "#/$defs/version" },
+        "op": { "enum": ["hello", "snapshot"] },
+        "token": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "hello only: the contents of gnome-bridge.token." },
+        "titles": { "type": "boolean", "description": "hello only: send window titles on this connection. True only while title classification is on." }
+      },
+      "oneOf": [
+        { "properties": { "op": { "const": "hello" } }, "required": ["token"] },
+        { "properties": { "op": { "const": "snapshot" } }, "not": { "anyOf": [{ "required": ["token"] }, { "required": ["titles"] }] } }
+      ]
+    },
+    "reply": {
+      "type": "object",
+      "required": ["v", "op"],
+      "properties": {
+        "v": { "$ref": "#/$defs/version" },
+        "op": { "enum": ["hello", "snapshot", "error"] }
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/hello" },
+        { "$ref": "#/$defs/snapshot" },
+        { "$ref": "#/$defs/error" }
+      ]
+    },
+    "hello": {
+      "properties": {
+        "op": { "const": "hello" },
+        "extension": { "type": "string", "maxLength": 64, "description": "The extension's metadata version." },
+        "shell": { "type": "string", "maxLength": 64, "description": "GNOME Shell's version." }
+      }
+    },
+    "error": {
+      "required": ["error"],
+      "properties": {
+        "op": { "const": "error" },
+        "error": { "type": "string", "maxLength": 256, "description": "Why the request was refused. The extension closes the connection after an error." }
+      }
+    },
+    "snapshot": {
+      "required": ["windows", "monitors", "focus", "pointer"],
+      "properties": {
+        "op": { "const": "snapshot" },
+        "windows": {
+          "type": "array",
+          "maxItems": 512,
+          "description": "Every window GNOME Shell manages, in stacking order, bottom first.",
+          "items": { "$ref": "#/$defs/window" }
+        },
+        "monitors": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/rect" } },
+        "focus": { "type": "integer", "minimum": 0, "description": "id of the focused window, 0 if none." },
+        "pointer": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "$ref": "#/$defs/coord" }, "y": { "$ref": "#/$defs/coord" } }
+        }
+      }
+    },
+    "window": {
+      "type": "object",
+      "required": ["id", "pid", "wm_class", "app", "type", "minimised", "on_workspace", "frame"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1, "description": "Mutter's window id, stable for the window's life." },
+        "pid": { "type": "integer", "minimum": 0, "maximum": 4194304, "description": "0 when unknown." },
+        "wm_class": { "type": "string", "maxLength": 256, "description": "The Wayland app_id, or the X class for Xwayland windows." },
+        "app": { "type": "string", "maxLength": 256, "description": "GNOME Shell's app id, e.g. org.gnome.Ptyxis.desktop; empty when it has none." },
+        "type": { "enum": ["normal", "dialog", "utility", "desktop", "dock", "other"] },
+        "minimised": { "type": "boolean" },
+        "on_workspace": { "type": "boolean", "description": "Shown on the active workspace, including windows on every workspace." },
+        "frame": { "$ref": "#/$defs/rect", "description": "Frame bounds in logical (stage) coordinates." },
+        "title": { "type": "string", "maxLength": 1024, "description": "Present only on a connection whose hello set titles. Never logged or stored by the agent." }
+      }
+    }
+  }
+}

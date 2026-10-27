@@ -1,0 +1,8 @@
+{
+  "uuid": "burnout-bridge@kshitijdhara.github.io",
+  "name": "burnout bridge",
+  "description": "Lets the local burnout agent see window geometry, stacking, focus, monitors and the pointer on Wayland, over a private owner-only socket. No session-bus service, no network. Window titles are sent only when you turn on title classification in burnout.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/kshitijdhara/burnout-tracker",
+  "version": 1
+}

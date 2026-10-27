@@ -559,6 +559,21 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
 - The bridge returns only the fields the agent needs: window geometry,
   stacking, focus, pointer position, and titles only when title
   classification is on.
+- **GNOME, as built (ADR-0010):**
+  - The extension listens on `$XDG_RUNTIME_DIR/burnout/gnome-bridge.sock`
+    in an owner-only directory. There is no bus name and no exported
+    object.
+  - The agent checks that the listener is `gnome-shell` running as its own
+    uid before sending the token. The token is 32 random bytes in a 0600
+    file, new at each login.
+  - The extension checks the caller's uid (`SO_PEERCRED`) before reading
+    anything, then compares the token in constant time.
+  - Titles are sent only on a connection whose hello asked for them. The
+    agent also drops any title it didn't ask for.
+  - The package installs the extension disabled; the user enables it
+    (AC-2).
+  - A test enforces all of this
+    (`internal/adapters/collector/wayland/contract_test.go`).
 
 ### 8.4 Laya sidecar
 
