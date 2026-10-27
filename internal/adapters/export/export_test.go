@@ -22,6 +22,7 @@ type fakeSource struct {
 	days        []Day
 	checkins    []Checkin
 	annotations []Annotation
+	boundaries  []Boundary
 	failAfter   int // fail on this many minutes, if set
 }
 
@@ -58,6 +59,10 @@ func (f *fakeSource) Annotations(_ context.Context, _ Range, fn func(Annotation)
 	return each(f.annotations, fn)
 }
 
+func (f *fakeSource) Boundaries(_ context.Context, _ Range, fn func(Boundary) error) error {
+	return each(f.boundaries, fn)
+}
+
 func sample() *fakeSource {
 	exit, strain, cov := 1, 42.5, 0.9
 	return &fakeSource{
@@ -71,6 +76,10 @@ func sample() *fakeSource {
 			ModelVersion: "strain-v1", Status: "ok", Strain: &strain, Drivers: []string{"breaks"}}},
 		checkins:    []Checkin{{At: "2026-10-21T20:00:00+02:00", Instrument: "cbi_work", Score: 50, Answers: map[string]int{"w2": 50, "w1": 75}}},
 		annotations: []Annotation{{From: "2026-11-02", To: "2026-11-06", Kind: "vacation", Note: "=HYPERLINK(\"x\")"}},
+		boundaries: []Boundary{
+			{Kind: "shutdown", Value: "21:30", Since: "2026-10-02", Until: "2026-10-20", Source: "cli"},
+			{Kind: "no_weekend", Since: "2026-10-21", Source: "review"},
+		},
 	}
 }
 
@@ -83,7 +92,7 @@ func TestWriteJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != (Counts{Minutes: 2, Intervals: 1, Days: 1, Checkins: 1, Annotations: 1}) {
+	if n != (Counts{Minutes: 2, Intervals: 1, Days: 1, Checkins: 1, Annotations: 1, Boundaries: 2}) {
 		t.Errorf("counts %+v", n)
 	}
 	var doc struct {
@@ -94,6 +103,7 @@ func TestWriteJSON(t *testing.T) {
 		Days        []Day        `json:"days"`
 		Checkins    []Checkin    `json:"checkins"`
 		Annotations []Annotation `json:"annotations"`
+		Boundaries  []Boundary   `json:"boundaries"`
 	}
 	if err := json.Unmarshal(b.Bytes(), &doc); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, b.String())
@@ -101,7 +111,8 @@ func TestWriteJSON(t *testing.T) {
 	want := sample()
 	if doc.V != Version || doc.From != "2026-10-01" || !reflect.DeepEqual(doc.Minutes, want.minutes) ||
 		!reflect.DeepEqual(doc.Intervals, want.intervals) || !reflect.DeepEqual(doc.Days, want.days) ||
-		!reflect.DeepEqual(doc.Checkins, want.checkins) || !reflect.DeepEqual(doc.Annotations, want.annotations) {
+		!reflect.DeepEqual(doc.Checkins, want.checkins) || !reflect.DeepEqual(doc.Annotations, want.annotations) ||
+		!reflect.DeepEqual(doc.Boundaries, want.boundaries) {
 		t.Errorf("round trip:\n%s", b.String())
 	}
 
@@ -114,7 +125,7 @@ func TestWriteJSON(t *testing.T) {
 	if err := json.Unmarshal(b.Bytes(), &empty); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"minutes", "intervals", "days", "checkins", "annotations"} {
+	for _, k := range []string{"minutes", "intervals", "days", "checkins", "annotations", "boundaries"} {
 		if arr, ok := empty[k].([]any); !ok || len(arr) != 0 {
 			t.Errorf("%s = %v", k, empty[k])
 		}
@@ -162,6 +173,10 @@ func TestWriteCSV(t *testing.T) {
 	// A note that a spreadsheet would run as a formula is defused.
 	if got := read(AnnotationsCSV)[1][3]; got != `'=HYPERLINK("x")` {
 		t.Errorf("note %q", got)
+	}
+	if got := read(BoundariesCSV); len(got) != 3 || strings.Join(got[0], ",") != "kind,value,since,until,source" ||
+		strings.Join(got[2], ",") != "no_weekend,,2026-10-21,,review" {
+		t.Errorf("boundaries %q", got)
 	}
 	if got := read(MinutesCSV); len(got) != 3 || got[2][4] != "true" {
 		t.Errorf("minutes %q", got)
@@ -249,7 +264,7 @@ func TestSchemaMatchesTypes(t *testing.T) {
 	}
 	for def, typ := range map[string]reflect.Type{
 		"minute": reflect.TypeFor[Minute](), "interval": reflect.TypeFor[Interval](), "dayRecord": reflect.TypeFor[Day](),
-		"checkin": reflect.TypeFor[Checkin](), "annotation": reflect.TypeFor[Annotation](),
+		"checkin": reflect.TypeFor[Checkin](), "annotation": reflect.TypeFor[Annotation](), "boundary": reflect.TypeFor[Boundary](),
 	} {
 		var fields, required []string
 		for f := range typ.Fields() {

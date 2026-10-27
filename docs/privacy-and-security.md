@@ -303,9 +303,9 @@ Phase 1 so far:
     prefixed with `'`.
   - The format is versioned (`schemas/v1/export.schema.json`).
   - Exports hold what the database holds: app ids, command names,
-    category minutes, features, scores, check-in answers and
-    annotations. Keyed hashes stay opaque. Boundaries aren't in the
-    export yet; `burnout boundary list --history` shows all of them.
+    category minutes, features, scores, check-in answers, annotations
+    and boundaries (those that applied in the range, with their
+    history). Keyed hashes stay opaque.
   - Exports live wherever the user saved them, so `forget` can't delete
     them. The data folder keeps a list of export paths (no contents), and
     `forget` and `privacy` show the ones still on disk.
