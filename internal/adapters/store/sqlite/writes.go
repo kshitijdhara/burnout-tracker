@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -117,6 +118,41 @@ func (s *Store) inTx(ctx context.Context, what string, fn func(*sql.Tx) error) e
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite: %s: %w", what, err)
 	}
+	return nil
+}
+
+// inImmediateTx runs fn in a BEGIN IMMEDIATE transaction, for a write
+// that reads first. It takes the write lock at the start, waiting up to
+// busy_timeout for it, so another connection committing between the read
+// and the write can't fail it with SQLITE_BUSY_SNAPSHOT, as a deferred
+// transaction can.
+func (s *Store) inImmediateTx(ctx context.Context, what string, fn func(*sql.Conn) error) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite: %s: %w", what, err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return fmt.Errorf("sqlite: %s: %w", what, err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		// Rolled back even if ctx is done; a connection still in a
+		// transaction is closed rather than returned to the pool.
+		if _, rbErr := conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`); rbErr != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
+	if err := fn(conn); err != nil {
+		return fmt.Errorf("sqlite: %s: %w", what, err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return fmt.Errorf("sqlite: %s: %w", what, err)
+	}
+	committed = true
 	return nil
 }
 
