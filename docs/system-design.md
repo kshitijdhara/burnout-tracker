@@ -544,6 +544,18 @@ Phase 1 so far:
   They are starting points for Phase 4 to fit.
 - **Changing role** rescores all of history at once, because weights are
   applied at scoring time.
+- **User overrides** (`classify.overrides`) map an app id or a site
+  (`domain:example.com`) to a category. They win over bundled rules but
+  never over exclusions or the sensitive lists, so step 3 runs before
+  step 2 in practice; the privacy step stays first.
+- **Titles** (opt-in `privacy.title_classification`): for bundled
+  browsers only, the site is read from the raw title in memory and the
+  title is redacted. Sites are matched against exclusions and sensitive
+  sites, then the user's site overrides, then a small bundled site list
+  (`internal/domain/classify/domain_rules.go`), then the in-memory cache.
+  Without a match the window keeps its browser category. A browser
+  window whose category changes within a minute gets one row per
+  category. There is no Laya step yet (ADR-0009).
 - **Core hours** (`profile.core_hours`, default 09:00-18:00, weekdays)
   define after-hours work. Changing them changes the features themselves:
   - each stored day records the feature parameters it was computed with;

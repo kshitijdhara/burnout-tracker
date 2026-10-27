@@ -14,7 +14,7 @@ import (
 func TestSafeModeDropsTheCollectorAndShowsInTheTray(t *testing.T) {
 	safeMode.Store(true)
 	t.Cleanup(func() { safeMode.Store(false) })
-	if c := screenCollector(slog.New(slog.NewTextHandler(io.Discard, nil)), true); c != nil {
+	if c := screenCollector(slog.New(slog.NewTextHandler(io.Discard, nil)), true, true); c != nil {
 		_ = c.Close()
 		t.Fatal("a desktop collector in safe mode")
 	}

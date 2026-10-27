@@ -314,7 +314,7 @@ var errNoTray = errors.New("no tray icon could be shown, so nothing is recorded 
 func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, settings *liveConfig, store *sqlite.Store,
 	keys *keystore.Store, key model.Sensitive[[]byte],
 ) error {
-	collector := screenCollector(log, safe)
+	collector := screenCollector(log, safe, settings.current().Privacy.TitleClassification)
 	if collector != nil {
 		defer func() { _ = collector.Close() }()
 	}
@@ -412,19 +412,21 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 }
 
 // screenCollector is the desktop collector, or nil when this platform has
-// none or the daemon is in safe mode.
-func screenCollector(log *slog.Logger, safe bool) ports.Collector {
+// none or the daemon is in safe mode. titles is read once: the collector
+// decides at start whether it reads titles (on macOS, only with the Screen
+// Recording permission).
+func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 	if safe {
 		log.Warn("safe mode after 3 starts in 10 minutes: no desktop collector; recording hook data only until an hour passes without a crash")
 		return nil
 	}
-	c, err := newCollector(collectorOptions{Now: time.Now})
+	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)
 		return nil
 	}
 	caps := c.Capabilities()
-	log.Info("collector ready", "name", caps.Name, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
+	log.Info("collector ready", "name", caps.Name, "titles", caps.Titles, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
 	return c
 }
 

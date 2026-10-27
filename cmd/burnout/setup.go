@@ -20,10 +20,19 @@ import (
 
 const consentFile = "consent"
 
-// summary is the first-run data summary (privacy & security §3, §5.2 AC-3).
-const summary = `burnout-tracker collects, on this device only:
+// summary is the first-run data summary (privacy & security §3, §5.2
+// AC-3). titles says whether title classification is on.
+func summary(titles bool) string {
+	window := "window titles: off"
+	if titles {
+		window = "browser titles are read to tell sites apart, in memory only; never stored"
+	}
+	return fmt.Sprintf(summaryFormat, window)
+}
 
-  • which apps and windows hold your attention, per minute (window titles: off)
+const summaryFormat = `burnout-tracker collects, on this device only:
+
+  • which apps and windows hold your attention, per minute (%s)
   • whether you are present (idle time, screen lock, calls, visible video)
   • shell commands: the command name and a known subcommand only — never
     arguments — plus exit code, duration and a keyed hash of the project
@@ -43,7 +52,7 @@ func runSetup(ctx context.Context, _ []string) error {
 	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return errors.New("setup must be run interactively in a terminal")
 	}
-	fmt.Print(summary)
+	fmt.Print(summary(titlesOn()))
 	warnIfUnencrypted(ctx)
 	fmt.Print("\nType \"yes\" to consent and start collecting: ")
 	in := bufio.NewReader(os.Stdin)

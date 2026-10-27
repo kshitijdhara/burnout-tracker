@@ -20,6 +20,24 @@ const (
 	CategoryOther         Category = "other"
 )
 
+// Categories returns every category, in a stable order.
+func Categories() []Category {
+	return []Category{
+		CategoryPrivate, CategoryUncategorized, CategoryCode, CategoryTerminal, CategoryBrowser, CategoryComms,
+		CategoryMeeting, CategoryDocs, CategoryMedia, CategoryRemoteDesktop, CategoryOther,
+	}
+}
+
+// Valid reports whether c is one of Categories.
+func (c Category) Valid() bool {
+	for _, k := range Categories() {
+		if c == k {
+			return true
+		}
+	}
+	return false
+}
+
 // WindowID identifies a window for the lifetime of one daemon run. It is an
 // opaque OS handle and is never persisted; persistence uses a keyed HMAC.
 type WindowID uint64

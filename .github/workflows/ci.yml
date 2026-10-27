@@ -166,3 +166,5 @@ jobs:
         run: go test ./internal/domain/calendar/ -run='^$' -fuzz=FuzzParse -fuzztime=60s
       - name: Fuzz private-hours parser
         run: go test ./internal/domain/schedule/ -run='^$' -fuzz=FuzzParse -fuzztime=30s
+      - name: Fuzz title redactor
+        run: go test ./internal/domain/redact/ -run='^$' -fuzz=FuzzTitle -fuzztime=60s
