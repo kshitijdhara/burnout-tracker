@@ -324,7 +324,7 @@ function renderWeek(w) {
     const list = el("ul");
     for (const s of w.suggestions) {
       const item = el("li", {}, el("span", { text: s }));
-      for (const o of (w.offers || []).filter((o) => o.for === s)) offerButton(item, o, bounds, w);
+      for (const o of (w.offers || []).filter((o) => o.for === s)) offerButton(item, o, bounds, w).catch(showError);
       list.append(item);
     }
     body.append(el("h3", { text: "One or two things to try" }), list);
@@ -338,11 +338,13 @@ function renderWeek(w) {
 
 // ---- Boundaries --------------------------------------------------------
 
+// [kind, label, input type, starting value, step, min, max], as the
+// server parses them.
 const boundaryKinds = [
-  ["shutdown", "Stop work by", "time", "21:30"],
-  ["no_weekend", "No work at the weekend", "", ""],
-  ["meetings_max", "At most this many hours of meetings", "number", "4"],
-  ["focus_block", "A focus block of at least (minutes)", "number", "90"],
+  ["shutdown", "Stop work by", "time", "21:30", "60", "", ""],
+  ["no_weekend", "No work at the weekend", "", "", "", "", ""],
+  ["meetings_max", "At most this many hours of meetings", "number", "4", "0.5", "0.5", "12"],
+  ["focus_block", "A focus block of at least (minutes)", "number", "90", "1", "15", "240"],
 ];
 
 // offerButton offers the boundary that goes with a suggestion. It is
@@ -364,7 +366,7 @@ async function renderBoundaries(box, w, said = "") {
   const list = el("ul", { class: "plain annotations" });
   for (const b of bs) {
     const summary = kept.get(b.text) || `applies from ${b.since}`;
-    const item = el("li", {}, el("span", { text: `${b.text}: ${summary}` }));
+    const item = el("li", {}, el("span", { text: `${b.text[0].toUpperCase()}${b.text.slice(1)}: ${summary}` }));
     if (s.writable) {
       item.append(button("Remove", () => action(item, status, "Removed.", async () => {
         await send("DELETE", `/api/boundaries/${encodeURIComponent(b.id)}`);
@@ -384,12 +386,18 @@ async function renderBoundaries(box, w, said = "") {
   const value = el("input", { id: "boundary-value", name: "value", type: "time", value: "21:30", autocomplete: "off" });
   const valueLabel = el("label", { for: "boundary-value", text: "Value" });
   const sync = () => {
-    const [, , type, start] = boundaryKinds.find(([v]) => v === kind.value);
+    const [, , type, start, step, min, max] = boundaryKinds.find(([v]) => v === kind.value);
     value.hidden = valueLabel.hidden = type === "";
     value.type = type || "text";
+    // Reset every time: a fractional step left on a time input makes it
+    // send seconds, which the server refuses.
+    value.step = step;
+    value.min = min;
+    value.max = max;
     value.value = start;
   };
   kind.addEventListener("change", sync);
+  sync();
   const add = el("form", { class: "inline-form", "aria-label": "Set a boundary" },
     el("label", { for: "boundary-kind", text: "Boundary" }), kind, valueLabel, value,
     el("button", { type: "submit", text: "Set" }));
