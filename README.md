@@ -228,6 +228,19 @@ settings, and won't start on it.
   app's time counts, under `private`, without its name. Password
   managers, finance apps, crypto wallets and a few health apps are always
   private.
+- `burnout config set privacy.title_classification true`, then restart
+  the daemon (`burnout service install`): browser titles tell sites
+  apart, so GitHub counts as code and Gmail as comms. Titles are
+  redacted and classified in memory, and never stored; only the category
+  is kept. Banking, payment, health, dating and password-manager sites
+  count as `private`. On macOS this needs the Screen Recording
+  permission.
+- `burnout config add privacy.exclude_domains example.com`: that site
+  (and its subdomains) counts as `private`, when title classification
+  is on.
+- `burnout config add classify.overrides com.spotify.client=other
+  domain:example.com=docs`: your own category for an app or a site.
+  Overrides never beat exclusions or the sensitive lists.
 - `burnout config set privacy.aggregate_only true`: keep only time per
   category (code, comms, browser, …), with no app names or per-window
   rows. Days recorded before you turned it on are reduced overnight.
@@ -298,7 +311,8 @@ security delete-generic-password -s burnout -a hmac   # if the keychain was used
   nothing.
 
 **Preview limits.** There is no installer yet. Phase 0 needs no macOS privacy permissions,
-because window titles and input counts are off. Call and video detection
+because window titles (unless you turn on title classification) and
+input counts are off. Call and video detection
 is macOS-only for now.
 
 ### Windows and Linux

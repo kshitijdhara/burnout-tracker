@@ -235,14 +235,40 @@ Phase 1 so far:
 - **Sensitive-apps denylist** is built for desktop apps: password
   managers, finance and tax apps, crypto wallets and a few health apps.
   Banking, health and dating mostly happen in a browser, where only the
-  window title says what a page is; those sites are covered when opt-in
-  title classification arrives.
+  window title says what a page is. With title classification on, a
+  bundled list of sensitive sites (banking, payments, investing and
+  crypto, health and therapy, dating, password-manager vaults) is
+  recorded as `private` too.
+- **Title classification** is built (§4.1), opt-in with
+  `privacy.title_classification` (off by default; read when the daemon
+  starts; on macOS it needs Screen Recording, which `doctor` reports).
+  - Only bundled browsers' titles are used; other apps' titles are
+    ignored.
+  - In memory, the site is read from the raw title: a site name the
+    page puts in its title ("Inbox - Gmail") or a host name in it.
+  - The title is redacted (`internal/domain/redact`, fuzzed in CI):
+    emails, URLs, paths, 3+ digit numbers and 20+ character id- or
+    secret-like tokens become placeholders.
+  - Cascade: app exclusions and sensitive apps; site exclusions and
+    sensitive sites (`private`, whatever an override says); the user's
+    site overrides; bundled sites; the in-memory cache; the browser's
+    own category.
+  - The cache is keyed by HMAC of the browser, the site and the
+    redacted title. It is bounded, cleared when settings change and
+    never written. Titles, sites and cache keys never reach the
+    database, logs, exports or the doctor bundle; canary tests check
+    the sink, a real database and its WAL, the log, an export and the
+    bundle.
 - **The config file** is built (system design §3.4): `burnout config
   get|set|add|remove|unset|validate`. It carries:
   - **private hours** (`privacy.private_hours`): the daemon treats them
     exactly as a pause;
-  - **exclusions** (`privacy.exclude_apps`): per app; per domain comes
-    with title classification;
+  - **exclusions** (`privacy.exclude_apps`, `privacy.exclude_domains`):
+    per app, and per site when title classification is on. The doctor
+    bundle masks both;
+  - **your categories** (`classify.overrides`): an app id or
+    `domain:example.com` mapped to a category. They beat the bundled
+    rules, never exclusions or the sensitive lists;
   - **aggregate-only mode** (`privacy.aggregate_only`): new minutes are
     written as one row per category, with no app id or window key, and
     the nightly maintenance reduces days recorded before the mode was on.
