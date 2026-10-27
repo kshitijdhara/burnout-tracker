@@ -388,7 +388,8 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	}
 	add("Profile", fmt.Sprintf("%s, core hours %s", cfg.Profile.Role, cfg.Profile.CoreHours))
 	collecting := "not running"
-	if daemonAnswers(ctx) {
+	running := daemonAnswers(ctx)
+	if running {
 		collecting = "running"
 	}
 	if paused, p := control.PauseState(dataDir, now); paused {
@@ -400,7 +401,7 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	add("Pause", "the tray menu, the dashboard's Privacy page, or `burnout pause 1h` / `burnout pause tomorrow`; `burnout resume` to start again")
 	add("Change settings", "`burnout config set KEY VALUE` (all keys: `burnout config get`), or edit the config file above")
 	add("Uninstall", "`burnout uninstall`; add `--purge` to delete all your data too")
-	add("Window titles", titlesLine(cfg))
+	add("Window titles", titlesLine(cfg, daemonReadsTitles(running, dataDir)))
 	add("Keystroke counts", "off (not collected)")
 	hours := "none"
 	if len(cfg.Privacy.PrivateHours) > 0 {
@@ -478,8 +479,20 @@ func titlesOn() bool {
 	return err == nil && c.Privacy.TitleClassification
 }
 
+// daemonReadsTitles reports whether a daemon is running whose desktop
+// collector reads window titles. It decided that when it started, so it
+// can disagree with the config file until it restarts.
+func daemonReadsTitles(running bool, dataDir string) bool {
+	return running && control.DaemonTitles(dataDir)
+}
+
 // titlesLine describes title classification, for privacy and doctor.
-func titlesLine(c config.Config) string {
+// daemonTitles is daemonReadsTitles.
+func titlesLine(c config.Config, daemonTitles bool) string {
+	if !c.Privacy.TitleClassification && daemonTitles {
+		return "off from the next daemon start: the running daemon still reads browser titles in memory, never stored; " +
+			"`burnout service install` restarts it now"
+	}
 	if c.Privacy.TitleClassification {
 		s := "on: browser titles are redacted and classified in memory, never stored; only the category is kept"
 		if runtime.GOOS == "darwin" {

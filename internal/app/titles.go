@@ -3,25 +3,23 @@ package app
 import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/redact"
 )
 
-// maxTitleCache bounds the title cache. It is cleared, not evicted, when
-// full: entries are cheap to recompute.
-const maxTitleCache = 4096
-
 // titleRules classifies browser windows by title (privacy & security §4.1,
-// system design §4.6). The raw title, its domain and the redacted title
-// live only in memory, for one call; only the category leaves. The cache
-// is keyed by HMAC and is never written anywhere.
+// system design §4.6). The raw title and its domain live only in memory,
+// for one call; only the category leaves.
+//
+// There is no cache yet: every step is a map lookup or a scan of the
+// title, so a cache would cost a redaction and an HMAC per window per tick
+// to save nothing. It comes with the optional Laya step (ADR-0006), keyed
+// by HMAC of the browser, the site and the redacted title; the Hasher is
+// taken now for that.
 type titleRules struct {
-	rules  *classify.Rules
-	hasher Hasher
-	cache  map[string]model.Category
+	rules *classify.Rules
 }
 
-func newTitleRules(rules *classify.Rules, h Hasher) *titleRules {
-	return &titleRules{rules: rules, hasher: h, cache: make(map[string]model.Category)}
+func newTitleRules(rules *classify.Rules, _ Hasher) *titleRules {
+	return &titleRules{rules: rules}
 }
 
 // category returns w's category. Without a title, or for an app other than
@@ -29,8 +27,7 @@ func newTitleRules(rules *classify.Rules, h Hasher) *titleRules {
 // cascade: the app's exclusion, then a sensitive or excluded site named
 // anywhere in the title, then the title's site (exclusions and sensitive
 // sites are private, whatever the user's overrides say), the user's site
-// overrides and the bundled sites, then the cache of earlier results, then
-// the app's own category.
+// overrides and the bundled sites, then the app's own category.
 func (t *titleRules) category(w model.Window) model.Category {
 	cat := t.rules.App(w.AppID)
 	title := w.Title.Reveal()
@@ -40,21 +37,10 @@ func (t *titleRules) category(w model.Window) model.Category {
 	if t.rules.PrivateTitle(title) {
 		return model.CategoryPrivate
 	}
-	domain := classify.DomainFromTitle(title)
-	if c, ok := t.rules.Domain(domain); ok {
-		return c
-	}
-	// Two pages with the same redacted title on different sites
-	// ("Sign in") must not share an entry.
-	key := t.hasher.Key("title", w.AppID, domain, redact.Title(title))
-	if c, ok := t.cache[key]; ok {
+	if c, ok := t.rules.Domain(classify.DomainFromTitle(title)); ok {
 		return c
 	}
 	// The optional Laya step (ADR-0006) slots in here. Until then the
 	// app's category stands.
-	if len(t.cache) >= maxTitleCache {
-		clear(t.cache)
-	}
-	t.cache[key] = cat
 	return cat
 }

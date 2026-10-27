@@ -28,6 +28,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/sdnotify"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -111,7 +112,7 @@ func runDaemon(ctx context.Context, args []string) error {
 		return err
 	}
 	defer func() { _ = release() }()
-	return serveDaemon(ctx, log, dataDir, false)
+	return serveDaemon(ctx, log, dataDir, false, func(error) {})
 }
 
 // runServiceDaemon is the daemon as launchd, systemd or Task Scheduler
@@ -160,20 +161,18 @@ func runServiceDaemon(ctx context.Context) (err error) {
 	if recErr != nil {
 		log.Warn("could not record this start for crash-loop detection", "err", recErr)
 	}
-	err = serveDaemon(ctx, log, dataDir, history.Safe)
-	if !errors.Is(err, errSafeModeOver) {
-		// It returned, so it didn't crash: a stop, a logout or an error
-		// a restart may fix doesn't count towards safe mode. A panic, a
-		// native fault or the watchdog's kill never gets here.
-		_ = crashloop.Forget(dataDir, started)
-	}
+	stopped := cleanStop(dataDir, started)
+	err = serveDaemon(ctx, log, dataDir, history.Safe, stopped)
+	stopped(err)
 	if errors.Is(err, errSafeModeOver) {
 		// Exit with an error so launchd or systemd starts a normal daemon.
 		log.Info("leaving safe mode after an hour without a crash; restarting with the desktop collector")
 		return err
 	}
 	if errors.Is(err, errBadConfig) {
-		log.Error("not starting: the config file is invalid; see `burnout config validate`", "err", err)
+		// Not the error itself: it can quote excluded sites and apps, and
+		// the log goes into `doctor --bundle` (privacy & security §10).
+		log.Error("not starting: the config file is invalid; run `burnout config validate`")
 		return nil
 	}
 	if errors.Is(err, sqlite.ErrSchemaTooNew) {
@@ -184,6 +183,20 @@ func runServiceDaemon(ctx context.Context) (err error) {
 		log.Error("daemon stopped", "err", err)
 	}
 	return stderr.redactErr(err)
+}
+
+// cleanStop forgets the start at started once the daemon returns an error,
+// or none, at most once. It returned, so it didn't crash: a stop, a logout
+// or an error a restart may fix doesn't count towards safe mode. A panic,
+// a native fault or the watchdog's kill never gets here. Ending safe mode
+// cleared the history already.
+func cleanStop(dataDir string, started time.Time) func(error) {
+	forget := sync.OnceFunc(func() { _ = crashloop.Forget(dataDir, started) })
+	return func(err error) {
+		if !errors.Is(err, errSafeModeOver) {
+			forget()
+		}
+	}
 }
 
 // waitForLock takes the daemon lock, waiting while a daemon started in a
@@ -264,7 +277,9 @@ var errSafeModeOver = errors.New("safe mode is over; restart to use the desktop 
 
 // serveDaemon runs the daemon once it holds the lock. In safe mode, after
 // repeated crashes (system design §11.2), it records hook data only.
-func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string, safe bool) error {
+// stopped gets collect's error as soon as collect returns: on macOS the
+// process exits at logout before serveDaemon can return.
+func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string, safe bool, stopped func(error)) error {
 	safeMode.Store(safe)
 	cfgPath, err := configPath()
 	if err != nil {
@@ -295,15 +310,32 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string, safe boo
 
 	dash := &trayDashboard{dataDir: dataDir, log: log}
 	defer dash.close()
+	ts := &trayState{dataDir: dataDir, settings: settings.current}
 	// The tray icon shows before anything is collected, and nothing is
 	// collected, hooks included, unless it does (privacy & security §5.2
 	// AC-1).
-	return runTray(ctx, trayMenu(log, dataDir, settings, dash), func(ctx context.Context, shown bool) error {
+	return runTray(ctx, trayMenu(log, dataDir, ts, dash), trayWork(ts, stopped, func(ctx context.Context) error {
+		return collect(ctx, log, dataDir, safe, settings, store, keys, key)
+	}))
+}
+
+// trayWork runs collect while the icon shows, keeping the tray's slower
+// status current beside it, and hands collect's error to stopped before
+// it returns.
+func trayWork(ts *trayState, stopped func(error), collect func(context.Context) error) tray.Work {
+	return func(ctx context.Context, shown bool) error {
 		if !shown {
 			return errNoTray
 		}
-		return collect(ctx, log, dataDir, safe, settings, store, keys, key)
-	})
+		var wg sync.WaitGroup
+		lctx, cancel := context.WithCancel(ctx)
+		wg.Go(func() { ts.loop(lctx) })
+		err := collect(ctx)
+		cancel()
+		wg.Wait()
+		stopped(err)
+		return err
+	}
 }
 
 // errNoTray means no tray icon could be shown, so nothing may be recorded
@@ -314,9 +346,15 @@ var errNoTray = errors.New("no tray icon could be shown, so nothing is recorded 
 func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, settings *liveConfig, store *sqlite.Store,
 	keys *keystore.Store, key model.Sensitive[[]byte],
 ) error {
-	collector := screenCollector(log, safe, settings.current().Privacy.TitleClassification)
+	titles := settings.current().Privacy.TitleClassification
+	collector := screenCollector(log, safe, titles)
 	if collector != nil {
 		defer func() { _ = collector.Close() }()
+	}
+	// The collector reads titles, or doesn't, until the daemon restarts:
+	// privacy and doctor say so while the config file no longer agrees.
+	if err := control.SetDaemonTitles(dataDir, titles && collector != nil); err != nil {
+		log.Warn("could not record whether this daemon reads titles", "err", err)
 	}
 
 	server, err := ingest.Listen(ctx)
@@ -421,7 +459,7 @@ func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 		log.Warn("safe mode after 3 starts in 10 minutes: no desktop collector; recording hook data only until an hour passes without a crash")
 		return nil
 	}
-	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now})
+	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now, Wait: true})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)
 		return nil

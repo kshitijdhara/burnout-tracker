@@ -2,8 +2,8 @@
 // through small files in the owner-only data folder: pausing collection
 // (privacy & security §5.1 "Pause"), forgetting recent data ("Delete
 // recent", "Forget"), when the monthly "what's collected" reminder was
-// last seen (§5.2 AC-4), and the day's nudge with the kinds turned off
-// from the tray (system design §8.3). Files, not the hook socket, so the socket stays
+// last seen (§5.2 AC-4), the day's nudge (system design §8.3), and, the
+// other way, whether the running daemon reads window titles. Files, not the hook socket, so the socket stays
 // hooks-only and its wire contract doesn't change.
 package control
 
@@ -29,6 +29,7 @@ const (
 	forgetDoneFile = "forget-done"
 	reminderFile   = "reminder-seen"
 	nudgesFile     = "nudges"
+	titlesFile     = "daemon-titles"
 )
 
 // Pause is a pause of collection. A zero Until means until resumed.
@@ -140,12 +141,15 @@ func ReminderSeen(dataDir string) (time.Time, bool) {
 }
 
 // Nudges is the tray's nudge state: the day's nudge and whether it was
-// snoozed, and the kinds the user asked never to see again.
+// snoozed.
 type Nudges struct {
-	Day     string   `json:"day,omitempty"` // logical day Kind first showed on
-	Kind    string   `json:"kind,omitempty"`
-	Snoozed bool     `json:"snoozed,omitempty"` // until the next day
-	Off     []string `json:"off,omitempty"`
+	Day     string `json:"day,omitempty"` // logical day Kind first showed on
+	Kind    string `json:"kind,omitempty"`
+	Snoozed bool   `json:"snoozed,omitempty"` // until the next day
+	// Off are kinds the tray of v0.1.0-alpha.1 turned off for good. The
+	// tray now turns a kind off in the config file, where `burnout config`
+	// turns it back on; NudgeOn clears a kind from here too.
+	Off []string `json:"off,omitempty"`
 }
 
 // ReadNudges returns the nudge state; none yet is the zero state. An
@@ -183,14 +187,36 @@ func SnoozeNudge(dataDir, day, kind string) error {
 	return writeJSON(filepath.Join(dataDir, nudgesFile), n)
 }
 
-// NudgeOff turns kind off for good, and hides it for the rest of day.
-func NudgeOff(dataDir, day, kind string) error {
-	n, _ := ReadNudges(dataDir) // an unreadable file is replaced
-	if !slices.Contains(n.Off, kind) {
-		n.Off = append(n.Off, kind)
+// NudgeOn clears kind from Off, when the config file turns it on.
+func NudgeOn(dataDir, kind string) error {
+	n, err := ReadNudges(dataDir)
+	if err != nil || !slices.Contains(n.Off, kind) {
+		return err
 	}
-	n.Day, n.Kind, n.Snoozed = day, kind, true
+	n.Off = slices.DeleteFunc(n.Off, func(k string) bool { return k == kind })
 	return writeJSON(filepath.Join(dataDir, nudgesFile), n)
+}
+
+type titlesJSON struct {
+	On bool `json:"on"`
+}
+
+// SetDaemonTitles records whether the daemon's desktop collector reads
+// window titles. It decides that when it starts, so after a change to the
+// config file, privacy and doctor tell the two apart.
+func SetDaemonTitles(dataDir string, on bool) error {
+	return writeJSON(filepath.Join(dataDir, titlesFile), titlesJSON{On: on})
+}
+
+// DaemonTitles reports whether the last daemon to start reads window
+// titles. Only meaningful while a daemon runs; unreadable reads as no.
+func DaemonTitles(dataDir string) bool {
+	b, err := os.ReadFile(filepath.Join(dataDir, titlesFile)) //nolint:gosec // our own data folder
+	if err != nil {
+		return false
+	}
+	var t titlesJSON
+	return json.Unmarshal(b, &t) == nil && t.On
 }
 
 type doneJSON struct {

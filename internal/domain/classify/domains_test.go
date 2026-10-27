@@ -88,15 +88,18 @@ func TestBundledDomainsAreHostnames(t *testing.T) {
 }
 
 func TestPrivateTitle(t *testing.T) {
-	r := New([]string{"domain:mybank.com", "domain:wiki.example.co.uk"}, nil)
+	r := New([]string{"domain:mybank.com", "domain:wiki.example.co.uk", "domain:shop.example.org.uk"}, nil)
 	for title, want := range map[string]bool{
+		"Team page · Example":                                  false, // wiki.example.co.uk is part of a site
+		"Basket · Example":                                     false, // so is shop.example.org.uk
+		"Team page | wiki.example.co.uk":                       true,
+		"MyBank - Statements - Google Chrome":                  true,
 		"Bank of America | Online Banking | Accounts Overview": true,
 		"Accounts - Wells Fargo":                               true,
 		"CHASE: sign in":                                       true,
 		"Inbox (2) - LastPass":                                 true,
 		"MyBank - Statements":                                  true, // the excluded site's own word
 		"Page on mybank.com":                                   true,
-		"Team page · Example":                                  true,  // wiki.example.co.uk
 		"A match report - Sport":                               false, // ambiguous words need the domain
 		"Chasers of the light":                                 false, // whole words only
 		"Pull request · owner/repo · GitHub":                   false,
@@ -123,6 +126,45 @@ func TestSensitiveDomainsHaveNames(t *testing.T) {
 	for _, d := range sensitiveDomains {
 		if !named[d] {
 			t.Errorf("%s has no name in sensitiveNames", d)
+		}
+	}
+}
+
+// Excluding a site never makes the browser's own name private: Chrome,
+// Edge and Firefox end their titles on Windows and Linux with a name
+// that carries a site's word ("Google", "Microsoft", "Mozilla").
+func TestExclusionsDoNotMatchBrowserNames(t *testing.T) {
+	const (
+		pr   = "Pull request · owner/repo · GitHub"
+		edge = " - Personal - Microsoft\u200b Edge" // Edge puts a zero-width space in its name
+	)
+	tests := []struct {
+		exclude string
+		title   string
+		want    bool
+	}{
+		// A subdomain: its parent's word names other sites too.
+		{"mail.google.com", pr + " - Google Chrome", false},
+		{"mail.google.com", "Design doc - Google Docs - Google Chrome", false},
+		{"mail.google.com", "Inbox - mail.google.com - Google Chrome", true},
+		{"teams.microsoft.com", pr + edge, false},
+		{"teams.microsoft.com", "Chat | teams.microsoft.com" + edge, true},
+		{"developer.mozilla.org", pr + " — Mozilla Firefox", false},
+		{"developer.mozilla.org", "Array - developer.mozilla.org — Mozilla Firefox Private Browsing", true},
+		// A whole site: its word counts, but not in the browser's name.
+		{"google.com", pr + " - Google Chrome", false},
+		{"google.com", "Google Search - Google Chrome", true},
+		{"microsoft.com", pr + edge, false},
+		{"microsoft.com", "Microsoft account" + edge, true},
+		{"mozilla.org", pr + " — Mozilla Firefox", false},
+		{"mozilla.org", "Mozilla Firefox", false},
+		{"mozilla.org", "Donate to Mozilla — Mozilla Firefox", true},
+		{"mybank.com", "MyBank - Statements - Brave", true},
+	}
+	for _, tc := range tests {
+		r := New([]string{DomainPrefix + tc.exclude}, nil)
+		if got := r.PrivateTitle(tc.title); got != tc.want {
+			t.Errorf("excluding %s: PrivateTitle(%q) = %t, want %t", tc.exclude, tc.title, got, tc.want)
 		}
 	}
 }

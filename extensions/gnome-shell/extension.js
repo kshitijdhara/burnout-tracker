@@ -34,6 +34,7 @@ const TOKEN_RE = /^[0-9a-f]{64}$/;
 
 // Limits, kept in step with the schema and internal/adapters/collector/wayland.
 const MAX_REQUEST_BYTES = 4096;
+const MAX_REPLY_BYTES = 1048576;
 const MAX_WINDOWS = 512;
 const MAX_MONITORS = 32;
 const MAX_CLASS_CHARS = 256;
@@ -42,6 +43,10 @@ const MAX_TITLE_CHARS = 1024;
 // A connection with no request for this long is closed. The agent asks
 // every second, so only a stuck or departed client gets here.
 const IDLE_SECONDS = 15;
+
+// Connections open at once. The daemon holds one and doctor briefly opens
+// two; a connection beyond this is closed unanswered.
+const MAX_CLIENTS = 8;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -108,14 +113,39 @@ function snapshot(titles) {
         monitors.push(rect(display.get_monitor_geometry(i)));
 
     const [px, py] = global.get_pointer();
-    return {
+    return fit({
         v: VERSION,
         op: 'snapshot',
         windows,
         monitors,
         focus: display.focus_window?.get_id() ?? 0,
         pointer: {x: px, y: py},
-    };
+    });
+}
+
+function byteLength(v) {
+    return encoder.encode(JSON.stringify(v)).length;
+}
+
+// fit keeps a reply within MAX_REPLY_BYTES, which the agent refuses past:
+// the per-field limits count characters, and JSON escapes can make one
+// six bytes. It empties titles, then drops windows, bottom of the stack
+// first, since the top is what the user sees. The running size only ever
+// overestimates.
+function fit(reply) {
+    let size = byteLength(reply);
+    const ws = reply.windows;
+    for (let i = 0; i < ws.length && size > MAX_REPLY_BYTES; i++) {
+        if (ws[i].title) {
+            size -= byteLength(ws[i].title) - 2;
+            ws[i].title = '';
+        }
+    }
+    let drop = 0;
+    while (size > MAX_REPLY_BYTES && drop < ws.length)
+        size -= byteLength(ws[drop++]);
+    reply.windows = ws.slice(drop);
+    return reply;
 }
 
 // timingSafeEqual compares two strings without stopping at the first
@@ -335,6 +365,14 @@ export default class BurnoutBridge extends Extension {
             this._service.add_address(Gio.UnixSocketAddress.new(this._socketPath),
                 Gio.SocketType.STREAM, Gio.SocketProtocol.DEFAULT, null);
             this._service.connect('incoming', (_svc, conn) => {
+                if (this._clients.size >= MAX_CLIENTS) {
+                    conn.close_async(GLib.PRIORITY_DEFAULT, null, (cn, res) => {
+                        try {
+                            cn.close_finish(res);
+                        } catch {}
+                    });
+                    return true;
+                }
                 const c = new Client(this, conn);
                 this._clients.add(c);
                 c.start();
