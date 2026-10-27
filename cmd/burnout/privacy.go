@@ -168,6 +168,31 @@ func forgetData(ctx context.Context, dataDir string, from time.Time) error {
 	return store.Forget(ctx, from, model.LogicalDay(from, rollover))
 }
 
+// pauseEnd is when a pause from the tray or the dashboard ends: in an
+// hour, at the start of tomorrow's logical day, or never (zero: until
+// resumed).
+func pauseEnd(hour, tomorrow bool, now time.Time) time.Time {
+	switch {
+	case hour:
+		return now.Add(time.Hour)
+	case tomorrow:
+		until, _ := pauseUntil("tomorrow", now, rollover)
+		return until
+	}
+	return time.Time{}
+}
+
+// recentStart is where "delete the last hour" (lastHour) or "delete today"
+// starts, for the tray and the dashboard.
+func recentStart(lastHour bool, now time.Time) (time.Time, error) {
+	last, today := time.Duration(0), !lastHour
+	if lastHour {
+		last = time.Hour
+	}
+	from, _, err := forgetFrom(last, today, "", false, now, rollover)
+	return from, err
+}
+
 // forgetThroughDaemon asks the running daemon to forget everything from
 // from on, and waits for it.
 func forgetThroughDaemon(dataDir string, from time.Time) error {

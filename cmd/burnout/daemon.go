@@ -321,12 +321,18 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string, safe boo
 
 // trayWork runs collect while the icon shows, keeping the tray's slower
 // status current beside it, and hands collect's error to stopped before
-// it returns.
+// it returns. A shutdown (SIGTERM, which Go also raises for a Windows
+// logoff or shutdown; macOS quitting the app; Windows ending the session,
+// which removes the icon) cancels ctx first, so the start is forgotten
+// then, before the OS may kill the process while collect writes out. Only
+// an outright kill without warning still counts as a crash.
 func trayWork(ts *trayState, stopped func(error), collect func(context.Context) error) tray.Work {
 	return func(ctx context.Context, shown bool) error {
 		if !shown {
 			return errNoTray
 		}
+		forgetAtShutdown := context.AfterFunc(ctx, func() { stopped(nil) })
+		defer forgetAtShutdown()
 		var wg sync.WaitGroup
 		lctx, cancel := context.WithCancel(ctx)
 		wg.Go(func() { ts.loop(lctx) })
@@ -347,7 +353,7 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 	keys *keystore.Store, key model.Sensitive[[]byte],
 ) error {
 	titles := settings.current().Privacy.TitleClassification
-	collector := screenCollector(log, safe, titles)
+	collector := screenCollector(ctx, log, safe, titles)
 	if collector != nil {
 		defer func() { _ = collector.Close() }()
 	}
@@ -454,12 +460,12 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 // none or the daemon is in safe mode. titles is read once: the collector
 // decides at start whether it reads titles (on macOS, only with the Screen
 // Recording permission).
-func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
+func screenCollector(ctx context.Context, log *slog.Logger, safe, titles bool) ports.Collector {
 	if safe {
 		log.Warn("safe mode after 3 starts in 10 minutes: no desktop collector; recording hook data only until an hour passes without a crash")
 		return nil
 	}
-	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now, Wait: true})
+	c, err := newCollector(ctx, collectorOptions{Titles: titles, Now: time.Now, Wait: true})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)
 		return nil

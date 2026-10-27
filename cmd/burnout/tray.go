@@ -29,25 +29,12 @@ func trayMenu(log *slog.Logger, dataDir string, ts *trayState, dash *trayDashboa
 	return tray.Menu{
 		Status: func() tray.Status { return ts.status(time.Now()) },
 		Pause: func(p tray.PauseFor) error {
-			now := time.Now()
-			var until time.Time // zero: until resumed
-			switch p {
-			case tray.PauseHour:
-				until = now.Add(time.Hour)
-			case tray.PauseTomorrow:
-				until, _ = pauseUntil("tomorrow", now, rollover)
-			}
+			until := pauseEnd(p == tray.PauseHour, p == tray.PauseTomorrow, time.Now())
 			return then(control.SetPause(dataDir, until))
 		},
 		Resume: func() error { return then(control.Resume(dataDir)) },
 		Delete: func(r tray.Range) error {
-			last, today := time.Duration(0), false
-			if r == tray.LastHour {
-				last = time.Hour
-			} else {
-				today = true
-			}
-			from, _, err := forgetFrom(last, today, "", false, time.Now(), rollover)
+			from, err := recentStart(r == tray.LastHour, time.Now())
 			if err != nil {
 				return err
 			}
