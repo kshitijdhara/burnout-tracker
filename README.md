@@ -283,9 +283,7 @@ security delete-generic-password -s burnout -a hmac   # if the keychain was used
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
-**Preview limits.** There is no installer yet, and the
-background service is macOS and Linux only (on Windows, run `burnout
-daemon` in a terminal). Phase 0 needs no macOS privacy permissions,
+**Preview limits.** There is no installer yet. Phase 0 needs no macOS privacy permissions,
 because window titles and input counts are off. Call and video detection
 is macOS-only for now.
 
@@ -312,13 +310,23 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
 
 - **Windows:** build with `go build -o bin\burnout.exe .\cmd\burnout` and
   install hooks with `burnout install-hooks --zsh=false` (Git Bash works
-  with `--bash`). There is no
-  background service on Windows yet: run `burnout daemon` in a terminal and
-  stop it with Ctrl-C (`pkill` and `pgrep` don't exist on Windows).
-  To remove everything, in Command Prompt:
+  with `--bash`). Copy `burnout.exe` somewhere stable first, for example
+  `%LOCALAPPDATA%\Programs\burnout`.
+  The background service is a logon task in Task Scheduler for your
+  account only, so it needs no admin rights: `burnout service install`
+  registers it and starts the daemon. It runs only while you're signed in
+  to the desktop, and Task Scheduler restarts it a minute after it exits
+  with an error; a console window may flash briefly at sign-in. It
+  can't carry `BURNOUT_DATA_DIR` or the other folder overrides, so
+  install refuses while one is set. Its log is
+  `%LOCALAPPDATA%\burnout\logs\daemon.log`, and Go's crash output goes
+  to `stderr.log` next to it. Without the service, run `burnout daemon` in
+  a terminal and stop it with Ctrl-C (`pkill` and `pgrep` don't exist on
+  Windows). To remove everything, in Command Prompt:
 
   ```bat
   burnout uninstall-hooks
+  burnout service uninstall
   rmdir /s /q "%LOCALAPPDATA%\burnout"
   rmdir /s /q "%APPDATA%\burnout"
   cmdkey /delete:burnout:hmac
