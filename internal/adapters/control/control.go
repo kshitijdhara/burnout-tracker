@@ -1,7 +1,8 @@
 // Package control carries requests from the CLI to a running daemon
 // through small files in the owner-only data folder: pausing collection
-// (privacy & security §5.1 "Pause") and forgetting recent data ("Delete
-// recent", "Forget"). Files, not the hook socket, so the socket stays
+// (privacy & security §5.1 "Pause"), forgetting recent data ("Delete
+// recent", "Forget") and when the monthly "what's collected" reminder was
+// last seen (§5.2 AC-4). Files, not the hook socket, so the socket stays
 // hooks-only and its wire contract doesn't change.
 package control
 
@@ -24,6 +25,7 @@ const (
 	pauseFile      = "pause"
 	forgetFile     = "forget-request"
 	forgetDoneFile = "forget-done"
+	reminderFile   = "reminder-seen"
 )
 
 // Pause is a pause of collection. A zero Until means until resumed.
@@ -107,6 +109,31 @@ func TakeForget(dataDir string) (ForgetRequest, bool) {
 		return ForgetRequest{}, false
 	}
 	return r, true
+}
+
+type reminderJSON struct {
+	SeenMs int64 `json:"seen_ms"`
+}
+
+// SetReminderSeen records that the user opened the "what's collected"
+// reminder at at.
+func SetReminderSeen(dataDir string, at time.Time) error {
+	return writeJSON(filepath.Join(dataDir, reminderFile), reminderJSON{SeenMs: at.UnixMilli()})
+}
+
+// ReminderSeen returns when the reminder was last seen, if ever. An
+// unreadable file reads as never seen, so the reminder shows again: the
+// safe direction.
+func ReminderSeen(dataDir string) (time.Time, bool) {
+	b, err := os.ReadFile(filepath.Join(dataDir, reminderFile)) //nolint:gosec // our own data folder
+	if err != nil {
+		return time.Time{}, false
+	}
+	var r reminderJSON
+	if json.Unmarshal(b, &r) != nil || r.SeenMs <= 0 {
+		return time.Time{}, false
+	}
+	return time.UnixMilli(r.SeenMs), true
 }
 
 type doneJSON struct {

@@ -1,7 +1,8 @@
 // Package tray shows the menu-bar icon (macOS) or notification-area icon
 // (Windows, Linux) while the daemon runs, and its menu: whether anything
-// is being recorded, pause and resume, delete the last hour or today, and
-// open the dashboard (privacy & security §5.1). The icon has no hide or
+// is being recorded, pause and resume, delete the last hour or today, open
+// the dashboard (privacy & security §5.1), and the monthly "what's
+// collected" reminder (§5.2 AC-4). The icon has no hide or
 // quit item: while a collector runs it stays visible (§5.2 AC-1).
 package tray
 
@@ -16,6 +17,9 @@ type Status struct {
 	Paused bool
 	// Text is the menu's first line, e.g. "Recording" or "Paused until 15:30".
 	Text string
+	// Reminder is true while the monthly "what's collected" reminder is
+	// due: the menu shows Review, and on macOS the menu bar says so too.
+	Reminder bool
 }
 
 // PauseFor is how long a pause from the menu lasts.
@@ -46,7 +50,9 @@ type Menu struct {
 	Resume        func() error
 	Delete        func(Range) error
 	OpenDashboard func() error
-	Log           *slog.Logger
+	// Review opens what's collected and marks the reminder seen.
+	Review func() error
+	Log    *slog.Logger
 }
 
 // Work is what runs while the icon shows. shown reports whether the icon is

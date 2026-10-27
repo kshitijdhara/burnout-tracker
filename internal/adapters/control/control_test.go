@@ -88,3 +88,23 @@ func TestForgetRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReminderSeen(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok := ReminderSeen(dir); ok {
+		t.Fatal("seen with no reminder file")
+	}
+	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
+	if err := SetReminderSeen(dir, at); err != nil {
+		t.Fatal(err)
+	}
+	if seen, ok := ReminderSeen(dir); !ok || !seen.Equal(at) {
+		t.Fatalf("seen %v %v", seen, ok)
+	}
+	if err := os.WriteFile(filepath.Join(dir, reminderFile), []byte("garbage"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReminderSeen(dir); ok {
+		t.Fatal("an unreadable file must read as never seen")
+	}
+}

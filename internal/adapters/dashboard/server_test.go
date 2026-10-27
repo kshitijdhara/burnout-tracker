@@ -91,6 +91,16 @@ func login(t *testing.T, s *Server) *http.Cookie {
 	return cookies[0]
 }
 
+func TestLaunchToView(t *testing.T) {
+	s, _, _ := start(t, fakeSource{})
+	for view, want := range map[string]string{"privacy": "/#privacy", "": "/", "javascript:alert(1)": "/"} {
+		resp := request(t, "GET", s.LaunchURLTo(view), nil)
+		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != want {
+			t.Errorf("view %q: %d %q, want %q", view, resp.StatusCode, resp.Header.Get("Location"), want)
+		}
+	}
+}
+
 func TestLaunchTokenAndSession(t *testing.T) {
 	s, clk, base := start(t, fakeSource{})
 	if r := request(t, "GET", base+"/api/overview", nil); r.StatusCode != http.StatusUnauthorized {

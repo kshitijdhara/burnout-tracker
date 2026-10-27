@@ -355,7 +355,7 @@ Your controls:
   burnout config set privacy.aggregate_only true
   burnout config set retention.minutes_days 30  keep less (all keys: burnout config get)
   burnout export --out FILE [--format csv]       your data as JSON or CSV
-  burnout uninstall-hooks, burnout service uninstall
+  burnout uninstall [--purge]        remove hooks and the service (--purge: and all your data)
 Details: docs/privacy-and-security.md
 `)
 	return nil
@@ -391,6 +391,9 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 		collecting += ", private hours now (" + w + ")"
 	}
 	add("Collection", collecting)
+	add("Pause", "the tray menu, or `burnout pause 1h` / `burnout pause tomorrow`; `burnout resume` to start again")
+	add("Change settings", "`burnout config set KEY VALUE` (all keys: `burnout config get`), or edit the config file above")
+	add("Uninstall", "`burnout uninstall`; add `--purge` to delete all your data too")
 	add("Window titles", "off (not collected)")
 	add("Keystroke counts", "off (not collected)")
 	hours := "none"

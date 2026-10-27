@@ -284,7 +284,7 @@ function renderPrivacy(p) {
     el("ul", {}, ...p.collected.map((c) => el("li", { text: c }))),
     el("h3", { text: "Your settings" }),
     el("dl", { class: "settings" }, ...p.settings.flatMap((s) => [el("dt", { text: s.name }), el("dd", { text: s.value })])),
-    el("p", { class: "fine", text: "Change these with `burnout config`, `burnout pause` and `burnout forget`. Details: docs/privacy-and-security.md" }));
+    el("p", { class: "fine", text: "Change these with `burnout config`, `burnout pause` and `burnout forget`; remove everything with `burnout uninstall --purge`. Details: docs/privacy-and-security.md" }));
 }
 
 // ---- Navigation --------------------------------------------------------

@@ -238,6 +238,7 @@ func (f *fakeControls) menu() Menu {
 		Resume:        func() error { return f.record("resume") },
 		Delete:        func(r Range) error { return f.record(ranges[r]) },
 		OpenDashboard: func() error { return f.record("dashboard") },
+		Review:        func() error { return f.record("review") },
 		Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 }
@@ -282,7 +283,7 @@ func TestTrayOnLinux(t *testing.T) {
 		if p.find(t, "Recording").enabled {
 			t.Error("the status line is clickable")
 		}
-		for _, h := range []string{"Resume", "Quit", "Hide"} {
+		for _, h := range []string{"Resume", "Quit", "Hide", "Review what's collected…"} {
 			if p.shows(t, h) {
 				t.Errorf("%q shows while recording", h)
 			}
@@ -309,7 +310,18 @@ func TestTrayOnLinux(t *testing.T) {
 		p.click(t, "Delete the last hour")
 		eventually(t, "the failure note", func() bool { return p.shows(t, "Couldn't delete the last hour") })
 
-		if got, want := strings.Join(f.called(), ","), "pause 1h,resume,delete today,delete hour"; got != want {
+		f.mu.Lock()
+		f.fail = false
+		f.mu.Unlock()
+		f.set(Status{Text: "Recording", Reminder: true})
+		eventually(t, "the reminder", func() bool { return p.shows(t, "Review what's collected…") })
+		eventually(t, "the menu to settle", func() bool { return p.find(t, "Review what's collected…").enabled })
+		p.click(t, "Review what's collected…")
+		eventually(t, "the review", func() bool { return len(f.called()) == 5 })
+		f.set(Status{Text: "Recording"})
+		eventually(t, "the reminder to go", func() bool { return !p.shows(t, "Review what's collected…") })
+
+		if got, want := strings.Join(f.called(), ","), "pause 1h,resume,delete today,delete hour,review"; got != want {
 			t.Errorf("calls %s, want %s", got, want)
 		}
 		return nil

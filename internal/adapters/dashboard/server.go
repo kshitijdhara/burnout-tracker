@@ -95,12 +95,31 @@ func newServer(src Source, log *slog.Logger, ln net.Listener, now func() time.Ti
 
 // LaunchURL issues a fresh one-time launch token (replacing any unused
 // one) and returns the URL that redeems it.
-func (s *Server) LaunchURL() string {
+func (s *Server) LaunchURL() string { return s.LaunchURLTo("") }
+
+// views are the page's views a launch link may open; they match app.js.
+var views = map[string]bool{"overview": true, "today": true, "week": true, "privacy": true}
+
+// LaunchURLTo is LaunchURL for a link that opens view (e.g. "privacy").
+// An unknown view opens the default one.
+func (s *Server) LaunchURLTo(view string) string {
 	tok := randomToken()
 	s.mu.Lock()
 	s.launch, s.expires = tok, s.now().Add(TokenTTL)
 	s.mu.Unlock()
-	return fmt.Sprintf("http://127.0.0.1:%d/launch?t=%s", s.port, tok)
+	u := fmt.Sprintf("http://127.0.0.1:%d/launch?t=%s", s.port, tok)
+	if views[view] {
+		u += "&v=" + view
+	}
+	return u
+}
+
+// landing is where a redeemed launch link goes: the page, at its view.
+func landing(r *http.Request) string {
+	if v := r.URL.Query().Get("v"); views[v] {
+		return "/#" + v
+	}
+	return "/"
 }
 
 // Serve runs until ctx ends.
@@ -248,7 +267,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 		Name: s.cookieName(), Value: session, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, landing(r), http.StatusSeeOther)
 }
 
 // api serves fn's result as JSON. Errors are logged, not shown: they can

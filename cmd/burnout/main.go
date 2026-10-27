@@ -44,6 +44,7 @@ func commands() []command {
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
 		{"install-hooks", "install shell (zsh) and Claude Code hooks", runInstallHooks},
 		{"uninstall-hooks", "remove shell and Claude Code hooks", runUninstallHooks},
+		{"uninstall", "remove hooks and the background service: uninstall [--purge] (--purge also deletes your data)", runUninstall},
 		{"version", "print the version", func(context.Context, []string) error { fmt.Println(version); return nil }},
 	}
 }

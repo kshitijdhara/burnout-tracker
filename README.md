@@ -250,11 +250,18 @@ folder. Deleting it also deletes `hook-backups/`, the copies of the files
 `install-hooks` changed; copy that folder out first if you want to keep them.
 
 ```sh
+~/.local/bin/burnout uninstall --purge   # hooks, service, data, config and keys; asks first
+rm ~/.local/bin/burnout
+```
+
+`burnout uninstall` without `--purge` removes the hooks and the service but
+keeps your data. By hand, the same is:
+
+```sh
 ~/.local/bin/burnout uninstall-hooks     # removes exactly what install-hooks added
 ~/.local/bin/burnout service uninstall   # stops the daemon and removes the service
 rm -rf ~/Library/Application\ Support/burnout
 security delete-generic-password -s burnout -a hmac   # if the keychain was used
-rm ~/.local/bin/burnout
 ```
 
 **Stopping things.**
