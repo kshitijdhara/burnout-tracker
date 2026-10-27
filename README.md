@@ -27,6 +27,17 @@ Phase 0 is a developer preview: there is no installer yet.
 Desktop collection works on macOS and Windows; on Linux only shell and
 Claude Code hooks are recorded for now.
 
+> **Where it doesn't run.** burnout records only while its tray icon is
+> visible, hooks included ([AC-1](docs/privacy-and-security.md)). Where no
+> icon can be shown, the daemon records nothing and exits:
+>
+> - over ssh, or on a Mac before anyone logs in at the screen;
+> - on servers and other machines without a desktop;
+> - on Linux desktops without a tray, including GNOME without the
+>   [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/).
+>
+> Hook-only use on those machines isn't supported.
+
 ### macOS
 
 You need Go 1.26.10 or newer and the Xcode command-line tools (the macOS
@@ -270,7 +281,9 @@ is macOS-only for now.
 Steps 2–5 are the same as on macOS, except as noted below. Building and removing differ:
 
 - **Linux:** there is no desktop collector yet, so only shell and Claude
-  Code hooks are recorded. Build as on macOS without `xcode-select`.
+  Code hooks are recorded, and only on a desktop with a tray (on GNOME,
+  install the AppIndicator extension first). Build as on macOS without
+  `xcode-select`.
   The background service is a systemd user unit. Its log is
   `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
   burnout.service` shows only startup errors and crashes. To remove

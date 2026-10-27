@@ -93,11 +93,16 @@ jobs:
 
   fuzz:
     runs-on: ubuntu-latest
+    # Go before 1.27 can fail a fuzz run that ends at -fuzztime with
+    # "context deadline exceeded" (go.dev/issue/75804), so fuzz on a
+    # release with the fix. go.mod's minimum stays as it is.
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: 1.27.3
       - name: Fuzz wire decoder
         run: go test ./internal/wire/ -run='^$' -fuzz=FuzzDecode -fuzztime=60s
       - name: Fuzz Claude Code payload parser
