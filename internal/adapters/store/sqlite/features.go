@@ -173,17 +173,33 @@ func (s *Store) SaveFeatureDays(ctx context.Context, days []strain.Day, paramsKe
 
 // FeatureDays returns stored features for days in [from, to], in order.
 // Rows from another registry version, or computed with parameters other
-// than paramsKey (features.Params.Key), are left out, so callers
-// recompute them.
+// than paramsKey (features.Params.Key), are left out: OlderFeatureDays
+// returns them.
 func (s *Store) FeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error) {
+	return s.featureDays(ctx, from, to, paramsKey, true)
+}
+
+// OlderFeatureDays returns the stored features FeatureDays leaves out:
+// rows from another registry version, or computed with parameters other
+// than paramsKey. Callers recompute such a day only while its raw data is
+// all kept (RawKeptFrom), and otherwise use the row as it is.
+func (s *Store) OlderFeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error) {
+	return s.featureDays(ctx, from, to, paramsKey, false)
+}
+
+// featureDays returns the rows computed with this registry version and
+// paramsKey (current), or every other row (!current). Rows that don't
+// decode are left out of both.
+func (s *Store) featureDays(ctx context.Context, from, to, paramsKey string, current bool) ([]strain.Day, error) {
 	var out []strain.Day
 	err := s.scanRows(ctx, `
-		SELECT logical_day, coverage, features FROM daily_features
-		WHERE logical_day BETWEEN ? AND ? AND registry_ver = ? ORDER BY logical_day`,
-		[]any{from, to, features.RegistryVersion}, func(r *sql.Rows) error {
+		SELECT logical_day, registry_ver, coverage, features FROM daily_features
+		WHERE logical_day BETWEEN ? AND ? ORDER BY logical_day`,
+		[]any{from, to}, func(r *sql.Rows) error {
 			var d strain.Day
+			var ver int
 			var raw string
-			if err := r.Scan(&d.Date, &d.Coverage, &raw); err != nil {
+			if err := r.Scan(&d.Date, &ver, &d.Coverage, &raw); err != nil {
 				return err
 			}
 			var sf storedFeatures
@@ -193,7 +209,7 @@ func (s *Store) FeatureDays(ctx context.Context, from, to, paramsKey string) ([]
 			if sf.Params == "" {
 				sf.Params = features.DefaultKey // stored before keys existed
 			}
-			if sf.Params != paramsKey {
+			if (ver == features.RegistryVersion && sf.Params == paramsKey) != current {
 				return nil
 			}
 			d.Present = time.Duration(sf.PresentS * float64(time.Second))
@@ -205,6 +221,31 @@ func (s *Store) FeatureDays(ctx context.Context, from, to, paramsKey string) ([]
 		return nil, fmt.Errorf("sqlite: feature days: %w", err)
 	}
 	return out, nil
+}
+
+// RawKeptFrom returns the first logical day from which attention minutes
+// and intervals are both still fully kept, or "" when either is gone
+// entirely. Retention trims each by time, with its own period
+// (retention.minutes_days, retention.intervals_days), so the oldest day
+// left of each may have lost its first hours: the answer is the day after
+// the later of the two oldest days. Features recomputed for an earlier
+// day would come from partial data.
+func (s *Store) RawKeptFrom(ctx context.Context) (string, error) {
+	var minutes, intervals sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT (SELECT MIN(logical_day) FROM attention_minutes), (SELECT MIN(logical_day) FROM intervals)`).
+		Scan(&minutes, &intervals)
+	if err != nil {
+		return "", fmt.Errorf("sqlite: raw kept from: %w", err)
+	}
+	if !minutes.Valid || !intervals.Valid {
+		return "", nil
+	}
+	oldest, err := time.Parse(time.DateOnly, max(minutes.String, intervals.String))
+	if err != nil {
+		return "", fmt.Errorf("sqlite: raw kept from: %w", err)
+	}
+	return oldest.AddDate(0, 0, 1).Format(time.DateOnly), nil
 }
 
 // storedScore is the JSON in scores.components.

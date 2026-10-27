@@ -17,6 +17,7 @@ type fakeScoreStore struct {
 	stored   []strain.Day
 	key      string // the params key stored days were computed with
 	withData []string
+	keptFrom string // RawKeptFrom; "" keeps everything
 	loaded   []string
 	notes    []annotation.Annotation
 }
@@ -50,13 +51,32 @@ func (f *fakeScoreStore) FeatureDays(_ context.Context, from, to, key string) ([
 	if key != f.key {
 		return nil, nil
 	}
+	return f.inRange(from, to), nil
+}
+
+func (f *fakeScoreStore) OlderFeatureDays(_ context.Context, from, to, key string) ([]strain.Day, error) {
+	if key == f.key {
+		return nil, nil
+	}
+	return f.inRange(from, to), nil
+}
+
+// RawKeptFrom keeps every day's raw data unless keptFrom says otherwise.
+func (f *fakeScoreStore) RawKeptFrom(context.Context) (string, error) {
+	if f.keptFrom == "" {
+		return "0001-01-01", nil
+	}
+	return f.keptFrom, nil
+}
+
+func (f *fakeScoreStore) inRange(from, to string) []strain.Day {
 	var out []strain.Day
 	for _, d := range f.stored {
 		if d.Date >= from && d.Date <= to {
 			out = append(out, d)
 		}
 	}
-	return out, nil
+	return out
 }
 
 func TestScoreDays(t *testing.T) {
@@ -128,6 +148,22 @@ func TestScoreDays(t *testing.T) {
 	if !slices.Equal(st.loaded, []string{"2026-10-20", "2026-10-21", "2026-10-23", "2026-10-24"}) {
 		t.Errorf("after a core-hours change computed %v", st.loaded)
 	}
+
+	// Raw data kept only from 10-22: the older stored 10-20 keeps its
+	// values, 10-21 (nothing stored) isn't scored from partial data, and
+	// the recent days are still computed.
+	st.loaded, st.keptFrom = nil, "2026-10-22"
+	sc, err = ScoreDays(context.Background(), st, now, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(st.loaded, []string{"2026-10-23", "2026-10-24"}) {
+		t.Errorf("with raw data trimmed computed %v", st.loaded)
+	}
+	if sc.Scores[0].Date != "2026-10-20" || len(sc.Scores) != 3 {
+		t.Errorf("with raw data trimmed scored %+v", sc.Scores)
+	}
+	st.keptFrom = ""
 
 	st.loaded = nil
 	opts.IncludeToday = true

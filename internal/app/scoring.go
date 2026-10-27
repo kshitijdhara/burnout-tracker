@@ -15,13 +15,20 @@ type ScoreStore interface {
 	DataDays(ctx context.Context, from, to string) ([]string, error)
 	DayInput(ctx context.Context, logicalDay string) (features.Day, error)
 	FeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error)
+	// OlderFeatureDays are the stored days FeatureDays leaves out: another
+	// registry version, or other feature parameters.
+	OlderFeatureDays(ctx context.Context, from, to, paramsKey string) ([]strain.Day, error)
+	// RawKeptFrom is the first day whose minutes and intervals are all
+	// still kept, or "" for none.
+	RawKeptFrom(ctx context.Context) (string, error)
 	Annotations(ctx context.Context, from, to string) ([]annotation.Annotation, error)
 }
 
 // Scoring horizons: features are kept two years (privacy & security §3),
 // but can only be computed while the raw minutes and intervals behind them
-// are kept (180 days). The most recent days are always recomputed, because
-// a day's last minutes can reach the store after it ends.
+// are kept (180 days by default, less if the user shortened retention).
+// The most recent days are always recomputed, because a day's last minutes
+// can reach the store after it ends.
 const (
 	featureHistory = 730
 	rawHistory     = 180
@@ -57,9 +64,12 @@ func DefaultScoreOptions() ScoreOptions {
 
 // ScoreDays scores every day with data up to now. Today's features are
 // partial, so it is only included with IncludeToday, and is never in
-// Computed. Stored features computed with other feature parameters (the
-// user changed their core hours) are recomputed while their raw data is
-// kept.
+// Computed. Stored features from another registry version, or computed
+// with other feature parameters (the user changed their core hours), are
+// recomputed only while all their raw data is kept (RawKeptFrom); before
+// that they keep their stored values, so a recompute from partially
+// trimmed data never replaces them. A day before that with no stored
+// features at all isn't scored, for the same reason.
 func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions) (Scoring, error) {
 	rollover, includeToday := o.Rollover, o.IncludeToday
 	today := model.LogicalDay(now, rollover)
@@ -75,6 +85,17 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions
 	for _, d := range stored {
 		have[d.Date] = true
 	}
+	older, err := st.OlderFeatureDays(ctx, day(featureHistory), yesterday, o.Features.Key())
+	if err != nil {
+		return Scoring{}, err
+	}
+	keptFrom, err := st.RawKeptFrom(ctx)
+	if err != nil {
+		return Scoring{}, err
+	}
+	// whole reports whether a day's raw data is all kept, so its features
+	// can be (re)computed.
+	whole := func(date string) bool { return keptFrom != "" && date >= keptFrom }
 	withData, err := st.DataDays(ctx, day(rawHistory), today)
 	if err != nil {
 		return Scoring{}, err
@@ -98,9 +119,19 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions
 			remember(d)
 		}
 	}
+	// Older rows whose raw data is partly or wholly gone keep their stored
+	// values: a recompute would see a day with its minutes trimmed as a
+	// light one.
+	for _, d := range older {
+		if d.Date < recomputeFrom && !have[d.Date] && !whole(d.Date) {
+			days = append(days, d)
+			remember(d)
+			have[d.Date] = true
+		}
+	}
 	for _, date := range withData {
 		isToday := date == today
-		if (isToday && !includeToday) || (!isToday && have[date] && date < recomputeFrom) {
+		if (isToday && !includeToday) || (!isToday && date < recomputeFrom && (have[date] || !whole(date))) {
 			continue
 		}
 		in, err := st.DayInput(ctx, date)

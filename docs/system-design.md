@@ -582,6 +582,17 @@ Phase 1 so far:
     like with like;
   - older days keep their stored values;
   - with the default profile, nothing is recomputed.
+- **Recompute rule.** The same rule covers a registry version bump
+  (`features.RegistryVersion`) and changed core hours. A stored day from
+  another version or with other parameters is recomputed only while its
+  raw data is *all* kept. Retention trims minutes (`retention.minutes_days`)
+  and intervals (`retention.intervals_days`) separately and by time, so
+  the oldest day left of either may be partial. A day counts as whole from
+  the day after the later of the two oldest days (`RawKeptFrom`). Before
+  that, a stored day keeps its stored row, which is never overwritten with
+  a recompute from partial data, and a day with no stored row isn't
+  scored. The last two completed days are always recomputed; minutes are
+  kept at least 3 days.
 
 ### 4.7 Calendar busy blocks
 

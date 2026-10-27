@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,10 +59,14 @@ func TestBoundaryCommand(t *testing.T) {
 	for _, args := range [][]string{
 		{"add", "shutdown", "late"}, {"add", "bedtime", "22:00"}, {"add"}, {"remove", "no-weekend"},
 		{"remove", "99"}, {"list", "--all"}, {"frobnicate"},
+		{"add", "meetings-max", "nan"}, {"add", "meetings-max", "Inf"}, {"add", "shutdown", "9:30"},
 	} {
-		if _, err := run(args...); err == nil {
-			t.Errorf("%v accepted", args)
+		if _, err := run(args...); err == nil || !isInputError(err) {
+			t.Errorf("%v: %v, want an input error", args, err)
 		}
+	}
+	if bs, _ := st.Boundaries(ctx); len(boundary.Current(bs)) != 1 || boundary.Current(bs)[0].Kind != boundary.Shutdown {
+		t.Errorf("a refused rule was stored: %+v", boundary.Current(bs))
 	}
 	if out, err := run("add", "focus-block", "5"); err == nil || strings.Contains(out, "Set") || !strings.Contains(err.Error(), "between 15 and 240") {
 		t.Errorf("bad focus block: %q %v", out, err)
@@ -154,6 +159,43 @@ func TestAskReview(t *testing.T) {
 	}
 }
 
+// failingStore fails every write, like a locked or missing database.
+type failingStore struct{ *sqlite.Store }
+
+var errLocked = errors.New("sqlite: database is locked")
+
+func (failingStore) SetBoundary(context.Context, boundary.Boundary, string, time.Time) (int64, bool, error) {
+	return 0, false, errLocked
+}
+
+func (failingStore) RemoveBoundary(context.Context, int64, string, time.Time) (bool, error) {
+	return false, errLocked
+}
+
+// A store error in the boundary step ends the review with the error; a
+// typo is said and asked again.
+func TestAskReviewStoreErrors(t *testing.T) {
+	ctx := context.Background()
+	acts := reviewActions{store: failingStore{tempStore(t)}, label: func(string, model.Category) error { return nil },
+		today: "2026-10-26", now: time.Date(2026, 10, 26, 20, 0, 0, 0, time.Local)}
+	w := review.Week{From: "2026-10-19", To: "2026-10-25"}
+	var out strings.Builder
+	in := "remove shutdwn\nadd a b c\nmeetings-max nan\nshutdown 21:30\n\n\n"
+	err := askReview(ctx, bufio.NewReader(strings.NewReader(in)), &out, w, acts)
+	if !errors.Is(err, errLocked) {
+		t.Fatalf("got %v, want the store error\n%s", err, out.String())
+	}
+	got := out.String()
+	for _, want := range []string{"no shutdwn boundary", "usage: burnout boundary", "between 0 and 12"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Mark this week") {
+		t.Errorf("the review carried on after the store failed:\n%s", got)
+	}
+}
+
 func TestLabelApp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := labelApp(path, "com.new.tool", model.CategoryDocs); err != nil {
@@ -173,5 +215,21 @@ func TestLabelApp(t *testing.T) {
 	apps := unlabelled([]sqlite.UncategorizedApp{{App: "com.new.tool"}, {App: "com.third"}, {App: "a=b"}}, cfg)
 	if len(apps) != 1 || apps[0].App != "com.third" {
 		t.Errorf("unlabelled: %+v", apps)
+	}
+
+	// App ids keep their case; override keys are lower-cased when the
+	// config is loaded. A labelled app isn't asked about again.
+	if err := labelApp(path, "com.microsoft.VSCode", model.CategoryCode); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = config.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Overrides()["com.microsoft.VSCode"]; ok {
+		t.Fatal("override keys aren't lower-cased, so this test checks nothing")
+	}
+	apps = unlabelled([]sqlite.UncategorizedApp{{App: "com.microsoft.VSCode"}, {App: "Gnome-terminal"}}, cfg)
+	if len(apps) != 1 || apps[0].App != "Gnome-terminal" {
+		t.Errorf("unlabelled with mixed case: %+v", apps)
 	}
 }

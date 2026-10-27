@@ -24,6 +24,19 @@ const boundaryUsage = "usage: burnout boundary add KIND [VALUE] | list [--histor
 	"  focus-block 90     a focus block of at least 90 minutes on workdays\n" +
 	"A rule applies from tomorrow; adding a kind you have changes it"
 
+// inputError is a mistake in what the user typed, not a failure to read or
+// write the store: the review says it and asks again.
+type inputError string
+
+func (e inputError) Error() string { return string(e) }
+
+// isInputError reports whether err from boundaryCommand is the user's to
+// fix: a usage mistake, an unknown rule, or an invalid boundary.
+func isInputError(err error) bool {
+	var ie inputError
+	return errors.As(err, &ie) || errors.Is(err, boundary.ErrInvalid)
+}
+
 // boundaryStore is where boundaries are kept: the store, or the
 // dashboard's control, which opens it per change.
 type boundaryStore interface {
@@ -58,7 +71,7 @@ func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args 
 	case "list":
 		history := len(rest) == 1 && (rest[0] == "--history" || rest[0] == "-history")
 		if len(rest) > 0 && !history {
-			return errors.New(boundaryUsage)
+			return inputError(boundaryUsage)
 		}
 		bs, err := st.Boundaries(ctx)
 		if err != nil {
@@ -77,7 +90,7 @@ func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args 
 		return nil
 	case "add", "set":
 		if len(rest) < 1 || len(rest) > 2 {
-			return errors.New(boundaryUsage)
+			return inputError(boundaryUsage)
 		}
 		value := ""
 		if len(rest) == 2 {
@@ -91,7 +104,7 @@ func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args 
 		return setBoundary(ctx, st, out, b, today, now)
 	case "remove":
 		if len(rest) != 1 {
-			return errors.New(boundaryUsage)
+			return inputError(boundaryUsage)
 		}
 		bs, err := st.Boundaries(ctx)
 		if err != nil {
@@ -106,7 +119,7 @@ func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args 
 				}
 			}
 			if id == 0 {
-				return fmt.Errorf("no %s boundary (see `burnout boundary list`)", rest[0])
+				return inputError(fmt.Sprintf("no %s boundary (see `burnout boundary list`)", rest[0]))
 			}
 		}
 		ok, err := st.RemoveBoundary(ctx, id, today, now)
@@ -114,12 +127,12 @@ func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args 
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("no active boundary %d (see `burnout boundary list`)", id)
+			return inputError(fmt.Sprintf("no active boundary %d (see `burnout boundary list`)", id))
 		}
 		_, _ = fmt.Fprintln(out, "Removed. It no longer applies from today; its history stays.")
 		return nil
 	}
-	return errors.New(boundaryUsage)
+	return inputError(boundaryUsage)
 }
 
 // setBoundary sets b and says what changed.

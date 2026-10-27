@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	_ "time/tzdata" // the clock-change zones, on Windows too
 	"unicode"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
@@ -139,6 +140,55 @@ func TestCopy(t *testing.T) {
 					t.Errorf("%s: %q says %q", k, s, w)
 				}
 			}
+		}
+	}
+}
+
+// The shutdown time is read off the wall clock, so it doesn't move by an
+// hour on the days the clocks change.
+func TestShutdownAcrossClockChanges(t *testing.T) {
+	zone := func(name string) *time.Location {
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loc
+	}
+	ny := zone("America/New_York")
+	day := time.Date(2026, 3, 8, 0, 0, 0, 0, ny) // clocks go forward at 02:00
+	if got := sinceMidnight(time.Date(2026, 3, 8, 21, 30, 0, 0, ny), day); got != 21*time.Hour+30*time.Minute {
+		t.Errorf("21:30 on 2026-03-08 in New York is %v from midnight", got)
+	}
+	fall := time.Date(2026, 11, 1, 0, 0, 0, 0, ny) // clocks go back at 02:00
+	if got := sinceMidnight(time.Date(2026, 11, 1, 21, 30, 0, 0, ny), fall); got != 21*time.Hour+30*time.Minute {
+		t.Errorf("21:30 on 2026-11-01 in New York is %v from midnight", got)
+	}
+	if got := sinceMidnight(time.Date(2026, 11, 2, 1, 30, 0, 0, ny), fall); got != 25*time.Hour+30*time.Minute {
+		t.Errorf("01:30 the morning after 2026-11-01 in New York is %v", got)
+	}
+
+	// Pick on a workday the clocks change between midnight and the
+	// shutdown: a Friday in Jerusalem. (US clocks change on Sundays, when
+	// no shutdown applies.)
+	for _, c := range []struct {
+		zone string
+		day  string
+	}{{"Asia/Jerusalem", "2026-03-27"}} {
+		loc := zone(c.zone)
+		d, _ := time.ParseInLocation(time.DateOnly, c.day, loc)
+		_, before := d.Zone()
+		_, after := d.Add(21 * time.Hour).Zone()
+		if before == after || d.Weekday() != time.Friday {
+			t.Fatalf("%s doesn't change clocks on a workday %s", c.zone, c.day)
+		}
+		now := func(hh, mm int) Now {
+			return Now{At: time.Date(d.Year(), d.Month(), d.Day(), hh, mm, 0, 0, loc), Day: c.day, Known: true, Active: true}
+		}
+		if k := Pick(shutdown, nil, now(21, 29), nil); k != "" {
+			t.Errorf("%s %s 21:29: %q", c.zone, c.day, k)
+		}
+		if k := Pick(shutdown, nil, now(21, 30), nil); k != Shutdown {
+			t.Errorf("%s %s 21:30: %q", c.zone, c.day, k)
 		}
 	}
 }

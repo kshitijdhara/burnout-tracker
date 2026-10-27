@@ -166,12 +166,13 @@ var offerFor = map[string]boundary.Kind{
 }
 
 // starting is an offered boundary's first value: a shutdown an hour after
-// core hours end, four hours of meetings, an hour of focus.
+// core hours end (not before boundary.EarliestShutdown), four hours of
+// meetings, an hour of focus.
 func starting(kind boundary.Kind, p features.Params) boundary.Boundary {
 	value := ""
 	switch kind {
 	case boundary.Shutdown:
-		at := min(p.CoreEnd+time.Hour, 23*time.Hour+30*time.Minute)
+		at := min(max(p.CoreEnd+time.Hour, boundary.EarliestShutdown), 23*time.Hour+30*time.Minute)
 		value = time.Time{}.Add(at).Format("15:04")
 	case boundary.MeetingsMax:
 		value = "4"

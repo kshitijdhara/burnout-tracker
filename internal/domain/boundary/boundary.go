@@ -74,6 +74,11 @@ func Parse(kind, value string) (Boundary, error) {
 		if err != nil {
 			return b, fmt.Errorf("%w: shutdown wants a time like 21:30", ErrInvalid)
 		}
+		// A morning shutdown would judge every workday missed: work
+		// after it is most of the day.
+		if at := time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute; at >= AfterMidnight && at < EarliestShutdown {
+			return b, fmt.Errorf("%w: shutdown is when work ends, from 12:00 to 03:59 (after midnight), like 21:30", ErrInvalid)
+		}
 		b.Value = t.Format("15:04")
 	case NoWeekend:
 		if value != "" {
@@ -81,7 +86,8 @@ func Parse(kind, value string) (Boundary, error) {
 		}
 	case MeetingsMax:
 		h, err := strconv.ParseFloat(strings.TrimSuffix(value, "h"), 64)
-		if err != nil || h <= 0 || h > 12 {
+		// Written so NaN fails too; ±Inf is out of range.
+		if err != nil || !(h > 0 && h <= 12) {
 			return b, fmt.Errorf("%w: meetings-max wants hours between 0 and 12, like 4 or 3.5", ErrInvalid)
 		}
 		b.Value = strconv.FormatFloat(h, 'f', -1, 64)
@@ -138,6 +144,10 @@ func (b Boundary) Active() bool { return b.Until == "" }
 // AfterMidnight is the time of day before which a shutdown means the
 // night after the workday, as the logical day runs to 04:00.
 const AfterMidnight = 4 * time.Hour
+
+// EarliestShutdown is the earliest shutdown on the workday itself; from
+// AfterMidnight until then is refused.
+const EarliestShutdown = 12 * time.Hour
 
 // ShutdownAt is a shutdown's time from the start of the workday's
 // calendar date: "21:30" is 21h30m, "01:00" is 25h.
