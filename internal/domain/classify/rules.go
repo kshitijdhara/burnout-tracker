@@ -12,6 +12,10 @@ var bundledApps = map[model.Category][]string{
 		"gnome-terminal-server", "konsole", "kitty", "alacritty", "wezterm-gui", "ghostty", "foot", "xterm",
 		// X11 WM_CLASS names that differ from the executable's.
 		"Gnome-terminal", "org.wezfurlong.wezterm",
+		// Wayland app ids that differ from the executable's (GNOME reports
+		// the app_id as the window's class).
+		"org.gnome.Terminal", "org.gnome.Ptyxis", "org.gnome.Ptyxis.Devel", "org.gnome.Console", "org.kde.konsole",
+		"com.gexperts.Tilix", "com.raggesilver.BlackBox",
 	},
 	model.CategoryCode: {
 		"com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed",

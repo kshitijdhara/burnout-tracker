@@ -30,15 +30,15 @@ func TestUpdateNotice(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := config.Default()
-	if s := trayStatus(dir, c, now); s.Text != "Recording" {
+	if s := statusNow(dir, c, now); s.Text != "Recording" {
 		t.Errorf("check off: %q", s.Text)
 	}
 	c.Update.Check = config.UpdateWeekly
-	if s := trayStatus(dir, c, now); s.Text != "Recording · update 1.2.0 available" {
+	if s := statusNow(dir, c, now); s.Text != "Recording · update 1.2.0 available" {
 		t.Errorf("update found: %q", s.Text)
 	}
 	withVersion(t, "1.2.0")
-	if s := trayStatus(dir, c, now); s.Text != "Recording" {
+	if s := statusNow(dir, c, now); s.Text != "Recording" {
 		t.Errorf("after updating: %q", s.Text)
 	}
 }

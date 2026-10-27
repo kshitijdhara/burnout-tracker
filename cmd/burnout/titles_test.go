@@ -150,8 +150,8 @@ func TestTitleCanary(t *testing.T) {
 	// the machine (service, disk encryption, the live desktop).
 	var report bytes.Buffer
 	shown := reportConfig(&report, true)
-	report.WriteString("  -  title classification: " + titlesLine(shown) + "\n")
-	if !strings.HasPrefix(titlesLine(shown), "on:") || !strings.HasPrefix(titlesLine(config.Default()), "off") {
+	report.WriteString("  -  title classification: " + titlesLine(shown, false) + "\n")
+	if !strings.HasPrefix(titlesLine(shown, false), "on:") || !strings.HasPrefix(titlesLine(config.Default(), false), "off") {
 		t.Errorf("titles line: %q", report.String())
 	}
 	files, err := collectBundle(ctx, report.Bytes())

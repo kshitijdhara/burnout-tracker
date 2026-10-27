@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -85,7 +86,7 @@ func TestBoundariesMigration(t *testing.T) {
 	if err := s.WriteHealth(ctx, "2026-10-21", `{}`); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`DROP TABLE boundaries`, `DELETE FROM schema_migrations WHERE version = 4`} {
+	for _, q := range []string{`DROP TABLE boundaries`, `DELETE FROM schema_migrations WHERE version >= 4`} {
 		if _, err := s.db.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
@@ -144,5 +145,123 @@ func TestUncategorizedApps(t *testing.T) {
 	got, err := s.UncategorizedApps(ctx, "2026-10-19", "2026-10-25")
 	if err != nil || len(got) != 2 || got[0].App != "com.new.tool" || got[0].Seconds != 70 || got[1].App != "com.other" {
 		t.Errorf("%+v %v", got, err)
+	}
+}
+
+// A database where a race left two active rules of a kind keeps the newest
+// one active, ends the older one, and then refuses a second active rule.
+func TestOneActiveBoundaryMigration(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "data")
+	s, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`DROP INDEX boundaries_one_active`,
+		`CREATE INDEX boundaries_active ON boundaries(kind) WHERE until_day IS NULL`,
+		`INSERT INTO boundaries (kind, value, since_day, source, created_ms) VALUES
+			('focus_block', '60', '2026-10-21', 'cli', 1), ('focus_block', '90', '2026-10-24', 'dashboard', 2),
+			('focus_block', '120', '2026-10-24', 'cli', 3), ('shutdown', '21:30', '2026-10-21', 'cli', 4)`,
+		`DELETE FROM schema_migrations WHERE version >= 5`,
+	} {
+		if _, err := s.db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = s.Close()
+	if s, err = Open(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	bs, err := s.Boundaries(ctx)
+	if err != nil || len(bs) != 4 {
+		t.Fatalf("%+v %v", bs, err)
+	}
+	if bs[0].Until != "2026-10-23" || bs[1].Until != "2026-10-24" || !bs[2].Active() || !bs[3].Active() {
+		t.Errorf("after the migration: %+v", bs)
+	}
+	if cur := boundary.Current(bs); len(cur) != 2 || cur[1].Value != "120" {
+		t.Errorf("current: %+v", cur)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO boundaries (kind, value, since_day, source, created_ms)
+		VALUES ('shutdown', '22:00', '2026-10-25', 'cli', 5)`); err == nil {
+		t.Error("a second active shutdown was stored")
+	}
+}
+
+// SetBoundary reads the active rule, then writes. Run from the CLI or the
+// dashboard while the daemon flushes, and from several places at once, it
+// must neither fail with SQLITE_BUSY_SNAPSHOT nor leave two active rules
+// of a kind.
+func TestSetBoundaryConcurrentWithFlush(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "data")
+	daemon, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = daemon.Close() }()
+	cli, err := OpenExisting(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cli.Close() }()
+
+	stop := make(chan struct{})
+	flushed := make(chan error, 1)
+	go func() { // the daemon's flush, as often as it can
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				flushed <- nil
+				return
+			default:
+			}
+			if err := daemon.WriteRollups(ctx, []model.MinuteRollup{{Minute: base.Add(time.Duration(i) * time.Minute),
+				LogicalDay: "2026-10-21", WindowKey: "w", AppID: "code", Category: model.CategoryCode, AttendedS: 60}}); err != nil {
+				flushed <- err
+				return
+			}
+		}
+	}()
+
+	const writers, each = 4, 25
+	errs := make(chan error, writers*each)
+	done := make(chan struct{})
+	for w := range writers {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for i := range each {
+				b := boundary.Boundary{Kind: boundary.FocusBlock, Value: strconv.Itoa(15 + w*each + i), Source: boundary.SourceCLI}
+				if _, _, err := cli.SetBoundary(ctx, b, "2026-10-21", base); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+	for range writers {
+		<-done
+	}
+	close(stop)
+	if err := <-flushed; err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	close(errs)
+	for err := range errs {
+		t.Errorf("set boundary: %v", err)
+	}
+	bs, err := cli.Boundaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := 0
+	for _, b := range bs {
+		if b.Active() {
+			active++
+		}
+	}
+	if active != 1 || len(bs) != writers*each {
+		t.Errorf("%d rules, %d active, want %d and 1", len(bs), active, writers*each)
 	}
 }

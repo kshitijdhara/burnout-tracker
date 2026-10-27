@@ -151,6 +151,18 @@ func Suppressed(s Settings, now Now) string {
 	return ""
 }
 
+// sinceMidnight is at's wall-clock time from the start of day's calendar
+// date. Past midnight it keeps counting: 01:30 the next morning is
+// 25h30m. It reads the clock, not the elapsed time, so a 21:30 shutdown
+// is 21h30m on the days the clocks change too.
+func sinceMidnight(at, day time.Time) time.Duration {
+	y, m, d := at.Date()
+	days := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Sub(time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC))
+	clock := time.Duration(at.Hour())*time.Hour + time.Duration(at.Minute())*time.Minute +
+		time.Duration(at.Second())*time.Second + time.Duration(at.Nanosecond())
+	return days + clock
+}
+
 // Pick returns the kind that applies at now and isn't off, or "" for none.
 // guardrails are the names of the limits the latest scored day crossed.
 func Pick(b Boundaries, guardrails []string, now Now, off map[Kind]bool) Kind {
@@ -159,7 +171,7 @@ func Pick(b Boundaries, guardrails []string, now Now, off map[Kind]bool) Kind {
 		return ""
 	}
 	weekend := day.Weekday() == time.Saturday || day.Weekday() == time.Sunday
-	tod := now.At.Sub(day) // past midnight it keeps counting: 01:30 is 25h30m
+	tod := sinceMidnight(now.At, day)
 	applies := map[Kind]bool{
 		Shutdown: b.HasShutdown && !weekend && now.Active && tod >= b.Shutdown,
 		DayOff:   b.WeekendsOff && weekend && now.Active,

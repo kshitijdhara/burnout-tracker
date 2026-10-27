@@ -45,10 +45,14 @@ type schemaNode struct {
 // limits are bytes, at most four per character.
 func TestSchemaMatchesCode(t *testing.T) {
 	var schema struct {
-		Defs map[string]schemaNode `json:"$defs"`
+		Description string                `json:"description"`
+		Defs        map[string]schemaNode `json:"$defs"`
 	}
 	if err := json.Unmarshal([]byte(readRepo(t, "schemas/v1/gnome-bridge.schema.json")), &schema); err != nil {
 		t.Fatal(err)
+	}
+	if want := "at most " + strconv.Itoa(MaxReplyBytes) + " bytes"; !strings.Contains(schema.Description, want) {
+		t.Errorf("schema description does not say a line is %s", want)
 	}
 	d := schema.Defs
 	checks := []struct {
@@ -129,6 +133,7 @@ func TestExtensionMatchesCode(t *testing.T) {
 	}
 	ints := map[string]int{
 		"VERSION":         Version,
+		"MAX_REPLY_BYTES": MaxReplyBytes,
 		"MAX_WINDOWS":     MaxWindows,
 		"MAX_MONITORS":    MaxMonitors,
 		"MAX_CLASS_CHARS": MaxClassBytes / 4,

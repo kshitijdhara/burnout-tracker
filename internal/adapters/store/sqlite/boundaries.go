@@ -29,22 +29,25 @@ func (s *Store) SetBoundary(ctx context.Context, b boundary.Boundary, today stri
 	if err != nil {
 		return 0, false, fmt.Errorf("sqlite: set boundary: %w", err)
 	}
-	err = s.inTx(ctx, "set boundary", func(tx *sql.Tx) error {
+	// Immediate: the read and the write must see the same active rule, and
+	// the daemon's flushes commit in between. The unique index
+	// boundaries_one_active backs this up.
+	err = s.inImmediateTx(ctx, "set boundary", func(conn *sql.Conn) error {
 		var value string
-		err := tx.QueryRowContext(ctx,
+		err := conn.QueryRowContext(ctx,
 			`SELECT id, value FROM boundaries WHERE kind = ? AND until_day IS NULL`, string(b.Kind)).Scan(&id, &value)
 		switch {
 		case err == nil && value == b.Value:
 			return nil
 		case err == nil:
-			if _, err := tx.ExecContext(ctx, `UPDATE boundaries SET until_day = ?, ended_ms = ? WHERE id = ?`,
+			if _, err := conn.ExecContext(ctx, `UPDATE boundaries SET until_day = ?, ended_ms = ? WHERE id = ?`,
 				today, now.UnixMilli(), id); err != nil {
 				return err
 			}
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		res, err := tx.ExecContext(ctx,
+		res, err := conn.ExecContext(ctx,
 			`INSERT INTO boundaries (kind, value, since_day, source, created_ms) VALUES (?, ?, ?, ?, ?)`,
 			string(b.Kind), b.Value, t.AddDate(0, 0, 1).Format(time.DateOnly), b.Source, now.UnixMilli())
 		if err != nil {

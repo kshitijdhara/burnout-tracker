@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
@@ -143,6 +144,99 @@ func TestFeatureAndScoreRoundTrip(t *testing.T) {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*), SUM(strain IS NULL) FROM scores WHERE model_ver = ?`,
 		strain.ModelVersion).Scan(&n, &nullStrain); err != nil || n != 2 || nullStrain != 1 {
 		t.Fatalf("scores: %d rows, %d without a value, %v", n, nullStrain, err)
+	}
+}
+
+// A registry bump after the minutes were trimmed shorter than the
+// intervals: only days whose raw data is all kept are recomputed, and the
+// older days keep their stored rows (system design §4.6).
+func TestRegistryBumpKeepsDaysWithTrimmedMinutes(t *testing.T) {
+	s := openTemp(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC) // logical day 2026-10-25
+	var rollups []model.MinuteRollup
+	var ivs []model.Interval
+	var old []strain.Day
+	for d := 1; d <= 24; d++ {
+		date := time.Date(2026, 10, d, 0, 0, 0, 0, time.UTC)
+		ld := date.Format(time.DateOnly)
+		for m := range 120 { // 09:00–11:00 of code
+			rollups = append(rollups, model.MinuteRollup{Minute: date.Add(9*time.Hour + time.Duration(m)*time.Minute),
+				LogicalDay: ld, WindowKey: "w", AppID: "code", Category: model.CategoryCode, AttendedS: 60})
+		}
+		ivs = append(ivs, model.Interval{Start: date.Add(9 * time.Hour), End: date.Add(11 * time.Hour), LogicalDay: ld,
+			Kind: model.IntervalPresence, Attrs: model.IntervalAttrs{Reason: "input"}})
+		if err := s.WriteHealth(ctx, ld, `{"coverage":1}`); err != nil {
+			t.Fatal(err)
+		}
+		old = append(old, strain.Day{Date: ld, Coverage: 1, Present: 6 * time.Hour, Values: map[string]float64{"attended_hours": 6}})
+	}
+	if err := s.WriteRollups(ctx, rollups); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteIntervals(ctx, ivs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveFeatureDays(ctx, old, features.DefaultKey); err != nil {
+		t.Fatal(err)
+	}
+	prev := features.RegistryVersion - 1
+	if _, err := s.db.ExecContext(ctx, `UPDATE daily_features SET registry_ver = ?`, prev); err != nil {
+		t.Fatal(err)
+	}
+	// retention.minutes_days = 7: the minutes before 10-18 12:00 go, so
+	// 10-19 is the oldest day with minutes. The oldest day left may have
+	// lost its morning, so 10-20 is the first day known to be whole. The
+	// intervals stay for 180 days.
+	r := DefaultRetention()
+	r.Rollups = 7 * day
+	if _, err := s.RunRetention(ctx, now, r); err != nil {
+		t.Fatal(err)
+	}
+	if from, err := s.RawKeptFrom(ctx); err != nil || from != "2026-10-20" {
+		t.Fatalf("raw kept from %q, %v", from, err)
+	}
+
+	sc, err := app.ScoreDays(ctx, s, now, app.DefaultScoreOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var computed []string
+	for _, d := range sc.Computed {
+		computed = append(computed, d.Date)
+	}
+	if !slices.Equal(computed, []string{"2026-10-20", "2026-10-21", "2026-10-22", "2026-10-23", "2026-10-24"}) {
+		t.Errorf("recomputed %v", computed)
+	}
+	if len(sc.Scores) != 24 || sc.Scores[0].Date != "2026-10-01" {
+		t.Errorf("scored %d days from %s, want all 24 from 2026-10-01", len(sc.Scores), sc.Scores[0].Date)
+	}
+	if err := s.SaveFeatureDays(ctx, sc.Computed, features.DefaultKey); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := s.OlderFeatureDays(ctx, "2026-10-01", "2026-10-31", features.DefaultKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 19 || kept[18].Date != "2026-10-19" {
+		t.Fatalf("older rows kept: %d, last %+v", len(kept), kept[len(kept)-1])
+	}
+	for _, d := range kept {
+		if d.Values["attended_hours"] != 6 || d.Present != 6*time.Hour {
+			t.Errorf("%s was overwritten: %+v", d.Date, d)
+		}
+	}
+	current, err := s.FeatureDays(ctx, "2026-10-01", "2026-10-31", features.DefaultKey)
+	if err != nil || len(current) != 5 || current[0].Values["attended_hours"] != 2 {
+		t.Errorf("recomputed rows: %+v %v", current, err)
+	}
+
+	// With every minute gone, no day is whole.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM attention_minutes`); err != nil {
+		t.Fatal(err)
+	}
+	if from, err := s.RawKeptFrom(ctx); err != nil || from != "" {
+		t.Errorf("raw kept from %q, %v with no minutes", from, err)
 	}
 }
 

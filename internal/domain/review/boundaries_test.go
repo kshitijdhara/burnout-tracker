@@ -182,4 +182,10 @@ func TestOffers(t *testing.T) {
 			t.Errorf("offer for %s", name)
 		}
 	}
+	// Core hours ending in the morning still offer a valid shutdown.
+	early := features.DefaultParams()
+	early.CoreStart, early.CoreEnd = 6*time.Hour, 10*time.Hour
+	if b := starting(boundary.Shutdown, early); b.Validate() != nil || b.Value != "12:00" {
+		t.Errorf("shutdown offered after early core hours: %+v", b)
+	}
 }

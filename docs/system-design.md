@@ -582,6 +582,17 @@ Phase 1 so far:
     like with like;
   - older days keep their stored values;
   - with the default profile, nothing is recomputed.
+- **Recompute rule.** The same rule covers a registry version bump
+  (`features.RegistryVersion`) and changed core hours. A stored day from
+  another version or with other parameters is recomputed only while its
+  raw data is *all* kept. Retention trims minutes (`retention.minutes_days`)
+  and intervals (`retention.intervals_days`) separately and by time, so
+  the oldest day left of either may be partial. A day counts as whole from
+  the day after the later of the two oldest days (`RawKeptFrom`). Before
+  that, a stored day keeps its stored row, which is never overwritten with
+  a recompute from partial data, and a day with no stored row isn't
+  scored. The last two completed days are always recomputed; minutes are
+  kept at least 3 days.
 
 ### 4.7 Calendar busy blocks
 
@@ -1013,8 +1024,13 @@ Phase 1 so far (`internal/domain/nudge`, the tray):
     or video;
   - "Snooze until tomorrow" and "Don't show this kind again" in the
     item's submenu; `nudges.enabled` and one switch per kind in the
-    config. Every unknown state, such as an unreadable control file,
+    config. "Don't show this kind again" turns that switch off in the
+    config file, so `burnout config set nudges.KIND true` turns it back
+    on. Every unknown state, such as an unreadable control file,
     shows nothing.
+  - The tray decides and records the day's nudge once a minute; its
+    2-second refresh rereads only the pause and rechecks suppression in
+    memory.
 - **Not yet:**
   - Focus/Do Not Disturb and screen-share detection. macOS exposes
     neither without a new permission (Focus authorization, Full Disk
@@ -1183,7 +1199,7 @@ Days below the coverage threshold aren't scored (§7.1).
 | Failure | Behaviour |
 |---------|-----------|
 | Crash | launchd `KeepAlive` (on failure only) + `ThrottleInterval` 30 s; systemd `Restart=on-failure` + `RestartSec=30`, no start limit. Windows: a per-user logon task (`InteractiveToken`, so only in the user's desktop session) with `RestartOnFailure` every minute (Task Scheduler's minimum), 999 times, no time limit; not yet verified that it fires on a non-zero exit rather than only on a failed launch. Conditions a restart can't fix (no consent, a newer schema, an unusable data folder) exit 0 and stay down |
-| Crash loop (3 in 10 min) | The service records its start times in an owner-only `starts` file in the data folder; a run that returns, cleanly or with an error, is dropped again, so only crashes (a panic, a native fault, a watchdog kill) count. On the 3rd start within 10 minutes it starts in **safe mode**: no native desktop collector, hooks still recorded. `doctor` and the tray's first line report it. After an hour without a crash it clears the file and exits for launchd or systemd to restart it normally. Daemons started in a terminal don't take part |
+| Crash loop (3 in 10 min) | The service records its start times in an owner-only `starts` file in the data folder; a run that returns, cleanly or with an error, is dropped again as soon as collection stops (before macOS ends the process at logout), and `service install` and `uninstall` clear the file before they stop the service, so only crashes (a panic, a native fault, a watchdog kill) count. On the 3rd start within 10 minutes it starts in **safe mode**: no native desktop collector, hooks still recorded. `doctor` and the tray's first line report it. After an hour without a crash it clears the file and exits for launchd or systemd to restart it normally. Daemons started in a terminal don't take part |
 | Hang | systemd: `Type=notify` + `WatchdogSec=60`; the daemon sends `READY=1` once collecting (or once it starts waiting for a terminal daemon) and `WATCHDOG=1` from its loop every flush (15 s), paused or not, so a stuck loop is killed and restarted. launchd has no watchdog. Not yet: an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
 | DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |

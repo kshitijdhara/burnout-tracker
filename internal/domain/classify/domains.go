@@ -91,7 +91,7 @@ func DomainFromTitle(title string) string {
 // Bank of America" or "MyBank - Statements" when mybank.com is excluded.
 // Call it on the raw title, in memory.
 func (r *Rules) PrivateTitle(title string) bool {
-	t := " " + words(title) + " "
+	t := " " + stripBrowserName(words(title)) + " "
 	for _, n := range r.privateNames {
 		if strings.Contains(t, n) {
 			return true
@@ -106,6 +106,40 @@ func words(s string) string {
 	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}), " ")
+}
+
+// browserNames are the names browsers end their window titles with on
+// Windows and Linux ("Inbox - Gmail - Google Chrome"), as words. Longer
+// names come first, so "mozilla firefox private browsing" goes whole.
+var browserNames = []string{
+	"mozilla firefox private browsing", "firefox developer edition", "firefox nightly", "mozilla firefox",
+	"google chrome beta", "google chrome dev", "google chrome canary", "google chrome", "chromium",
+	"microsoft edge beta", "microsoft edge dev", "microsoft edge canary", "microsoft edge",
+	"brave", "vivaldi", "opera",
+}
+
+// stripBrowserName drops the browser's name from the end of a title in
+// words, so an excluded site's word ("google", "microsoft", "mozilla")
+// never matches the browser instead of the page.
+func stripBrowserName(t string) string {
+	for _, b := range browserNames {
+		if t == b {
+			return ""
+		}
+		if s, ok := strings.CutSuffix(t, " "+b); ok {
+			return s
+		}
+	}
+	return t
+}
+
+// registrable reports whether domain is a whole site (mybank.com,
+// example.co.uk) rather than a part of one (mail.google.com). It is a
+// guess without the public suffix list: two labels, or three when the
+// middle one is generic.
+func registrable(domain string) bool {
+	labels := strings.Split(domain, ".")
+	return len(labels) == 2 || len(labels) == 3 && genericLabels[labels[1]]
 }
 
 // genericLabels are second-level labels that name no site ("co" in

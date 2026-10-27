@@ -15,7 +15,10 @@ func TestApp(t *testing.T) {
 	}{
 		{"com.googlecode.iterm2", model.CategoryTerminal},
 		{"WINDOWSTERMINAL.EXE", model.CategoryTerminal}, // case-insensitive
-		{"com.jetbrains.goland", model.CategoryCode},    // prefix rule
+		{"org.gnome.Ptyxis", model.CategoryTerminal},    // GNOME Wayland app ids
+		{"org.gnome.Console", model.CategoryTerminal},
+		{"org.gnome.Terminal", model.CategoryTerminal},
+		{"com.jetbrains.goland", model.CategoryCode}, // prefix rule
 		{"com.1password.1password", model.CategoryPrivate},
 		{"com.example.Secret", model.CategoryPrivate}, // exclusion beats override
 		{"notion.id", model.CategoryComms},            // override beats bundled

@@ -330,6 +330,9 @@ func askQuestions(ctx context.Context, in *bufio.Reader, out io.Writer, w review
 			args = append([]string{"add"}, args...)
 		}
 		if err := boundaryCommand(ctx, acts.store, out, args, boundary.SourceReview, acts.now); err != nil {
+			if !isInputError(err) {
+				return err // the store failed: don't carry on as if it was saved
+			}
 			say("%s\n", strings.TrimPrefix(firstLine(err), "boundary: invalid: "))
 		}
 	}
@@ -432,11 +435,13 @@ func labelable(c model.Category) bool {
 // unlabelled drops apps that already have an override: their past minutes
 // stay uncategorized, and asking again every week would nag. An app id
 // with "=" can't be written as KEY=CATEGORY, so it isn't asked about.
+// Override keys are stored lower-cased and app ids keep their case
+// (com.microsoft.VSCode), so the lookup lower-cases too.
 func unlabelled(apps []sqlite.UncategorizedApp, cfg config.Config) []sqlite.UncategorizedApp {
 	overrides := cfg.Overrides()
 	var out []sqlite.UncategorizedApp
 	for _, a := range apps {
-		if _, ok := overrides[a.App]; !ok && !strings.Contains(a.App, "=") {
+		if _, ok := overrides[strings.ToLower(strings.TrimSpace(a.App))]; !ok && !strings.Contains(a.App, "=") {
 			out = append(out, a)
 		}
 	}
