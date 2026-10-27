@@ -21,6 +21,16 @@
 > after the protected job has signed; the installers print the service
 > step instead of running it; the MSI is not built yet.
 
+> **Update 2026-10-27 (Windows service):** `burnout service
+> install|uninstall|status` registers a per-user logon task with
+> `schtasks /Create /XML`, which needs no admin rights; the binary renders
+> the XML. Only the user runs it, never an installer (AC-2), so the "MSI
+> registers the logon task" note in the table below no longer holds. A
+> task's action has no environment, so install refuses while a folder
+> override such as `BURNOUT_DATA_DIR` is set, rather than pin it. Task
+> Scheduler keeps no output: the daemon sends Go's crash output to
+> `stderr.log` itself and closes the console window it is given at logon.
+
 > **Update 2026-10-27 (`burnout update`):** `internal/adapters/egress/update`
 > and `cmd/burnout/update.go` implement item 5. Decisions:
 > - **Install-type detection**, after resolving symlinks (a
@@ -272,7 +282,7 @@ authenticity. The OS-level gates are handled like this:
 3. [ ] Generate the ECDSA P-256 *current* and *next* keys (key ceremony, `packaging/README.md`). [x] Embed both public keys (placeholders until then); document rotation.
 4. [x] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
 5. [x] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only; opt-in weekly check.
-6. [x] `burnout service install|uninstall|status` for launchd and systemd `--user`, definitions rendered by the binary. [ ] Windows logon task.
+6. [x] `burnout service install|uninstall|status` for launchd, systemd `--user` and a Windows logon task, definitions rendered by the binary.
 7. [ ] `burnout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
 8. [ ] Apply to SignPath Foundation for Windows.
 9. [ ] CI matrix for the supported platforms (ADR-0001 compatibility matrix).

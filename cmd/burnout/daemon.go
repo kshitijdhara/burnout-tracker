@@ -114,7 +114,8 @@ func runDaemon(ctx context.Context, args []string) error {
 	return serveDaemon(ctx, log, dataDir, false)
 }
 
-// runServiceDaemon is the daemon as launchd or systemd runs it. A failure
+// runServiceDaemon is the daemon as launchd, systemd or Task Scheduler
+// runs it. A failure
 // a restart may fix returns an error, so the service manager retries in
 // 30 s. One it can't fix (no consent, a database from a newer version, an
 // unusable data folder) is logged and exits 0, which the service treats as
@@ -139,6 +140,7 @@ func runServiceDaemon(ctx context.Context) (err error) {
 		return nil
 	}
 	capCrashLog(paths.LogDir(dataDir))
+	serviceStdio(paths.LogDir(dataDir))
 	w, err := logfile.Open(filepath.Join(paths.LogDir(dataDir), paths.DaemonLogFile), logfile.DefaultMaxBytes, logfile.DefaultFiles)
 	if err != nil {
 		return stderr.redactErr(err)
@@ -208,9 +210,9 @@ func waitForLock(ctx context.Context, log *slog.Logger, dataDir string) (func() 
 	}
 }
 
-// capCrashLog keeps launchd's crash log small across restarts: past
+// capCrashLog keeps the service's crash log small across restarts: past
 // crashLogMax it becomes stderr.log.1, replacing the older one, and an
-// empty owner-only stderr.log waits for launchd's next start. This run's
+// empty owner-only stderr.log waits for the next start. This run's
 // own crash output still goes to the renamed file.
 func capCrashLog(logDir string) {
 	path := filepath.Join(logDir, paths.CrashLogFile)
