@@ -130,7 +130,8 @@ const taskReserved = "\"%"
 // schtasks /Create /XML expects: run at the given user's logon, in their
 // interactive session only (the tray must be able to show), restarted a
 // minute after a failed run (the shortest interval Task Scheduler allows)
-// up to 999 times, with no time limit and on battery too. A start the
+// up to 999 times, with no time limit and on battery too. Running it again
+// replaces the running daemon, so a reinstall starts the new binary. A start the
 // daemon declines exits 0, a success, and isn't retried. user is the
 // account's SID.
 func RenderTask(bin string, args []string, user string) ([]byte, error) {
@@ -173,7 +174,7 @@ func RenderTask(bin string, args []string, user string) ([]byte, error) {
     </Principal>
   </Principals>
   <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <AllowHardTerminate>true</AllowHardTerminate>
