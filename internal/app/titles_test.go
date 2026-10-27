@@ -41,7 +41,7 @@ func titled(id model.WindowID, app, title string) model.Window {
 
 func TestTitleCascade(t *testing.T) {
 	rules := classify.New(
-		[]string{"domain:intranet.example.com", "org.mozilla.firefox"},
+		[]string{"domain:intranet.example.com", "domain:mybank.com", "domain:mail.google.com", "org.mozilla.firefox"},
 		map[string]model.Category{"domain:docs.google.com": model.CategoryCode, "domain:paypal.com": model.CategoryCode, "com.google.chrome": model.CategoryOther},
 	)
 	tr := newTitleRules(rules, &recordingHasher{})
@@ -50,11 +50,12 @@ func TestTitleCascade(t *testing.T) {
 		w    model.Window
 		want model.Category
 	}{
-		{titled(1, chrome, "Design doc - Google Docs"), model.CategoryCode},        // site override
-		{titled(2, chrome, "Pull request #42 · a/b · GitHub"), model.CategoryCode}, // bundled site
-		{titled(3, chrome, "Summary - PayPal"), model.CategoryPrivate},
+		{titled(1, chrome, "Design doc - Google Docs - Google Chrome"), model.CategoryCode}, // site override; not mail.google.com's
+		{titled(2, chrome, "Pull request #42 · a/b · GitHub"), model.CategoryCode},          // bundled site
+		{titled(3, chrome, "Summary - PayPal"), model.CategoryPrivate},                      // sensitive beats override
 		{titled(9, chrome, "Bank of America | Online Banking | Accounts Overview"), model.CategoryPrivate},
-		{titled(10, chrome, "Intranet home - Example"), model.CategoryPrivate},               // the excluded site's word                       // sensitive beats override
+		{titled(10, chrome, "Statements - MyBank - Google Chrome"), model.CategoryPrivate},   // the excluded site's word
+		{titled(11, chrome, "Intranet home - Example"), model.CategoryOther},                 // not a subdomain's parent's
 		{titled(4, chrome, "Wiki | intranet.example.com"), model.CategoryPrivate},            // domain exclusion
 		{titled(5, chrome, "Some page nobody knows"), model.CategoryOther},                   // the app's own category
 		{titled(6, chrome, ""), model.CategoryOther},                                         // no title
@@ -65,25 +66,6 @@ func TestTitleCascade(t *testing.T) {
 		if got := tr.category(tc.w); got != tc.want {
 			t.Errorf("window %d: %q, want %q", tc.w.ID, got, tc.want)
 		}
-	}
-	if len(tr.cache) != 1 {
-		t.Errorf("cache holds %d entries, want 1 (only the unknown page)", len(tr.cache))
-	}
-}
-
-func TestTitleCacheKeysSiteAndBound(t *testing.T) {
-	h := &recordingHasher{}
-	tr := newTitleRules(classify.New(nil, nil), h)
-	tr.category(titled(1, "com.google.Chrome", "Sign in - a.example"))
-	tr.category(titled(1, "com.google.Chrome", "Sign in - b.example"))
-	if len(tr.cache) != 2 {
-		t.Fatalf("pages on two sites share a cache entry: %d", len(tr.cache))
-	}
-	for i := range maxTitleCache + 10 {
-		tr.category(titled(1, "com.google.Chrome", "page "+strings.Repeat("x", i%50)+string(rune('a'+i%26))+string(rune('a'+i/26%26))))
-	}
-	if len(tr.cache) > maxTitleCache {
-		t.Fatalf("cache grew to %d", len(tr.cache))
 	}
 }
 
@@ -159,7 +141,9 @@ func TestTitlesNeverReachTheSink(t *testing.T) {
 				t.Errorf("titles %t: a title cache key reached the sink or log", on)
 			}
 		}
-		if on != (len(h.titles) > 0) {
+		// Nothing derived from a title is hashed until the ADR-0006 cache
+		// exists; the check above guards the keys once it does.
+		if len(h.titles) != 0 {
 			t.Errorf("titles %t: %d title keys made", on, len(h.titles))
 		}
 		h.mu.Unlock()
