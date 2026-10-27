@@ -35,6 +35,8 @@ func TestDecide(t *testing.T) {
 	off := func(k Kind) Settings { s := settings(); s.Off = map[Kind]bool{k: true}; return s }
 	disabled := settings()
 	disabled.Enabled = false
+	nightOwl := settings()
+	nightOwl.Waking, _ = schedule.Parse("09:00-03:00")
 	idle := at(friday, 22, 0)
 	idle.Active = false
 
@@ -52,6 +54,9 @@ func TestDecide(t *testing.T) {
 		{"before the shutdown time", settings(), shutdown, nil, Today{}, at(friday, 21, 29), "", false},
 		{"at the shutdown time", settings(), shutdown, nil, Today{}, at(friday, 21, 30), Shutdown, true},
 		{"shutdown, but not working", settings(), shutdown, nil, Today{}, idle, "", false},
+		{"after a shutdown past midnight", nightOwl, Boundaries{Shutdown: 25 * time.Hour, HasShutdown: true}, nil, Today{},
+			Now{At: at(saturday, 1, 30).At, Day: friday, Known: true, Active: true}, Shutdown, true},
+		{"before a shutdown past midnight", settings(), Boundaries{Shutdown: 25 * time.Hour, HasShutdown: true}, nil, Today{}, at(friday, 22, 59), "", false},
 		{"no shutdown on a weekend", settings(), Boundaries{Shutdown: 21 * time.Hour, HasShutdown: true}, nil, Today{}, at(saturday, 22, 0), "", false},
 		{"working on a day off", settings(), shutdown, nil, Today{}, at(saturday, 11, 0), DayOff, true},
 		{"a guardrail", settings(), Boundaries{}, []string{"weekly_hours"}, Today{}, at(friday, 10, 0), WeeklyHours, true},

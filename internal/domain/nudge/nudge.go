@@ -49,7 +49,7 @@ func CopyOf(k Kind) Copy { return copies[k] }
 
 // Boundaries are the user's boundaries that a nudge can point to.
 type Boundaries struct {
-	Shutdown    time.Duration // time of day work should end, on workdays
+	Shutdown    time.Duration // when work should end on workdays, from the logical day's midnight: 01:00 is 25h
 	HasShutdown bool
 	WeekendsOff bool // Saturday and Sunday are kept free
 }
@@ -154,12 +154,12 @@ func Suppressed(s Settings, now Now) string {
 // Pick returns the kind that applies at now and isn't off, or "" for none.
 // guardrails are the names of the limits the latest scored day crossed.
 func Pick(b Boundaries, guardrails []string, now Now, off map[Kind]bool) Kind {
-	day, err := time.Parse(time.DateOnly, now.Day)
+	day, err := time.ParseInLocation(time.DateOnly, now.Day, now.At.Location())
 	if err != nil {
 		return ""
 	}
 	weekend := day.Weekday() == time.Saturday || day.Weekday() == time.Sunday
-	tod := time.Duration(now.At.Hour())*time.Hour + time.Duration(now.At.Minute())*time.Minute
+	tod := now.At.Sub(day) // past midnight it keeps counting: 01:30 is 25h30m
 	applies := map[Kind]bool{
 		Shutdown: b.HasShutdown && !weekend && now.Active && tod >= b.Shutdown,
 		DayOff:   b.WeekendsOff && weekend && now.Active,
