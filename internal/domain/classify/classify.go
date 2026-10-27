@@ -17,6 +17,12 @@ type Rules struct {
 	prefixes  []prefixRule
 	private   map[string]bool // sensitive denylist + user exclusions, lower-cased
 	overrides map[string]model.Category
+	browsers  map[string]bool // bundled browsers, whatever their override
+
+	// Sites, for browser titles (domains.go).
+	domains         map[string]model.Category
+	domainOverrides map[string]model.Category
+	privateDomains  map[string]model.Category // all CategoryPrivate
 }
 
 type prefixRule struct {
@@ -26,17 +32,33 @@ type prefixRule struct {
 
 // New returns the bundled rules plus the user's exclusions (recorded as
 // private) and overrides (which win over bundled rules but not over
-// exclusions).
+// exclusions). Entries starting with DomainPrefix name sites rather than
+// apps.
 func New(exclusions []string, overrides map[string]model.Category) *Rules {
 	r := &Rules{
-		exact:     make(map[string]model.Category, len(bundledApps)),
-		private:   make(map[string]bool, len(sensitiveApps)+len(exclusions)),
-		overrides: make(map[string]model.Category, len(overrides)),
+		exact:           make(map[string]model.Category, len(bundledApps)),
+		private:         make(map[string]bool, len(sensitiveApps)+len(exclusions)),
+		overrides:       make(map[string]model.Category, len(overrides)),
+		browsers:        make(map[string]bool, len(bundledApps[model.CategoryBrowser])),
+		domains:         make(map[string]model.Category),
+		domainOverrides: make(map[string]model.Category),
+		privateDomains:  make(map[string]model.Category, len(sensitiveDomains)),
 	}
 	for cat, ids := range bundledApps {
 		for _, id := range ids {
 			r.exact[strings.ToLower(id)] = cat
+			if cat == model.CategoryBrowser {
+				r.browsers[strings.ToLower(id)] = true
+			}
 		}
+	}
+	for cat, ds := range bundledDomains {
+		for _, d := range ds {
+			r.domains[d] = cat
+		}
+	}
+	for _, d := range sensitiveDomains {
+		r.privateDomains[d] = model.CategoryPrivate
 	}
 	for _, p := range bundledPrefixes {
 		r.prefixes = append(r.prefixes, prefixRule{strings.ToLower(p.prefix), p.cat})
@@ -45,12 +67,26 @@ func New(exclusions []string, overrides map[string]model.Category) *Rules {
 		r.private[strings.ToLower(id)] = true
 	}
 	for _, id := range exclusions {
+		if d, ok := cutDomain(id); ok {
+			r.privateDomains[d] = model.CategoryPrivate
+			continue
+		}
 		r.private[strings.ToLower(id)] = true
 	}
 	for id, cat := range overrides {
+		if d, ok := cutDomain(id); ok {
+			r.domainOverrides[d] = cat
+			continue
+		}
 		r.overrides[strings.ToLower(id)] = cat
 	}
 	return r
+}
+
+// cutDomain returns the normalized domain of a "domain:" entry.
+func cutDomain(entry string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(entry)), DomainPrefix)
+	return NormalizeDomain(rest), ok
 }
 
 // App returns the category for an app id (bundle id or executable name).

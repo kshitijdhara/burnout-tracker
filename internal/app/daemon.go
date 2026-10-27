@@ -136,9 +136,16 @@ type Deps struct {
 type Settings struct {
 	// PrivateHours are when nothing is recorded, as if paused.
 	PrivateHours schedule.Schedule
-	// Exclusions are app ids recorded as private, like the sensitive-apps
-	// denylist.
+	// Exclusions are app ids, and sites as "domain:example.com", recorded
+	// as private, like the sensitive-apps and sensitive-sites denylists.
 	Exclusions []string
+	// Overrides map app ids, and sites as "domain:example.com", to the
+	// user's categories. They win over the bundled rules, not exclusions.
+	Overrides map[string]model.Category
+	// TitleClassification uses browser window titles, in memory only, to
+	// tell sites apart. Titles reach the daemon only when the collector
+	// was started with them; with this off they are ignored.
+	TitleClassification bool
 	// AggregateOnly keeps one row per category per minute, without app ids
 	// or per-window keys.
 	AggregateOnly bool
@@ -162,6 +169,7 @@ type Daemon struct {
 	// settings and rules change only on the loop (Deps.Reload).
 	settings Settings
 	rules    *classify.Rules
+	titles   *titleRules
 
 	inbox    chan event
 	counters counters // updated by Submit on ingest goroutines
@@ -226,11 +234,13 @@ type event struct {
 // New wires a daemon. It does not start anything.
 func New(cfg Config, deps Deps) *Daemon {
 	cfg.Timeline.Rollover = cfg.Rollover
+	rules := classify.New(cfg.Settings.Exclusions, cfg.Settings.Overrides)
 	return &Daemon{
 		cfg:      cfg,
 		deps:     deps,
 		settings: cfg.Settings,
-		rules:    classify.New(cfg.Settings.Exclusions, nil),
+		rules:    rules,
+		titles:   newTitleRules(rules, deps.Hasher),
 		inbox:    make(chan event, cfg.QueueSize),
 		engine:   attention.New(cfg.Attention),
 		rollups:  attention.NewRollups(cfg.Rollover),
@@ -353,8 +363,12 @@ func (d *Daemon) reload(ctx context.Context, now time.Time) {
 		d.settle(ctx, now)
 	}
 	d.settings = s
-	d.rules = classify.New(s.Exclusions, nil)
-	d.deps.Log.Info("settings changed", "private_hours", len(s.PrivateHours), "exclusions", len(s.Exclusions), "aggregate_only", s.AggregateOnly)
+	// New rules start a new title cache, so a new exclusion or override
+	// applies to pages already seen.
+	d.rules = classify.New(s.Exclusions, s.Overrides)
+	d.titles = newTitleRules(d.rules, d.deps.Hasher)
+	d.deps.Log.Info("settings changed", "private_hours", len(s.PrivateHours), "exclusions", len(s.Exclusions),
+		"overrides", len(s.Overrides), "title_classification", s.TitleClassification, "aggregate_only", s.AggregateOnly)
 }
 
 // settle closes every open span and held tick and writes them out, as at
@@ -379,7 +393,11 @@ func (d *Daemon) onTick(ctx context.Context) {
 	d.locked = snap.Locked || snap.DisplayAsleep
 	cats := make(map[model.WindowID]model.Category, len(snap.Windows))
 	for _, w := range snap.Windows {
-		cats[w.ID] = d.rules.App(w.AppID)
+		if d.settings.TitleClassification {
+			cats[w.ID] = d.titles.category(w)
+		} else {
+			cats[w.ID] = d.rules.App(w.AppID)
+		}
 	}
 	sessions := d.windows.resolve(snap, d.tracker.Sessions())
 	res := d.engine.Tick(attention.Input{
@@ -416,6 +434,11 @@ func (d *Daemon) identify(w model.Window, cat model.Category) attention.Identity
 		Category: cat,
 	}
 	switch {
+	case cat != model.CategoryPrivate && cat != d.rules.App(w.AppID) && !d.settings.AggregateOnly:
+		// A browser window's category follows its page: each category the
+		// window takes gets its own row, so a minute split between sites
+		// isn't all filed under the first.
+		id.Key = d.deps.Hasher.Key("window", w.AppID, strconv.FormatUint(uint64(w.ID), 10), string(cat))
 	case cat == model.CategoryPrivate:
 		// Private windows share one identity so no per-window trail exists.
 		id.AppID = ""
