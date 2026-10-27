@@ -49,6 +49,9 @@ func runUninstall(ctx context.Context, args []string) error {
 		return err
 	}
 	exe, _ := os.Executable() // only for a hint
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved // update.Swap keeps <binary>.old beside the resolved path
+	}
 	return uninstall(ctx, os.Stdin, os.Stdout, *purge, uninstallDirs{
 		data: dataDir, config: cfgDir, cache: filepath.Join(cache, paths.AppName), exe: exe, goos: runtime.GOOS,
 	}, uninstallSteps{
