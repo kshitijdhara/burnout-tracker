@@ -126,6 +126,9 @@ type Deps struct {
 	// Reload returns the user's settings when they have changed since the
 	// last call. It is called every ControlInterval on the loop.
 	Reload func() (Settings, bool)
+	// Heartbeat is called on the loop every FlushInterval, paused or not,
+	// to show a watchdog the loop is alive.
+	Heartbeat func()
 }
 
 // Settings are the user's privacy settings the loop applies (privacy &
@@ -273,6 +276,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-controls.C:
 			d.checkControls(ctx)
 		case <-flush.C:
+			if d.deps.Heartbeat != nil {
+				d.deps.Heartbeat()
+			}
 			if d.paused.Load() {
 				continue // everything was written when the pause began
 			}

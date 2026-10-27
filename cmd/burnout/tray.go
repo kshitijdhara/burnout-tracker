@@ -58,14 +58,16 @@ func trayMenu(log *slog.Logger, dataDir string, settings *liveConfig, dash *tray
 }
 
 // trayStatus is what the icon shows: paused (by the user or private
-// hours) or recording, and whether the monthly reminder is due. The
-// reminder shows whatever the recording state (AC-4).
+// hours), safe mode or recording, and whether the monthly reminder is due.
+// The reminder shows whatever the recording state (AC-4).
 func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 	st := tray.Status{Text: "Recording"}
 	if paused, p := control.PauseState(dataDir, now); paused {
 		st = tray.Status{Paused: true, Text: "Paused " + describePause(p, now)}
 	} else if c.PrivateHours().Contains(now) {
 		st = tray.Status{Paused: true, Text: "Private hours: nothing is recorded"}
+	} else if safeMode.Load() {
+		st = tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
 	}
 	consented, _ := consentedAt()
 	seen, _ := control.ReminderSeen(dataDir)

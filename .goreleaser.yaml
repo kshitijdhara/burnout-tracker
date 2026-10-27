@@ -1,0 +1,147 @@
+# GoReleaser builds every release asset from a tagged commit
+# (ADR-0005). It runs on a macOS runner, because the darwin collector and
+# tray need cgo; linux and windows are pure Go and cross-compile there.
+#
+# The release workflow (.github/workflows/release.yml) runs this with
+# --skip=publish, signs checksums.txt with the pinned release key in a
+# separate, protected job and then uploads dist/ itself, so nothing is
+# published unsigned.
+#
+# Local check:   goreleaser check
+# Local build:   goreleaser release --snapshot --clean --skip=sign,sbom
+version: 2
+
+project_name: burnout
+
+# Reproducible: the same commit builds the same bytes. Paths are trimmed,
+# and every timestamp (binaries, archive entries, packages) is the commit's.
+# The workflow also exports SOURCE_DATE_EPOCH for the tools that read it.
+builds:
+  - id: burnout-darwin
+    main: ./cmd/burnout
+    binary: burnout
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -buildid= -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+  - id: burnout
+    main: ./cmd/burnout
+    binary: burnout
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -buildid= -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+universal_binaries:
+  - id: burnout-darwin
+    ids: [burnout-darwin]
+    name_template: burnout
+    replace: true
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      # Apple Silicon refuses to run unsigned arm64 code, so ad-hoc sign
+      # (ADR-0005). Users re-sign locally with `burnout setup-signing`.
+      # Then wrap the signed binary in a .app inside a .dmg; GoReleaser's
+      # own dmg support is Pro-only.
+      post:
+        - codesign --force --sign - --identifier io.github.kshitijdhara.burnout-tracker "{{ .Path }}"
+        - packaging/macos/build-dmg.sh "{{ .Path }}" "{{ .Version }}" "dist/burnout_{{ .Version }}_darwin_all.dmg"
+
+archives:
+  - id: default
+    ids: [burnout, burnout-darwin]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # install.sh and install.ps1 build these names; keep them in step.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info:
+          mtime: "{{ .CommitDate }}"
+
+nfpms:
+  - id: packages
+    ids: [burnout]
+    package_name: burnout
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: burnout-tracker
+    homepage: https://github.com/kshitijdhara/burnout-tracker
+    maintainer: Kshitij Dhara <69909428+kshitijdhara@users.noreply.github.com>
+    description: Local-first burnout self-monitoring. Nothing is recorded until you run `burnout setup`.
+    license: Apache-2.0
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    mtime: "{{ .CommitDate }}"
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/burnout/LICENSE
+        file_info:
+          mtime: "{{ .CommitDate }}"
+    # Prints next steps only. A package must never start collection or
+    # register the service (privacy & security §5.2, AC-2); the service is
+    # per user, so the user runs `burnout service install` themselves.
+    scripts:
+      postinstall: packaging/nfpm/postinstall.sh
+
+# The dmg is built by the universal-binary hook above, outside GoReleaser's
+# artifact list, so it is added here to be checksummed (and so covered by
+# checksums.txt.sig).
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+  extra_files:
+    - glob: "dist/*.dmg"
+
+sboms:
+  - artifacts: archive
+
+# Cosign keyless signature of checksums.txt, an extra check for anyone who
+# wants transparency-log verification. The pinned-key signature
+# (checksums.txt.sig) is what install.sh, install.ps1 and `burnout update`
+# require; the release workflow adds it after this step.
+signs:
+  - id: cosign
+    cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle=${signature}
+      - ${artifact}
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other changes
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch

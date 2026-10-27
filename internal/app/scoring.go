@@ -82,9 +82,20 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions
 	var out Scoring
 	days := make([]strain.Day, 0, len(stored)+recomputeDays+1)
 	recomputeFrom := day(recomputeDays)
+	// prior holds every usable day's attended hours so far, for features
+	// that look back. A computed day can fill a gap older than stored
+	// days, so each day is given only the days before it.
+	sp := strain.DefaultParams()
+	prior := map[string]float64{}
+	remember := func(d strain.Day) {
+		if h, ok := d.Values["attended_hours"]; ok && d.Coverage >= sp.MinCoverage && d.Present >= sp.MinPresent {
+			prior[d.Date] = h
+		}
+	}
 	for _, d := range stored {
 		if d.Date < recomputeFrom {
 			days = append(days, d)
+			remember(d)
 		}
 	}
 	for _, date := range withData {
@@ -96,11 +107,17 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions
 		if err != nil {
 			return Scoring{}, err
 		}
+		for pd, h := range prior {
+			if pd < date {
+				in.Prior = append(in.Prior, features.PriorDay{Date: pd, AttendedH: h})
+			}
+		}
 		d := strain.Day{
 			Date: date, Coverage: in.Coverage, Present: in.Present,
 			Values: features.Values(in, o.Features),
 		}
 		days = append(days, d)
+		remember(d)
 		if !isToday {
 			out.Computed = append(out.Computed, d)
 		}
@@ -119,8 +136,7 @@ func ScoreDays(ctx context.Context, st ScoreStore, now time.Time, o ScoreOptions
 	for i := range days {
 		days[i].Excluded = excluded[days[i].Date]
 	}
-	p := strain.DefaultParams()
-	p.Role = o.Role
-	out.Scores = strain.Compute(days, p)
+	sp.Role = o.Role
+	out.Scores = strain.Compute(days, sp)
 	return out, nil
 }

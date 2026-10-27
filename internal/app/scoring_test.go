@@ -95,6 +95,15 @@ func TestScoreDays(t *testing.T) {
 	if v := sc.Computed[0].Values["attended_hours"]; v != 2 {
 		t.Errorf("computed attended hours %v, want 2", v)
 	}
+	// Look-back features see the usable days before each day, stored or
+	// computed: the first stored day has none, 10-21 sees 10-20, and
+	// 10-24 sees three days, all light under the 4 h fallback.
+	if _, ok := sc.Computed[0].Values["days_since_light_day"]; !ok {
+		t.Error("10-21 has no days since a light day")
+	}
+	if v := sc.Computed[2].Values["days_since_light_day"]; v != 1 {
+		t.Errorf("10-24 days since a light day %v, want 1", v)
+	}
 
 	// A vacation annotation excludes a day already stored, and the day is
 	// reported as missing, not rest.

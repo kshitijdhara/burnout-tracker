@@ -3,6 +3,7 @@ package features
 import (
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -10,7 +11,7 @@ import (
 
 // RegistryVersion changes whenever a feature is added, removed or computed
 // differently. Stored features from another version are recomputed.
-const RegistryVersion = 2
+const RegistryVersion = 3
 
 // Group is a family of correlated features; the strain score caps each
 // group's contribution so they can't count the same thing twice.
@@ -198,6 +199,20 @@ func Registry() []Feature {
 			},
 		},
 		{
+			Name: "comms_interrupt_rate", Version: 1, Unit: "/h", Group: GroupFragmentation, HigherWorse: true,
+			Epsilon: 1, Weights: weights(0.5, map[Role]float64{RolePM: 0.25}),
+			Label:   "switches into chat and email per hour",
+			Doc:     "How often attention moved into chat or email from something else, per attended hour.",
+			Compute: commsInterruptRate,
+		},
+		{
+			Name: "agent_switches_per_hour", Version: 1, Unit: "/h", Group: GroupFragmentation, HigherWorse: true,
+			Epsilon: 2, Weights: weight(0.5), Label: "app switches while agents worked",
+			Doc: "How often the app holding your attention changed while an AI agent was working, " +
+				"per hour attended in that time. Needs 30 minutes of it.",
+			Compute: agentSwitchesPerHour,
+		},
+		{
 			Name: "breaks", Version: 1, Unit: "count", Group: GroupRecovery, HigherWorse: false,
 			Epsilon: 1, Weights: weight(0.75), Label: "breaks of 5 minutes or more",
 			Doc: "Times you stepped away for at least 5 minutes between the day's first and last activity.",
@@ -220,6 +235,15 @@ func Registry() []Feature {
 			Epsilon: 0.5, Weights: weight(1), Label: "overnight gap",
 			Doc:     "Time from the previous day's last activity to this day's first.",
 			Compute: overnightGap,
+		},
+		{
+			Name: "days_since_light_day", Version: 1, Unit: "days", Group: GroupRecovery, HigherWorse: true,
+			Epsilon: 1, Weights: weights(0.5, map[Role]float64{RoleStudent: 0.25}),
+			Label: "days since a light day",
+			Doc: "Observed days since the last light one in the past 28 days: a day with attended hours " +
+				"below your own 25th percentile (below 4 h until 7 days are observed). " +
+				"Days the device wasn't used don't count either way.",
+			Compute: daysSinceLightDay,
 		},
 		{
 			Name: "shell_failure_rate", Version: 1, Unit: "ratio", Group: GroupFriction, HigherWorse: true,
@@ -258,6 +282,13 @@ func Registry() []Feature {
 				}
 				return float64(n), len(d.Shell) > 0
 			},
+		},
+		{
+			Name: "approval_latency", Version: 1, Unit: "min", Group: GroupFriction, HigherWorse: true,
+			Epsilon: 1, Weights: weight(0), Label: "time to answer an agent",
+			Doc: "Median time from an AI agent asking for your approval or answer to you giving it. " +
+				"Exploratory: shown, not scored.",
+			Compute: approvalLatency,
 		},
 		{
 			Name: "agent_parallelism", Version: 1, Unit: "sessions", Group: GroupAgent, HigherWorse: true,
@@ -357,6 +388,176 @@ func switchesPerHour(d Day, p Params) (float64, bool) {
 		prev = m
 	}
 	return float64(switches) / (total / 3600), true
+}
+
+// commsInterruptRate counts minutes where attention moved into chat or
+// email from another category, with the same stretch rule as
+// switchesPerHour. Moving between two comms apps is not an interrupt.
+func commsInterruptRate(d Day, p Params) (float64, bool) {
+	total := attendedWork(d)
+	if total < p.MinAttended.Seconds() {
+		return 0, false
+	}
+	n := 0
+	var prev *Minute
+	for i := range d.Minutes {
+		m := &d.Minutes[i]
+		if m.Label == "" || m.Label == model.UnattributedWindowKey {
+			continue
+		}
+		if prev != nil && m.Category == model.CategoryComms && prev.Category != model.CategoryComms &&
+			m.At.Sub(prev.At) <= time.Minute+p.FocusGap {
+			n++
+		}
+		prev = m
+	}
+	return float64(n) / (total / 3600), true
+}
+
+// agentSwitchesPerHour is switchesPerHour restricted to minutes inside the
+// union of the day's working agent segments: the switching that comes
+// from supervising agents.
+func agentSwitchesPerHour(d Day, p Params) (float64, bool) {
+	var working []Span
+	for _, s := range d.Agent {
+		if s.State == "working" {
+			working = append(working, s)
+		}
+	}
+	working = merge(working)
+	if len(working) == 0 {
+		return 0, false
+	}
+	inside := func(m Minute) bool {
+		mid := m.At.Add(30 * time.Second)
+		i := sort.Search(len(working), func(i int) bool { return working[i].End.After(mid) })
+		return i < len(working) && !working[i].Start.After(mid)
+	}
+	total, switches := 0.0, 0
+	var prev *Minute
+	for i := range d.Minutes {
+		m := &d.Minutes[i]
+		if !inside(*m) {
+			prev = nil
+			continue
+		}
+		if work(*m) {
+			total += m.AttendedS
+		}
+		if m.Label == "" || m.Label == model.UnattributedWindowKey {
+			continue
+		}
+		if prev != nil && m.Label != prev.Label && m.At.Sub(prev.At) <= time.Minute+p.FocusGap {
+			switches++
+		}
+		prev = m
+	}
+	if total < p.MinAttended.Seconds() {
+		return 0, false
+	}
+	return float64(switches) / (total / 3600), true
+}
+
+// Light days (days since a light day).
+const (
+	lightLookbackDays = 28 // earlier days considered
+	lightMinDays      = 7  // observed days needed for a personal threshold
+	lightFallbackH    = 4  // the threshold until then, attended hours
+	lightPercentile   = 0.25
+)
+
+// daysSinceLightDay counts the observed days in the lookback after the
+// most recent light one, plus this day. This day itself is never tested:
+// today's partial hours would always look light. With no light day in the
+// lookback, it is every observed day in it plus one.
+func daysSinceLightDay(d Day, _ Params) (float64, bool) {
+	date, err := time.Parse(time.DateOnly, d.Date)
+	if err != nil {
+		return 0, false
+	}
+	from := date.AddDate(0, 0, -lightLookbackDays).Format(time.DateOnly)
+	var window []PriorDay
+	for _, pd := range d.Prior {
+		if pd.Date >= from && pd.Date < d.Date {
+			window = append(window, pd)
+		}
+	}
+	if len(window) == 0 {
+		return 0, false
+	}
+	slices.SortFunc(window, func(a, b PriorDay) int { return strings.Compare(a.Date, b.Date) })
+	threshold := float64(lightFallbackH)
+	if len(window) >= lightMinDays {
+		hours := make([]float64, len(window))
+		for i, pd := range window {
+			hours[i] = pd.AttendedH
+		}
+		threshold = quantile(hours, lightPercentile)
+	}
+	n := 1
+	for i := len(window) - 1; i >= 0 && window[i].AttendedH >= threshold; i-- {
+		n++
+	}
+	return float64(n), true
+}
+
+// quantile returns the q-quantile of xs by linear interpolation. It sorts
+// xs in place.
+func quantile(xs []float64, q float64) float64 {
+	sort.Float64s(xs)
+	pos := q * float64(len(xs)-1)
+	lo := int(pos)
+	if lo+1 >= len(xs) {
+		return xs[lo]
+	}
+	return xs[lo] + (pos-float64(lo))*(xs[lo+1]-xs[lo])
+}
+
+// approvalLatency is the median length of the day's waits on the human.
+// A wait ends when the agent moves on, which takes the human's answer;
+// waits the human never answered time out and close at zero length, so
+// they aren't emitted. Pieces of one wait (split at rollover or a
+// restart) are joined first.
+func approvalLatency(d Day, _ Params) (float64, bool) {
+	bySession := map[string][]Span{}
+	for _, s := range d.Agent {
+		if s.State == "blocked_on_human" {
+			bySession[s.Session] = append(bySession[s.Session], s)
+		}
+	}
+	var waits []float64
+	for _, spans := range bySession {
+		for _, w := range merge(spans) {
+			waits = append(waits, w.Duration().Minutes())
+		}
+	}
+	if len(waits) == 0 {
+		return 0, false
+	}
+	return quantile(waits, 0.5), true
+}
+
+// merge returns spans sorted by start with touching or overlapping ones
+// joined. Empty and inverted spans are dropped.
+func merge(spans []Span) []Span {
+	var in []Span
+	for _, s := range spans {
+		if s.End.After(s.Start) {
+			in = append(in, Span{Start: s.Start, End: s.End})
+		}
+	}
+	slices.SortFunc(in, func(x, y Span) int { return x.Start.Compare(y.Start) })
+	var out []Span
+	for _, s := range in {
+		if n := len(out); n > 0 && !s.Start.After(out[n-1].End) {
+			if s.End.After(out[n-1].End) {
+				out[n-1].End = s.End
+			}
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 var focusCategories = []model.Category{model.CategoryCode, model.CategoryTerminal, model.CategoryDocs}
@@ -525,19 +726,7 @@ func sortedBusy(d Day) []Span {
 
 // mergedBusy returns the day's busy blocks with overlaps merged, so the
 // same meeting on two calendars counts once.
-func mergedBusy(d Day) []Span {
-	var out []Span
-	for _, b := range sortedBusy(d) {
-		if n := len(out); n > 0 && !b.Start.After(out[n-1].End) {
-			if b.End.After(out[n-1].End) {
-				out[n-1].End = b.End
-			}
-			continue
-		}
-		out = append(out, Span{Start: b.Start, End: b.End})
-	}
-	return out
-}
+func mergedBusy(d Day) []Span { return merge(d.Busy) }
 
 // overlap is how long a and b overlap.
 func overlap(a, b Span) time.Duration {

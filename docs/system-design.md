@@ -698,7 +698,7 @@ device wasn't used, is **missing, not rest**. Work on another machine is
 indistinguishable from rest, so we say so in the UI and rely on import
 (F17) for multi-device users.
 
-v1 implementation notes (`internal/domain/features`, registry version 2):
+v1 implementation notes (`internal/domain/features`, registry version 3):
 - Built: attended hours, after-hours share (weekdays), meeting hours,
   app switches per hour, longest focus block (code, terminal, docs; gaps
   up to 2 min), comms share, breaks and longest break, overnight gap,
@@ -715,9 +715,30 @@ v1 implementation notes (`internal/domain/features`, registry version 2):
     one ending;
   - after-hours meetings: a weekday's meeting hours outside core hours;
   - the last two apply only on days a calendar sync covered.
-- Not yet: comms interrupt
-  rate, days since a light day, human switches while agents work, and
-  approval latency.
+- Registry version 3 adds the last four features:
+  - comms interrupt rate (fragmentation, weight 0.5, PM 0.25): moves of
+    attention into chat or email from another category, per attended
+    hour. Same stretch rule as app switches; Slack → Mail is not an
+    interrupt.
+  - app switches while agents worked (fragmentation, weight 0.5): app
+    switches between minutes inside the union of working agent segments,
+    per hour attended in that time; needs 30 min of it. The human
+    timeline has no window labels, so it is counted from the minutes.
+  - days since a light day (recovery, higher is worse, weight 0.5,
+    student 0.25): observed days after the last light one in the trailing
+    28 days, plus this day. A light day has attended hours below the
+    user's own 25th percentile over those days, or below 4 h until 7 are
+    observed. Only usable days (coverage and presence, §7.2) count, and
+    this day is never tested, since today's partial hours would always
+    look light. Days with no data are missing, not rest, so they neither
+    count nor reset it: a vacation off the device doesn't reset it, and
+    vacation annotations aren't read, because stored days aren't
+    recomputed when one is added.
+  - approval latency (friction, exploratory, weight 0): median length of
+    the day's waits on the human, with pieces of one wait (split at
+    rollover or a restart) joined. A wait ends when the agent moves on,
+    which takes the human's answer. Unanswered waits time out at zero
+    length and drop out.
 - Coverage is the share of present time attributed to a window, from the
   day's health record. A day with under 30 min of presence is "not used".
 
@@ -1021,8 +1042,8 @@ Days below the coverage threshold aren't scored (§7.1).
 | Failure | Behaviour |
 |---------|-----------|
 | Crash | launchd `KeepAlive` (on failure only) + `ThrottleInterval` 30 s; systemd `Restart=on-failure` + `RestartSec=30`, no start limit. Conditions a restart can't fix (no consent, a newer schema, an unusable data folder) exit 0 and stay down. Windows task restart: not yet |
-| Crash loop (3 in 10 min) | Not yet: start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray. Phase 0 keeps restarting every 30 s |
-| Hang | Not yet: systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
+| Crash loop (3 in 10 min) | The service records its start times in an owner-only `starts` file in the data folder; a run that returns, cleanly or with an error, is dropped again, so only crashes (a panic, a native fault, a watchdog kill) count. On the 3rd start within 10 minutes it starts in **safe mode**: no native desktop collector, hooks still recorded. `doctor` and the tray's first line report it. After an hour without a crash it clears the file and exits for launchd or systemd to restart it normally. Daemons started in a terminal don't take part |
+| Hang | systemd: `Type=notify` + `WatchdogSec=60`; the daemon sends `READY=1` once collecting (or once it starts waiting for a terminal daemon) and `WATCHDOG=1` from its loop every flush (15 s), paused or not, so a stuck loop is killed and restarted. launchd has no watchdog. Not yet: an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
 | DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |
 | Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |

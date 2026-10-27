@@ -107,6 +107,12 @@ On macOS, Terminal starts bash as a login shell, which reads
 ~/.local/bin/burnout timeline   # today minute by minute
 ```
 
+If something looks wrong, `burnout doctor --bundle burnout-diagnostics.zip`
+writes the same report, today's health, your settings (excluded apps
+removed) and the end of the daemon log to one file you can attach to an
+issue. It shows you everything in it first and writes nothing until you
+type `yes`. Nothing is uploaded.
+
 `status` starts with a **strain score** (0–100) for the last completed
 day, the top reasons behind it, and the last 7 days. It compares each day
 with your own usual weekdays or weekends, so it needs 14 days with enough

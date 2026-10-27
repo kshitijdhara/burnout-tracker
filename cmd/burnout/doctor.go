@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/crashloop"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
@@ -21,46 +25,60 @@ import (
 
 // runDoctor prints what is and isn't working. It doesn't change data or
 // settings (it may create the data directory and record the keystore
-// choice, as the daemon would) and makes no network calls.
-func runDoctor(ctx context.Context, _ []string) error {
-	fmt.Println("burnout", version)
+// choice, as the daemon would) and makes no network calls. With --bundle
+// it writes the same report, and more, to a diagnostics archive instead.
+func runDoctor(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	bundle := fs.String("bundle", "", "write a redacted diagnostics archive (zip) to this new `file`, after showing everything in it")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return errors.New("usage: burnout doctor [--bundle FILE]")
+	}
+	if *bundle != "" {
+		return runBundle(ctx, *bundle)
+	}
+	return doctor(ctx, os.Stdout, false)
+}
+
+// doctor writes the report to w. forBundle leaves out what can't be
+// redacted: a config file that doesn't parse may be quoted in its error,
+// and its excluded apps aren't known.
+func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
+	_, _ = fmt.Fprintln(w, "burnout", version)
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return err
 	}
 
-	checkFix("consent recorded", hasConsent(), "run `burnout setup`")
+	checkFix(w, "consent recorded", hasConsent(), "run `burnout setup`")
 	switch err := paths.CheckPrivate(dataDir); {
 	case errors.Is(err, paths.ErrUnverified):
-		fmt.Println("  ?  data dir is owner-only: not verified on this platform")
+		_, _ = fmt.Fprintln(w, "  ?  data dir is owner-only: not verified on this platform")
 	case err != nil:
-		check("data dir is owner-only", false, err.Error())
+		check(w, "data dir is owner-only", false, err.Error())
 	default:
-		check("data dir is owner-only", true, "")
+		check(w, "data dir is owner-only", true, "")
 	}
 
-	checkFix("daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
-	reportService()
-	cfg, cfgPath, cfgErr := loadConfig()
-	switch {
-	case cfgErr != nil && cfgPath == "":
-		check("config file", false, cfgErr.Error())
-	case cfgErr != nil:
-		check("config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
-			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
-		cfg = config.Default()
-	default:
-		check("config file is valid", true, printable(cfgPath))
-	}
+	checkFix(w, "daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
+	reportService(w)
+	checkFix(w, "not in safe mode", !crashloop.Load(dataDir).Safe, "the desktop collector is off after 3 starts in 10 minutes; "+
+		"hooks still record, and it comes back after an hour without a crash (see the daemon log)")
+	cfg := reportConfig(w, forBundle)
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
 	case fde.Enabled:
-		check("disk encryption", true, detail)
+		check(w, "disk encryption", true, detail)
 	case fde.Disabled:
-		check("disk encryption", false, "OFF — your data is unprotected if this device is lost or stolen. Turn on FileVault, BitLocker or LUKS. ("+detail+")")
+		check(w, "disk encryption", false, "OFF — your data is unprotected if this device is lost or stolen. Turn on FileVault, BitLocker or LUKS. ("+detail+")")
 	default:
-		fmt.Printf("  ?  disk encryption: unknown (%s)\n", detail)
+		_, _ = fmt.Fprintf(w, "  ?  disk encryption: unknown (%s)\n", detail)
 	}
 
 	if keys, err := keystore.New(dataDir, keystoreOptions()...); err == nil {
@@ -68,26 +86,26 @@ func runDoctor(ctx context.Context, _ []string) error {
 		if note == "file" {
 			note += " (no OS keystore found; key file is owner-only)"
 		}
-		check("keystore", true, note)
+		check(w, "keystore", true, note)
 	} else {
-		check("keystore", false, err.Error())
+		check(w, "keystore", false, err.Error())
 	}
 
 	if c, err := newCollector(collectorOptions{Now: time.Now}); err != nil {
-		check("desktop collector", false, err.Error())
+		check(w, "desktop collector", false, err.Error())
 	} else {
 		caps := c.Capabilities()
 		snap, snapErr := c.Snapshot(ctx)
 		_ = c.Close()
-		check("desktop collector", true, caps.Name)
+		check(w, "desktop collector", true, caps.Name)
 		for _, p := range caps.MissingPermits {
-			fmt.Printf("  !  missing permission: %s\n", p)
+			_, _ = fmt.Fprintf(w, "  !  missing permission: %s\n", p)
 		}
 		for _, l := range caps.Limitations {
-			fmt.Printf("  -  limitation: %s\n", l)
+			_, _ = fmt.Fprintf(w, "  -  limitation: %s\n", l)
 		}
 		if snapErr == nil {
-			fmt.Printf("  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Privacy.ExcludeApps, nil)))
+			_, _ = fmt.Fprintf(w, "  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Privacy.ExcludeApps, nil)))
 		}
 	}
 
@@ -95,18 +113,37 @@ func runDoctor(ctx context.Context, _ []string) error {
 		defer func() { _ = store.Close() }()
 		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
 		if h, err := store.Health(ctx, day); err == nil && h != "" {
-			fmt.Println("  today's health:", h)
+			_, _ = fmt.Fprintln(w, "  today's health:", h)
 		}
-		check("database", store.QuickCheck(ctx) == nil, filepath.Join(dataDir, sqlite.FileName))
+		check(w, "database", store.QuickCheck(ctx) == nil, filepath.Join(dataDir, sqlite.FileName))
 	} else {
-		check("database", false, err.Error())
+		check(w, "database", false, err.Error())
 	}
 
-	fmt.Println("\n" + networkSummary(dataDir))
+	_, _ = fmt.Fprintln(w, "\n"+networkSummary(dataDir))
 	return nil
 }
 
-func check(name string, ok bool, detail string) {
+// reportConfig checks the config file and returns it, or the defaults if
+// it is invalid. forBundle leaves out the error, which can quote the file.
+func reportConfig(w io.Writer, forBundle bool) config.Config {
+	cfg, cfgPath, cfgErr := loadConfig()
+	switch {
+	case cfgErr != nil && forBundle:
+		check(w, "config file is valid", false, "run `burnout config validate` to see why")
+	case cfgErr != nil && cfgPath == "":
+		check(w, "config file", false, cfgErr.Error())
+	case cfgErr != nil:
+		check(w, "config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
+			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
+	default:
+		check(w, "config file is valid", true, printable(cfgPath))
+		return cfg
+	}
+	return config.Default()
+}
+
+func check(w io.Writer, name string, ok bool, detail string) {
 	mark := " ok "
 	if !ok {
 		mark = "FAIL"
@@ -114,16 +151,16 @@ func check(name string, ok bool, detail string) {
 	if detail = strings.TrimSpace(detail); detail != "" {
 		name += ": " + detail
 	}
-	fmt.Printf("  %s %s\n", mark, name)
+	_, _ = fmt.Fprintf(w, "  %s %s\n", mark, name)
 }
 
 // checkFix is check for a condition whose detail is only a fix, shown when
 // the condition fails.
-func checkFix(name string, ok bool, fix string) {
+func checkFix(w io.Writer, name string, ok bool, fix string) {
 	if ok {
 		fix = ""
 	}
-	check(name, ok, fix)
+	check(w, name, ok, fix)
 }
 
 // mediaNow describes the calls and video the collector sees at this
@@ -161,7 +198,7 @@ func mediaNow(snap model.Snapshot, rules *classify.Rules) string {
 
 // reportService shows whether the background service is set up. Platforms
 // without one yet say nothing.
-func reportService() {
+func reportService(w io.Writer) {
 	m, _, err := serviceManager()
 	if err != nil {
 		return
@@ -171,10 +208,10 @@ func reportService() {
 	case err != nil:
 		return
 	case st.Running:
-		check("background service", true, st.Detail)
+		check(w, "background service", true, st.Detail)
 	case st.Installed:
-		check("background service", false, describeService(st, m.LogHint()))
+		check(w, "background service", false, describeService(st, m.LogHint()))
 	default:
-		fmt.Printf("  -  background service: %s\n", describeService(st, m.LogHint()))
+		_, _ = fmt.Fprintf(w, "  -  background service: %s\n", describeService(st, m.LogHint()))
 	}
 }

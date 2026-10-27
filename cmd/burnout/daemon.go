@@ -13,9 +13,11 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/crashloop"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/identity"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/claude"
@@ -24,6 +26,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/logfile"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/sdnotify"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
@@ -108,7 +111,7 @@ func runDaemon(ctx context.Context, args []string) error {
 		return err
 	}
 	defer func() { _ = release() }()
-	return serveDaemon(ctx, log, dataDir)
+	return serveDaemon(ctx, log, dataDir, false)
 }
 
 // runServiceDaemon is the daemon as launchd or systemd runs it. A failure
@@ -117,7 +120,14 @@ func runDaemon(ctx context.Context, args []string) error {
 // unusable data folder) is logged and exits 0, which the service treats as
 // done until the next login, instead of failing every 30 s forever. What
 // it writes shows the home folder as ~ (privacy & security §10).
-func runServiceDaemon(ctx context.Context) error {
+func runServiceDaemon(ctx context.Context) (err error) {
+	defer func() {
+		if err == nil {
+			// Under systemd's Type=notify, exiting 0 before READY=1 counts
+			// as a failed start.
+			_ = sdnotify.Ready()
+		}
+	}()
 	home, _ := os.UserHomeDir()
 	stderr := homeRedactor{w: os.Stderr, home: home}
 	dataDir, err := paths.DataDir()
@@ -144,7 +154,22 @@ func runServiceDaemon(ctx context.Context) error {
 		return stderr.redactErr(err)
 	}
 	defer func() { _ = release() }()
-	err = serveDaemon(ctx, log, dataDir)
+	history, started, recErr := crashloop.Record(dataDir, time.Now())
+	if recErr != nil {
+		log.Warn("could not record this start for crash-loop detection", "err", recErr)
+	}
+	err = serveDaemon(ctx, log, dataDir, history.Safe)
+	if !errors.Is(err, errSafeModeOver) {
+		// It returned, so it didn't crash: a stop, a logout or an error
+		// a restart may fix doesn't count towards safe mode. A panic, a
+		// native fault or the watchdog's kill never gets here.
+		_ = crashloop.Forget(dataDir, started)
+	}
+	if errors.Is(err, errSafeModeOver) {
+		// Exit with an error so launchd or systemd starts a normal daemon.
+		log.Info("leaving safe mode after an hour without a crash; restarting with the desktop collector")
+		return err
+	}
 	if errors.Is(err, errBadConfig) {
 		log.Error("not starting: the config file is invalid; see `burnout config validate`", "err", err)
 		return nil
@@ -165,11 +190,16 @@ func waitForLock(ctx context.Context, log *slog.Logger, dataDir string) (func() 
 	for waiting := false; ; waiting = true {
 		release, err := lock.Acquire(dataDir)
 		if !errors.Is(err, lock.ErrLocked) {
+			_ = sdnotify.Watchdog() // a fresh ping for the start that follows
 			return release, err
 		}
 		if !waiting {
 			log.Info("another daemon is running, probably in a terminal; taking over when it stops")
+			// The wait has no end: tell systemd the start is done, so it
+			// doesn't time out, and keep its watchdog fed below.
+			_ = sdnotify.Ready()
 		}
+		_ = sdnotify.Watchdog()
 		select {
 		case <-ctx.Done():
 			return nil, nil
@@ -223,8 +253,17 @@ func (h homeRedactor) redactErr(err error) error {
 // exclusions.
 var errBadConfig = errors.New("invalid config")
 
-// serveDaemon runs the daemon once it holds the lock.
-func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
+// safeMode is whether this daemon started in safe mode, for the tray.
+var safeMode atomic.Bool
+
+// errSafeModeOver ends a safe-mode daemon after an hour without a crash,
+// so the service starts again with the desktop collector.
+var errSafeModeOver = errors.New("safe mode is over; restart to use the desktop collector")
+
+// serveDaemon runs the daemon once it holds the lock. In safe mode, after
+// repeated crashes (system design §11.2), it records hook data only.
+func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string, safe bool) error {
+	safeMode.Store(safe)
 	cfgPath, err := configPath()
 	if err != nil {
 		return err
@@ -261,7 +300,7 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 		if !shown {
 			return errNoTray
 		}
-		return collect(ctx, log, dataDir, settings, store, keys, key)
+		return collect(ctx, log, dataDir, safe, settings, store, keys, key)
 	})
 }
 
@@ -270,10 +309,10 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 var errNoTray = errors.New("no tray icon could be shown, so nothing is recorded (AC-1); see the log line above for why")
 
 // collect records until ctx ends. Call it only while the tray icon shows.
-func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *liveConfig, store *sqlite.Store,
+func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, settings *liveConfig, store *sqlite.Store,
 	keys *keystore.Store, key model.Sensitive[[]byte],
 ) error {
-	collector := screenCollector(log)
+	collector := screenCollector(log, safe)
 	if collector != nil {
 		defer func() { _ = collector.Close() }()
 	}
@@ -325,6 +364,7 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *li
 			}
 			return settingsFrom(c), changed
 		},
+		Heartbeat: func() { _ = sdnotify.Watchdog() },
 	})
 
 	var calendarDone sync.WaitGroup
@@ -336,24 +376,45 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *li
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(ctx, func(m wire.Message) { d.Submit(m) }) }()
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	go func() {
 		// Ingest only returns on shutdown or a fatal error; either way, stop.
 		if err := <-serveErr; err != nil {
 			log.Error("ingest stopped", "err", err)
 		}
-		cancel()
+		cancel(nil)
 	}()
+	if safe {
+		t := time.AfterFunc(crashloop.Clean, func() {
+			if err := crashloop.Clear(dataDir); err != nil {
+				log.Warn("could not end safe mode", "err", err)
+				return
+			}
+			cancel(errSafeModeOver)
+		})
+		defer t.Stop()
+	}
 
 	runCalendar(runCtx)
-	log.Info("daemon started", "version", version, "keystore", keys.Backend())
-	return d.Run(runCtx)
+	log.Info("daemon started", "version", version, "keystore", keys.Backend(), "safe_mode", safe)
+	_ = sdnotify.Send("READY=1\nWATCHDOG=1")
+	if err := d.Run(runCtx); err != nil {
+		return err
+	}
+	if cause := context.Cause(runCtx); errors.Is(cause, errSafeModeOver) {
+		return cause
+	}
+	return nil
 }
 
 // screenCollector is the desktop collector, or nil when this platform has
-// none.
-func screenCollector(log *slog.Logger) ports.Collector {
+// none or the daemon is in safe mode.
+func screenCollector(log *slog.Logger, safe bool) ports.Collector {
+	if safe {
+		log.Warn("safe mode after 3 starts in 10 minutes: no desktop collector; recording hook data only until an hour passes without a crash")
+		return nil
+	}
 	c, err := newCollector(collectorOptions{Now: time.Now})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)

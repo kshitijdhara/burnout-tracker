@@ -84,8 +84,9 @@ func RenderPlist(bin string, args []string, env map[string]string, logDir string
 
 // RenderUnit returns the systemd user unit: started with the user session,
 // restarted 30 s after a crash with no start limit, like launchd's
-// ThrottleInterval. A start the daemon declines (no consent, say) exits 0
-// and isn't retried.
+// ThrottleInterval, or after a minute without a watchdog ping from the
+// daemon's loop (a hang). A start the daemon declines (no consent, say)
+// exits 0 and isn't retried.
 func RenderUnit(bin string, args []string, env map[string]string) ([]byte, error) {
 	if err := checkPath("binary path", bin, systemdReserved); err != nil {
 		return nil, err
@@ -107,9 +108,11 @@ Description=burnout-tracker daemon (local only; nothing leaves this device)
 StartLimitIntervalSec=0
 
 [Service]
+Type=notify
 ` + envLines.String() + `ExecStart="` + bin + `" ` + strings.Join(args, " ") + `
 Restart=on-failure
 RestartSec=30
+WatchdogSec=60
 
 [Install]
 WantedBy=default.target
