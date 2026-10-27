@@ -62,6 +62,17 @@ func (v Version) String() string {
 // Prerelease reports whether v is a pre-release.
 func (v Version) Prerelease() bool { return len(v.Pre) > 0 }
 
+// ChannelFor is the channel a build follows by default: Beta for a
+// pre-release build such as an alpha, whose successors are pre-releases
+// too and which GitHub's "latest" release never names; Stable otherwise,
+// including for dev builds.
+func ChannelFor(current string) Channel {
+	if v, err := ParseVersion(current); err == nil && v.Prerelease() {
+		return Beta
+	}
+	return Stable
+}
+
 // Compare returns -1, 0 or 1 as v is older than, the same as or newer
 // than w, by semver precedence: a pre-release sorts before its release,
 // and numeric identifiers compare as numbers, below alphanumeric ones.

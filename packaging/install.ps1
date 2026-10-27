@@ -176,7 +176,17 @@ function Install-Burnout([string]$Version, [string]$Dir) {
 
     if (-not $Dir) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\burnout' }
     if (-not $Version) {
-        $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurnoutRepo/releases/latest").tag_name
+        # GitHub's latest release never names a pre-release, so while there
+        # are only pre-releases (an alpha), take the newest of any kind.
+        try {
+            $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurnoutRepo/releases/latest").tag_name
+        } catch {
+            $Version = $null
+        }
+        if (-not $Version) {
+            $Version = @(Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurnoutRepo/releases?per_page=1")[0].tag_name
+        }
+        if (-not $Version) { throw "couldn't find a release" }
     }
     if (-not $Version.StartsWith('v')) { $Version = "v$Version" }
     $asset = "burnout_$($Version.Substring(1))_windows_$(Get-BurnoutArch).zip"

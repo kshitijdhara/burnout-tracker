@@ -112,10 +112,10 @@ func (u *Updater) Run(ctx context.Context, o Options) (Result, error) {
 	return res, nil
 }
 
-// Check returns the newest stable version, for the weekly check. It only
+// Check returns the newest version on ch, for the weekly check. It only
 // reads the release list: nothing is downloaded.
-func (u *Updater) Check(ctx context.Context) (Version, error) {
-	r, err := u.Latest(ctx, Stable)
+func (u *Updater) Check(ctx context.Context, ch Channel) (Version, error) {
+	r, err := u.Latest(ctx, ch)
 	if err != nil {
 		return Version{}, err
 	}

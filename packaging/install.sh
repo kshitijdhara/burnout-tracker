@@ -62,15 +62,25 @@ fetch() { # url out
 	curl --proto '=https' --tlsv1.2 -fsSL -o "$2" "$1" || die "download failed: $1"
 }
 
-# latest_version prints the tag the latest release redirects to.
+# latest_version prints the newest release's tag: the one GitHub's latest
+# release redirects to or, while there are only pre-releases (an alpha),
+# which "latest" never names, the newest release of any kind.
 latest_version() {
-	url=$(curl --proto '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' \
-		"https://github.com/$REPO/releases/latest") || die "couldn't find the latest release"
-	tag=${url##*/}
-	case $tag in
-	v[0-9]*) echo "$tag" ;;
-	*) die "couldn't find the latest release (got '$url')" ;;
-	esac
+	if url=$(curl --proto '=https' --tlsv1.2 -fsSLI -o /dev/null -w '%{url_effective}' \
+		"https://github.com/$REPO/releases/latest" 2>/dev/null); then
+		tag=${url##*/}
+		case $tag in v[0-9]*)
+			echo "$tag"
+			return
+			;;
+		esac
+	fi
+	list=$(curl --proto '=https' --tlsv1.2 -fsSL \
+		"https://api.github.com/repos/$REPO/releases?per_page=1") || die "couldn't list the releases"
+	tag=$(printf '%s\n' "$list" | tr ',' '\n' |
+		sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' | head -n 1)
+	[ -n "$tag" ] || die "couldn't find a release"
+	echo "$tag"
 }
 
 # verify_with_key PEM DATA SIG succeeds if SIG is PEM's key's signature of
