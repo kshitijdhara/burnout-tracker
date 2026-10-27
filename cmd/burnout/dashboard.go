@@ -63,7 +63,7 @@ func runDashboard(ctx context.Context, args []string) error {
 	link := srv.LaunchURL()
 	opened := false
 	if !*noOpen {
-		opened = openBrowser(link) == nil
+		opened = openLaunch(dataDir, link) == nil
 	}
 	if opened {
 		fmt.Println("The dashboard is open in your browser.")
@@ -74,23 +74,49 @@ func runDashboard(ctx context.Context, args []string) error {
 	return srv.Serve(ctx)
 }
 
-// openBrowser opens url in the default browser. The URL is ours: a
-// loopback address and a random token, no user input.
-func openBrowser(url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("/usr/bin/open", url) //nolint:gosec // see above
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url) //nolint:gosec // see above
-	default:
-		cmd = exec.Command("xdg-open", url) //nolint:gosec // see above
+// openLaunch opens a dashboard launch link in the default browser without
+// putting it on a command line, where other local users could read the
+// token (privacy & security §2, T1): the link goes into an owner-only
+// launch file in the data folder, and the browser opens that file. The
+// file is removed once the token has expired, or by the next launch if
+// burnout stops first.
+func openLaunch(dataDir, link string) error {
+	path, err := dashboard.WriteLaunchFile(dataDir, link, time.Now())
+	if err != nil {
+		return err
 	}
+	if err := openFile(path); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	time.AfterFunc(dashboard.LaunchFileTTL, func() { _ = os.Remove(path) })
+	return nil
+}
+
+// openFile opens a launch file; tests replace it.
+var openFile = openBrowser
+
+// openBrowser opens target, a URL or a file, in the default browser or
+// app. It is ours: a launch file's path, or a fixed URL, no user input.
+func openBrowser(target string) error {
+	cmd := browserCommand(target)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	go func() { _ = cmd.Wait() }() // the daemon opens it too, and must reap it
 	return nil
+}
+
+// browserCommand is the command openBrowser runs.
+func browserCommand(target string) *exec.Cmd {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("/usr/bin/open", target) //nolint:gosec // see openBrowser
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", target) //nolint:gosec // see openBrowser
+	default:
+		return exec.Command("xdg-open", target) //nolint:gosec // see openBrowser
+	}
 }
 
 // collected is what is and isn't collected, for the Privacy page. titles
@@ -387,19 +413,9 @@ func (d dashControl) Forget(ctx context.Context, span string) error {
 	return nil
 }
 
-// withStore runs fn on a read-write connection that is closed after.
-func (d dashControl) withStore(ctx context.Context, fn func(*sqlite.Store) error) error {
-	store, err := sqlite.OpenExisting(ctx, d.dataDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = store.Close() }()
-	return fn(store)
-}
-
 func (d dashControl) Annotations(ctx context.Context) ([]dashboard.Annotation, error) {
 	var out []dashboard.Annotation
-	err := d.withStore(ctx, func(s *sqlite.Store) error {
+	err := rwStore(d).with(ctx, func(s *sqlite.Store) error {
 		notes, err := s.Annotations(ctx, "0000-01-01", "9999-12-31")
 		for _, a := range notes {
 			out = append(out, dashboard.Annotation{ID: a.ID, Text: describeAnnotation(a)})
@@ -410,7 +426,7 @@ func (d dashControl) Annotations(ctx context.Context) ([]dashboard.Annotation, e
 }
 
 func (d dashControl) AddAnnotation(ctx context.Context, a annotation.Annotation) (id int64, err error) {
-	err = d.withStore(ctx, func(s *sqlite.Store) error {
+	err = rwStore(d).with(ctx, func(s *sqlite.Store) error {
 		id, err = s.AddAnnotation(ctx, a)
 		return err
 	})
@@ -418,7 +434,7 @@ func (d dashControl) AddAnnotation(ctx context.Context, a annotation.Annotation)
 }
 
 func (d dashControl) RemoveAnnotation(ctx context.Context, id int64) (ok bool, err error) {
-	err = d.withStore(ctx, func(s *sqlite.Store) error {
+	err = rwStore(d).with(ctx, func(s *sqlite.Store) error {
 		ok, err = s.RemoveAnnotation(ctx, id)
 		return err
 	})
@@ -426,7 +442,7 @@ func (d dashControl) RemoveAnnotation(ctx context.Context, id int64) (ok bool, e
 }
 
 func (d dashControl) SaveCheckins(ctx context.Context, rs []checkin.Record) error {
-	return d.withStore(ctx, func(s *sqlite.Store) error { return s.SaveCheckins(ctx, rs) })
+	return rwStore(d).with(ctx, func(s *sqlite.Store) error { return s.SaveCheckins(ctx, rs) })
 }
 
 func (d dashControl) Boundaries(ctx context.Context) ([]dashboard.Boundary, error) {

@@ -495,9 +495,15 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   opens it with a new launch token. Each server has its own port, and both
   read the database through a read-only connection.
 - **Launch token:** 256 bits, compared in constant time, single-use, and
-  valid for 60 s.
+  valid for 60 s. It never goes on a command line, which other local users
+  can read (T1): `burnout dashboard` and the tray write the launch URL into
+  an owner-only `dashboard-launch-*.html` file in the data folder, a
+  script-free meta refresh, and open that file. The file is removed once
+  the token has expired, or by the next launch if burnout stopped first.
+  `--no-open` prints the URL in the terminal instead.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
-  named after the port.
+  named after the port. A session ends after 12 hours without a request,
+  and at most 8 are kept; a new one replaces the one used longest ago.
 - **CSRF token:** 256 bits per session, minted with the cookie. The page
   reads it from `GET /api/session`; a cross-origin page can send that
   request but never read the answer, because there are no CORS headers.
@@ -508,7 +514,10 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   - be GET or HEAD, unless it is one of the write routes below;
   - not be marked cross-site or same-site by `Sec-Fetch-Site`. `none` (a
     typed URL) is allowed only for the page and the launch link, never the
-    API.
+    API. The launch link alone may also be cross-site or same-site, since
+    the launch file is another origin; the token is what it needs. It then
+    answers with a page that moves on by meta refresh rather than a
+    redirect, so the next request is same-origin and carries the cookie.
 - **Every write** (POST or DELETE) must also:
   - match a write route exactly; any other method or path is `405`;
   - be marked `Sec-Fetch-Site: same-origin`, or, from a browser without
