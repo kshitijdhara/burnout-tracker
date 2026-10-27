@@ -134,7 +134,7 @@ func (t *trayDashboard) open(view string) error {
 		}()
 		t.srv, t.store, t.cancel, t.done = srv, store, cancel, done
 	}
-	return openBrowser(t.srv.LaunchURLTo(view))
+	return openLaunch(t.dataDir, t.srv.LaunchURLTo(view))
 }
 
 // close stops the dashboard, if it was opened.

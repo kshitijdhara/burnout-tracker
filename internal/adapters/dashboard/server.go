@@ -7,11 +7,16 @@
 //   - it listens on 127.0.0.1 only, on a random port;
 //   - every request must carry Host 127.0.0.1:<port> or localhost:<port>,
 //     which defeats DNS rebinding;
-//   - access starts from a one-time launch token (single use, 60 s) that
-//     `burnout dashboard` puts in the URL it opens; the server swaps it for
-//     an HttpOnly, SameSite=Strict session cookie and redirects to a
-//     token-free URL;
-//   - requests a browser marks as cross-site are refused;
+//   - access starts from a one-time launch token (single use, 60 s).
+//     `burnout dashboard` and the tray never put it on a command line,
+//     which other local users can read: they write it into an owner-only
+//     launch file and open that (see LaunchPage). The server swaps the
+//     token for an HttpOnly, SameSite=Strict session cookie and sends the
+//     browser on to a token-free URL;
+//   - sessions end after SessionIdle without a request, and at most
+//     MaxSessions are kept;
+//   - requests a browser marks as cross-site are refused, except the
+//     launch link itself, which the launch file opens;
 //   - GET and HEAD are served everywhere; POST and DELETE only on the
 //     write routes (writes.go), and only from the page itself: marked
 //     same-origin (or unmarked with a matching Origin) and carrying the
@@ -44,6 +49,14 @@ var assets embed.FS
 // TokenTTL is how long a launch token stays valid.
 const TokenTTL = 60 * time.Second
 
+const (
+	// SessionIdle is how long a session lasts without a request.
+	SessionIdle = 12 * time.Hour
+	// MaxSessions bounds the sessions kept; a new one replaces the one
+	// used longest ago.
+	MaxSessions = 8
+)
+
 // Source supplies the dashboard's data. Every method is called per request
 // and must be safe for concurrent use.
 type Source interface {
@@ -64,7 +77,7 @@ type Server struct {
 	mu       sync.Mutex
 	launch   string // the outstanding launch token; empty once used
 	expires  time.Time
-	sessions map[string]string // session cookie → its CSRF token
+	sessions map[string]*session // by session cookie
 
 	ln     net.Listener
 	srv    *http.Server
@@ -85,7 +98,7 @@ func newServer(src Source, ctl Control, log *slog.Logger, ln net.Listener, now f
 	s := &Server{
 		src: src, ctl: ctl, log: log, now: now, ln: ln,
 		port:     ln.Addr().(*net.TCPAddr).Port,
-		sessions: map[string]string{},
+		sessions: map[string]*session{},
 	}
 	s.srv = &http.Server{
 		Handler:           s.handler(),
@@ -225,11 +238,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		}
 		// Browsers label requests a page makes to another site; the
 		// dashboard only ever talks to itself. A launch link opened from
-		// the terminal carries "none".
-		switch r.Header.Get("Sec-Fetch-Site") {
+		// the terminal carries "none", one opened by the launch file
+		// (another origin) "cross-site": the token is what it needs.
+		switch site := r.Header.Get("Sec-Fetch-Site"); site {
 		case "", "same-origin":
-		case "none":
-			if r.URL.Path != "/launch" && r.URL.Path != "/" {
+		case "none", "cross-site", "same-site":
+			launch := r.URL.Path == "/launch"
+			if !launch && (site != "none" || r.URL.Path != "/") {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
@@ -276,8 +291,14 @@ func (s *Server) hasSession(r *http.Request) bool {
 	return ok
 }
 
+// session is one browser's access, from a redeemed launch token.
+type session struct {
+	csrf string
+	seen time.Time // its last request
+}
+
 // sessionToken returns the CSRF token of the request's session, if it has
-// one.
+// one that hasn't been idle too long, and marks it used.
 func (s *Server) sessionToken(r *http.Request) (string, bool) {
 	c, err := r.Cookie(s.cookieName())
 	if err != nil || len(c.Value) != 64 {
@@ -285,23 +306,53 @@ func (s *Server) sessionToken(r *http.Request) (string, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	tok, ok := s.sessions[c.Value]
-	return tok, ok
+	now := s.now()
+	ss, ok := s.sessions[c.Value]
+	if !ok {
+		return "", false
+	}
+	if now.Sub(ss.seen) > SessionIdle {
+		delete(s.sessions, c.Value)
+		return "", false
+	}
+	ss.seen = now
+	return ss.csrf, true
+}
+
+// addSession starts a session, dropping idle ones and, past MaxSessions,
+// the one used longest ago. s.mu must be held.
+func (s *Server) addSession(id string, now time.Time) {
+	for k, ss := range s.sessions {
+		if now.Sub(ss.seen) > SessionIdle {
+			delete(s.sessions, k)
+		}
+	}
+	for len(s.sessions) >= MaxSessions {
+		oldest := ""
+		for k, ss := range s.sessions {
+			if oldest == "" || ss.seen.Before(s.sessions[oldest].seen) {
+				oldest = k
+			}
+		}
+		delete(s.sessions, oldest)
+	}
+	s.sessions[id] = &session{csrf: randomToken(), seen: now}
 }
 
 // redeem swaps a valid launch token for a session cookie, once.
 func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	tok := r.URL.Query().Get("t")
 	s.mu.Lock()
+	now := s.now()
 	ok := s.launch != "" && len(tok) == len(s.launch) &&
-		subtle.ConstantTimeCompare([]byte(tok), []byte(s.launch)) == 1 && s.now().Before(s.expires)
+		subtle.ConstantTimeCompare([]byte(tok), []byte(s.launch)) == 1 && now.Before(s.expires)
 	if ok {
 		s.launch = "" // single use
 	}
-	session := ""
+	id := ""
 	if ok {
-		session = randomToken()
-		s.sessions[session] = randomToken() // its CSRF token
+		id = randomToken()
+		s.addSession(id, now)
 	}
 	s.mu.Unlock()
 	if !ok {
@@ -317,11 +368,29 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	// Not Secure: the server is plain HTTP on loopback, which never leaves
 	// the machine, and Safari refuses Secure cookies from http://127.0.0.1.
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // see above
-		Name: s.cookieName(), Value: session, Path: "/",
+		Name: s.cookieName(), Value: id, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
+	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+		// Opened from the launch file, another origin. A redirect would
+		// stay in that cross-site navigation, which doesn't carry the
+		// Strict cookie; a page that moves on by itself starts a new,
+		// same-origin one that does. No script: the CSP allows none.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, bouncePage, landing(r), landing(r))
+		return
+	}
 	http.Redirect(w, r, landing(r), http.StatusSeeOther)
 }
+
+// bouncePage sends the browser on to a landing, one of the constants in
+// landings, twice: by meta refresh, and as a link if that is off.
+const bouncePage = `<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=%s">
+<title>burnout</title>
+<p><a href="%s">Open the dashboard</a></p>
+`
 
 // api serves fn's result as JSON, or 204 when there is none. Errors are
 // logged, not shown, since they can name paths; only a badRequest's text
