@@ -38,7 +38,21 @@ type Config struct {
 	Privacy   Privacy   `toml:"privacy"`
 	Retention Retention `toml:"retention"`
 	Calendar  Calendar  `toml:"calendar"`
+	Update    Update    `toml:"update"`
 }
+
+// Update is the opt-in update check (privacy & security §6). It only ever
+// tells the user about a new release; installing is `burnout update`.
+type Update struct {
+	// Check is "off" (the default) or "weekly".
+	Check string `toml:"check"`
+}
+
+// The update.check values.
+const (
+	UpdateOff    = "off"
+	UpdateWeekly = "weekly"
+)
 
 // Calendar holds the calendar feed settings. The feed URL itself is a
 // secret and lives in the OS keystore, never here (system design §3.4).
@@ -96,6 +110,7 @@ func Default() Config {
 		},
 	}
 	c.Calendar.ICS.Enabled = true // fetched only once a feed is added
+	c.Update.Check = UpdateOff
 	return c
 }
 
@@ -155,6 +170,9 @@ func (c Config) Validate() error {
 		if err := checkAppID(app); err != nil {
 			errs = append(errs, fmt.Errorf("privacy.exclude_apps: %w", err))
 		}
+	}
+	if c.Update.Check != UpdateOff && c.Update.Check != UpdateWeekly {
+		errs = append(errs, fmt.Errorf("update.check: %q: want %q or %q", c.Update.Check, UpdateOff, UpdateWeekly))
 	}
 	r := c.Retention
 	for _, b := range bounds {
@@ -300,6 +318,7 @@ func (c *Config) normalize() {
 	}
 	c.Privacy.PrivateHours = dedupe(hours, strings.TrimSpace)
 	c.Profile.Role = strings.ToLower(strings.TrimSpace(c.Profile.Role))
+	c.Update.Check = strings.ToLower(strings.TrimSpace(c.Update.Check))
 	if w, err := parseCoreHours(c.Profile.CoreHours); err == nil {
 		c.Profile.CoreHours = w.String()
 	}
@@ -404,6 +423,13 @@ func Render(c Config) []byte {
 # your OS keystore, not here). false stops fetching and keeps the feed.
 `)
 	fmt.Fprintf(&b, "enabled = %t\n", c.Calendar.ICS.Enabled)
+	b.WriteString(`
+[update]
+# "weekly" asks GitHub once a week whether a newer release exists and shows
+# it in the tray and ` + "`burnout doctor`" + `; it never installs anything (run
+# ` + "`burnout update`" + `). "off" makes no update checks at all.
+`)
+	fmt.Fprintf(&b, "check = %s\n", quote(c.Update.Check))
 	return b.Bytes()
 }
 
@@ -474,7 +500,10 @@ var keys = func() []key {
 		get := b.get
 		k = append(k, key{name: b.key, num: func(c *Config) *int { return get(&c.Retention) }})
 	}
-	return append(k, key{name: "calendar.ics.enabled", flag: func(c *Config) *bool { return &c.Calendar.ICS.Enabled }})
+	return append(k,
+		key{name: "calendar.ics.enabled", flag: func(c *Config) *bool { return &c.Calendar.ICS.Enabled }},
+		key{name: "update.check", text: func(c *Config) *string { return &c.Update.Check }},
+	)
 }()
 
 func lookup(name string) (key, error) {

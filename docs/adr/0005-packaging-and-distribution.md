@@ -21,6 +21,36 @@
 > after the protected job has signed; the installers print the service
 > step instead of running it; the MSI is not built yet.
 
+> **Update 2026-10-27 (`burnout update`):** `internal/adapters/egress/update`
+> and `cmd/burnout/update.go` implement item 5. Decisions:
+> - **Install-type detection**, after resolving symlinks (a
+>   `~/.local/bin/burnout` link into `Burnout.app` is the app): a path inside
+>   `*.app/Contents/MacOS/` is the macOS app; on Linux a path under `/usr`
+>   (not `/usr/local`), `/bin` or `/sbin` is a package; on Windows a path
+>   under Program Files is a package. Anything else is a user-prefix install
+>   if this user can write its folder, and is treated as a package if not,
+>   so `update` never needs elevation. A package download is the `.deb`,
+>   unless the system has `rpm` and no `dpkg`.
+> - **Windows** swaps immediately rather than staging a replace for the
+>   next start: the running `burnout.exe` is renamed to `burnout.exe.old`
+>   and the new one moved in (renamed back on failure), as `install.ps1`
+>   does. On Unix the new binary is renamed over the old one after the old
+>   one is hard-linked (or copied) to `burnout.old`.
+> - **Development builds** (version `dev`) can't be compared, so `update`
+>   refuses them without `--allow-downgrade`. `--to` an older version also
+>   needs `--allow-downgrade`.
+> - **Hosts:** github.com now redirects asset downloads to
+>   `release-assets.githubusercontent.com`, so the client allows it beside
+>   the three hosts listed before (privacy & security §6 updated).
+> - **Weekly check** (`update.check = "weekly"`, default `"off"`): the daemon
+>   reads the stable release list at most once a week (a failure retries a
+>   day later), stores the result in `update-check.json` in the data folder,
+>   and the tray's first line and `doctor` show a newer release. It never
+>   downloads or installs.
+> - The new `[update]` config section is an unknown key to builds that
+>   predate it, which refuse such a config. No release predates it.
+> - Not done: re-signing the `.app` (item 7); `update` only notifies there.
+
 ## Context
 
 The agent ships to macOS, Windows and Linux. It needs OS permissions (macOS
@@ -123,7 +153,7 @@ keyless signing, and GitHub artifact attestations.
 
   | Install type | What `update` does |
   |--------------|--------------------|
-  | Script/tarball (user prefix) | downloads, verifies, swaps the binary atomically (rename on Unix; staged replace on next start on Windows) |
+  | Script/tarball (user prefix) | downloads, verifies, swaps the binary atomically (rename on Unix; rename the running exe aside and move the new one in on Windows) |
   | `.deb` / `.rpm` / `.msi` (root-owned paths) | downloads and verifies the new package, then asks the user to install it (or prompts for elevation). It never writes to system paths itself |
   | macOS `.app` | automatic updates **only notify**. Re-signing needs the user present (see below), so the update applies when they run `burnout update` |
 
@@ -241,7 +271,7 @@ authenticity. The OS-level gates are handled like this:
 2. [x] Release workflow on `v*` tags: pinned-key signing in a protected environment with required reviewers, `actions/attest-build-provenance`, Actions pinned by SHA, least-privilege `permissions:`.
 3. [ ] Generate the ECDSA P-256 *current* and *next* keys (key ceremony, `packaging/README.md`). [x] Embed both public keys (placeholders until then); document rotation.
 4. [x] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
-5. [ ] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only.
+5. [x] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only; opt-in weekly check.
 6. [x] `burnout service install|uninstall|status` for launchd and systemd `--user`, definitions rendered by the binary. [ ] Windows logon task.
 7. [ ] `burnout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
 8. [ ] Apply to SignPath Foundation for Windows.

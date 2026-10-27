@@ -194,12 +194,25 @@ calendars. A local `.ics` file works too.
 - Only meeting start and end times and busy or free are kept. Titles,
   attendees, places and notes are dropped as the feed is read.
 - The URL is a key to your calendar, so it stays in your OS keystore, and
-  it is fetched over HTTPS about every 3 hours. This is the only network
-  call burnout makes.
+  it is fetched over HTTPS about every 3 hours. Apart from update checks
+  you ask for (below), this is the only network call burnout makes.
 - `burnout calendar status` shows the last sync, and
   `burnout calendar remove [--forget]` stops it.
 - This adds back-to-back and after-hours meetings to what the strain score
   weighs.
+
+**Updates.** `burnout update` installs the newest release from GitHub. It
+checks the release's signature against the keys built into burnout and the
+download's checksum before changing anything, refuses older versions
+unless you add `--allow-downgrade`, and keeps the previous binary as
+`burnout.old` (`--to v1.2.3 --allow-downgrade` rolls back). A copy
+installed by the install script is replaced in place. A `.deb`, `.rpm` or
+`Burnout.app` is only downloaded and verified, and burnout tells you how to
+install it. `--check` only looks, and `--channel beta` includes
+pre-releases. burnout never checks on its own unless you run
+`burnout config set update.check weekly`; then it asks GitHub once a week
+and shows a newer release in the tray and `burnout doctor`, without
+installing it.
 
 **Settings** live in one file, `config.toml` (`burnout config path` shows
 where). `burnout config get` shows them all with comments, and

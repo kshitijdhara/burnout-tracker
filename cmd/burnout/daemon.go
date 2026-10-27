@@ -367,11 +367,12 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 		Heartbeat: func() { _ = sdnotify.Watchdog() },
 	})
 
-	var calendarDone sync.WaitGroup
-	defer calendarDone.Wait() // before the store closes
-	runCalendar := func(ctx context.Context) {
-		calendarDone.Add(1)
-		go func() { defer calendarDone.Done(); calendarLoop(ctx, log, store, dataDir, keys, settings) }()
+	var loopsDone sync.WaitGroup
+	defer loopsDone.Wait() // before the store closes
+	runLoops := func(ctx context.Context) {
+		loopsDone.Add(2)
+		go func() { defer loopsDone.Done(); calendarLoop(ctx, log, store, dataDir, keys, settings) }()
+		go func() { defer loopsDone.Done(); updateLoop(ctx, log, dataDir, settings) }()
 	}
 
 	serveErr := make(chan error, 1)
@@ -396,7 +397,7 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 		defer t.Stop()
 	}
 
-	runCalendar(runCtx)
+	runLoops(runCtx)
 	log.Info("daemon started", "version", version, "keystore", keys.Backend(), "safe_mode", safe)
 	_ = sdnotify.Send("READY=1\nWATCHDOG=1")
 	if err := d.Run(runCtx); err != nil {

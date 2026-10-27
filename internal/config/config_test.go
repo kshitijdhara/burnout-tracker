@@ -140,7 +140,7 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	if err := c.Add("retention.minutes_days", []string{"1"}); err == nil {
 		t.Error("add to a number accepted")
 	}
-	if len(Keys()) != 11 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
+	if len(Keys()) != 12 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
 		t.Errorf("keys: %v", Keys())
 	}
 }
@@ -270,5 +270,21 @@ func TestProfile(t *testing.T) {
 	}
 	if err := c.Unset("profile.role"); err != nil || c.Role() != features.RoleDeveloper {
 		t.Errorf("unset: %v %+v", err, c.Profile)
+	}
+}
+
+func TestUpdateCheck(t *testing.T) {
+	if Default().Update.Check != UpdateOff {
+		t.Error("the update check must be off by default")
+	}
+	c, err := Parse([]byte("[update]\ncheck = \" Weekly \"\n"))
+	if err != nil || c.Update.Check != UpdateWeekly {
+		t.Errorf("weekly: %v, %v", c.Update.Check, err)
+	}
+	if _, err := Parse([]byte("[update]\ncheck = \"daily\"\n")); err == nil || !strings.Contains(err.Error(), "update.check") {
+		t.Errorf("daily: %v", err)
+	}
+	if err := c.Unset("update.check"); err != nil || c.Update.Check != UpdateOff {
+		t.Errorf("unset: %v, %v", c.Update.Check, err)
 	}
 }

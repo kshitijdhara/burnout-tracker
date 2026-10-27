@@ -120,7 +120,11 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 		check(w, "database", false, err.Error())
 	}
 
-	_, _ = fmt.Fprintln(w, "\n"+networkSummary(dataDir))
+	if n := updateNotice(dataDir, cfg); n != "" {
+		_, _ = fmt.Fprintf(w, "  !  update: %s\n", n)
+	}
+
+	_, _ = fmt.Fprintln(w, "\n"+networkSummary(dataDir, cfg))
 	return nil
 }
 
