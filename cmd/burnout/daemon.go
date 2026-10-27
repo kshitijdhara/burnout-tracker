@@ -421,7 +421,7 @@ func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 		log.Warn("safe mode after 3 starts in 10 minutes: no desktop collector; recording hook data only until an hour passes without a crash")
 		return nil
 	}
-	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now})
+	c, err := newCollector(collectorOptions{Titles: titles, Now: time.Now, Wait: true})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)
 		return nil

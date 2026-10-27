@@ -50,7 +50,13 @@ func (s desktopSession) gnome() bool {
 func newCollector(o collectorOptions) (ports.Collector, error) {
 	s := currentSession()
 	if s.wayland() && s.gnome() {
-		c, err := wayland.New(context.Background(), wayland.Options{Titles: o.Titles, Now: o.Now})
+		// The first dial is bounded by the hello timeout; the daemon's
+		// redials run under its own context, from Snapshot.
+		open := wayland.New
+		if o.Wait {
+			open = wayland.NewWaiting
+		}
+		c, err := open(context.Background(), wayland.Options{Titles: o.Titles, Now: o.Now})
 		if err != nil {
 			return nil, gnomeBridgeError(err)
 		}
