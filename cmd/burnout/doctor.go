@@ -69,7 +69,8 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 		check(w, "data dir is owner-only", true, "")
 	}
 
-	checkFix(w, "daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
+	running := daemonAnswers(ctx)
+	checkFix(w, "daemon is running", running, "start it with `burnout service install`, or `burnout daemon` in a terminal")
 	reportService(w)
 	checkFix(w, "not in safe mode", !crashloop.Load(dataDir).Safe, "the desktop collector is off after 3 starts in 10 minutes; "+
 		"hooks still record, and it comes back after an hour without a crash (see the daemon log)")
@@ -95,7 +96,7 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 		check(w, "keystore", false, err.Error())
 	}
 
-	_, _ = fmt.Fprintf(w, "  -  title classification: %s\n", titlesLine(cfg))
+	_, _ = fmt.Fprintf(w, "  -  title classification: %s\n", titlesLine(cfg, daemonReadsTitles(running, dataDir)))
 	reportDesktopBridge(ctx, w, cfg.Privacy.TitleClassification)
 	if c, err := newCollector(collectorOptions{Titles: cfg.Privacy.TitleClassification, Now: time.Now}); err != nil {
 		check(w, "desktop collector", false, err.Error())
