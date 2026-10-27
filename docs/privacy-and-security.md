@@ -317,21 +317,20 @@ them. These are requirements, not intentions:
    for self-use only and must not be used to monitor others.
 
 AC-1 in Phase 1:
-- The daemon shows the icon before it collects anything, and watches the
-  screen only once the icon is up. If it can't show one, it doesn't watch
-  the screen, and its log says why:
+- The daemon shows the icon before it collects anything. Shell and Claude
+  Code hooks count as collectors too: if no icon can be shown, the daemon
+  records nothing and exits, and its log says why:
   - macOS: no login session at the screen, e.g. started over ssh;
   - Linux: the desktop has no tray (GNOME needs the AppIndicator
-    extension). There is no Linux screen collector yet anyway;
+    extension);
   - Windows: the icon didn't appear within 10 seconds.
+  The background service retries every 30 s, so a tray that appears after
+  login is picked up. Hook-only use without an icon (servers, ssh, GNOME
+  without the extension) is therefore not supported.
 - The menu has no hide or quit item. On macOS the icon can't be
   ⌘-dragged off the menu bar.
-- **Open question:** shell and Claude Code hooks still record without an
-  icon, e.g. in an ssh session or on a desktop without a tray. They run
-  only after the interactive first run (AC-3) and `burnout install-hooks`.
-  Treating hooks as collectors under AC-1 would mean recording nothing
-  without an icon, which ends hook-only use on servers and on GNOME
-  without the extension.
+- The end-to-end test binary, built with `-tags e2e`, skips the tray.
+  Release builds have no flag, setting or variable that does.
 
 ---
 

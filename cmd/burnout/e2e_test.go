@@ -444,7 +444,7 @@ func buildBinary(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-tags", "e2e", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	return bin

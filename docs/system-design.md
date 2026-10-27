@@ -89,7 +89,7 @@ no streaks, no guilt-driven copy, and no red badges at 11 p.m.
 | Disk | < 200 MB/year at default retention |
 | Data quality | SLOs in §11.1 (coverage ≥ 98%, hook delivery ≥ 99.9%) |
 | Robustness | Agent failure never breaks the user's shell or Claude Code; hooks fail open and silently |
-| Platforms | macOS (last 3 versions, Apple Silicon + Intel); Windows 11 (10 best-effort, out of support since Oct 2025); Linux: Ubuntu LTS GNOME and Fedora KDE supported, Arch + Sway best-effort |
+| Platforms | macOS (last 3 versions, Apple Silicon + Intel); Windows 11 (10 best-effort, out of support since Oct 2025); Linux: Ubuntu LTS GNOME and Fedora KDE supported, Arch + Sway best-effort. A visible tray is required (Privacy & Security §5.2 AC-1): Ubuntu's GNOME ships one, other GNOME desktops need the AppIndicator extension, and headless machines and ssh sessions are not supported |
 | Install | GitHub Releases only: `.dmg`, `.msi`, `.deb`/`.rpm`, tarballs, or `install.sh`/`install.ps1` with pinned-key verification. Free, no external requirements |
 | Accessibility | Dashboard meets WCAG 2.2 AA; presence detection works for keyboard-only, voice-control and screen-reader users |
 
@@ -967,8 +967,9 @@ These, plus §7.5, are the alpha exit criteria.
   - **Threads:** on macOS it owns the main thread, as AppKit requires,
     and the daemon's work runs beside it. On Windows and Linux it runs on
     a goroutine of its own.
-  - **Ordering:** the icon shows first; the screen collector starts only
-    once it does (Privacy & Security §5.2 AC-1).
+  - **Ordering:** the icon shows first, and the daemon collects nothing,
+    hooks included, unless it does; without an icon it exits (Privacy &
+    Security §5.2 AC-1).
   - **Menu:** pause and resume, delete the last hour or today, and open
     the dashboard. It reuses the CLI's control files, so the daemon's loop
     handles a click exactly like `burnout pause` or `forget`.

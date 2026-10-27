@@ -25,7 +25,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -255,19 +254,26 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 
 	dash := &trayDashboard{dataDir: dataDir, log: log}
 	defer dash.close()
-	// The tray icon shows before anything is collected, and the screen is
-	// watched only while it does (privacy & security §5.2 AC-1).
-	return tray.Run(ctx, trayMenu(log, dataDir, settings, dash), func(ctx context.Context, shown bool) error {
-		return collect(ctx, log, dataDir, settings, store, keys, key, shown)
+	// The tray icon shows before anything is collected, and nothing is
+	// collected, hooks included, unless it does (privacy & security §5.2
+	// AC-1).
+	return runTray(ctx, trayMenu(log, dataDir, settings, dash), func(ctx context.Context, shown bool) error {
+		if !shown {
+			return errNoTray
+		}
+		return collect(ctx, log, dataDir, settings, store, keys, key)
 	})
 }
 
-// collect records until ctx ends: hooks always, the screen only when shown
-// says the tray icon is visible.
+// errNoTray means no tray icon could be shown, so nothing may be recorded
+// (privacy & security §5.2 AC-1). The tray's log line says why.
+var errNoTray = errors.New("no tray icon could be shown, so nothing is recorded (AC-1); see the log line above for why")
+
+// collect records until ctx ends. Call it only while the tray icon shows.
 func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *liveConfig, store *sqlite.Store,
-	keys *keystore.Store, key model.Sensitive[[]byte], shown bool,
+	keys *keystore.Store, key model.Sensitive[[]byte],
 ) error {
-	collector := screenCollector(log, shown)
+	collector := screenCollector(log)
 	if collector != nil {
 		defer func() { _ = collector.Close() }()
 	}
@@ -345,13 +351,9 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *li
 	return d.Run(runCtx)
 }
 
-// screenCollector is the desktop collector, or nil: none for this
-// platform, or no tray icon to show that it runs.
-func screenCollector(log *slog.Logger, shown bool) ports.Collector {
-	if !shown {
-		log.Warn("no tray icon, so the screen isn't watched (privacy & security AC-1); recording hook data only")
-		return nil
-	}
+// screenCollector is the desktop collector, or nil when this platform has
+// none.
+func screenCollector(log *slog.Logger) ports.Collector {
 	c, err := newCollector(collectorOptions{Now: time.Now})
 	if err != nil {
 		log.Warn("no desktop collector; recording hook data only", "err", err)
