@@ -123,8 +123,8 @@ func serviceEnv() (map[string]string, error) {
 }
 
 func installService(ctx context.Context, m service.Manager, dataDir string) error {
-	if !hasConsent() {
-		return errors.New("no consent recorded: run `burnout setup` first")
+	if err := consentError(); err != nil {
+		return err
 	}
 	if unstableBinary(m.Bin) {
 		return fmt.Errorf("the service would run %s, which is a temporary build; copy the binary somewhere stable first (for example ~/.local/bin) and run service install from there", m.Bin)

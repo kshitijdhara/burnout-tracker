@@ -103,21 +103,39 @@ func calendarAdd(ctx context.Context, dataDir string, keys *keystore.Store, args
 		return err
 	}
 	if src.Remote() && !*yes {
-		fmt.Printf(`This URL is a key to your whole calendar. burnout keeps it in your OS keystore,
-never in files or logs, and fetches it over HTTPS from %s about every 3 hours.
-Only meeting times are kept: no titles, attendees, locations or notes.
-`, src.Describe())
 		if fi, err := os.Stdin.Stat(); err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+			explainCalendarURL(os.Stdout, src)
 			return errors.New("run this in a terminal to confirm, or add --yes")
 		}
-		fmt.Print("Type \"yes\" to continue: ")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil || strings.TrimSpace(line) != "yes" {
-			fmt.Println("Not added.")
+		if !confirmCalendarURL(bufio.NewReader(os.Stdin), os.Stdout, src) {
 			return nil
 		}
 	}
-	// Check the feed works before keeping it.
+	return addCalendarSource(ctx, dataDir, keys, src)
+}
+
+func explainCalendarURL(out io.Writer, src ics.Source) {
+	_, _ = fmt.Fprintf(out, `This URL is a key to your whole calendar. burnout keeps it in your OS keystore,
+never in files or logs, and fetches it over HTTPS from %s about every 3 hours.
+Only meeting times are kept: no titles, attendees, locations or notes.
+`, src.Describe())
+}
+
+// confirmCalendarURL explains that a remote feed's URL is a secret and
+// asks for a typed "yes".
+func confirmCalendarURL(in *bufio.Reader, out io.Writer, src ics.Source) bool {
+	explainCalendarURL(out, src)
+	_, _ = fmt.Fprint(out, "Type \"yes\" to continue: ")
+	line, err := in.ReadString('\n')
+	if err != nil || strings.TrimSpace(line) != "yes" {
+		_, _ = fmt.Fprintln(out, "Not added.")
+		return false
+	}
+	return true
+}
+
+// addCalendarSource checks the feed works, keeps it and syncs it.
+func addCalendarSource(ctx context.Context, dataDir string, keys *keystore.Store, src ics.Source) error {
 	now := time.Now()
 	blocks, err := fetchBlocks(ctx, src, now.Add(-14*24*time.Hour), now)
 	if err != nil {

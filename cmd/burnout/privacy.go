@@ -371,9 +371,12 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	var rows []dashboard.Setting
 	add := func(name, value string) { rows = append(rows, dashboard.Setting{Name: name, Value: printable(value)}) }
 	now := time.Now()
-	if hasConsent() {
+	switch consentStatus() {
+	case consentCurrent:
 		add("Consent", "given (`burnout setup`)")
-	} else {
+	case consentStale:
+		add("Consent", "out of date: what is collected changed; nothing is collected until you run `burnout setup` again")
+	default:
 		add("Consent", "not given; nothing is collected")
 	}
 	cfg, cfgPath, cfgErr := loadConfig()

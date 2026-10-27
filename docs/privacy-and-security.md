@@ -347,7 +347,9 @@ them. These are requirements, not intentions:
    Installers MUST NOT start collection on their own.
 3. **AC-3** Collection MUST NOT start until the logged-in user has finished
    the first-run flow interactively, including reading the data summary
-   (§3) and consenting.
+   (§3) and consenting. Consent is to a numbered version of that summary
+   (`consentVersion`); when the summary changes, the daemon refuses to start
+   until the user runs `burnout setup` again and consents to the new one.
 4. **AC-4** The agent MUST show a "here's what's being collected" reminder
    at least monthly, with one-click access to pause, settings and uninstall.
 5. **AC-5** The agent MUST NOT offer remote access of any kind: no network
