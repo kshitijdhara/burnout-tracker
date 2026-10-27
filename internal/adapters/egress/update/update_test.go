@@ -635,3 +635,19 @@ func TestState(t *testing.T) {
 		t.Error("a failed check retries after a day")
 	}
 }
+
+func TestChannelFor(t *testing.T) {
+	for current, want := range map[string]Channel{
+		"v0.1.0-alpha.2": Beta,
+		"0.2.0-rc.1":     Beta,
+		"v0.1.0":         Stable,
+		"v1.2.3":         Stable,
+		"dev":            Stable,
+		"dev-437b66b":    Stable,
+		"":               Stable,
+	} {
+		if got := ChannelFor(current); got != want {
+			t.Errorf("ChannelFor(%q) = %s, want %s", current, got, want)
+		}
+	}
+}

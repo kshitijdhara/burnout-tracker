@@ -22,7 +22,8 @@ import (
 // security §6) and only runs when the user asks.
 func runUpdate(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	channel := fs.String("channel", string(update.Stable), "`stable`, or beta to include pre-releases")
+	channel := fs.String("channel", string(update.ChannelFor(version)),
+		"`stable`, or beta to include pre-releases (default: beta on a pre-release build such as an alpha)")
 	to := fs.String("to", "", "install this `version` (e.g. v1.2.3) instead of the newest; with --allow-downgrade, rolls back")
 	allowDowngrade := fs.Bool("allow-downgrade", false, "allow a version that isn't newer than this one")
 	checkOnly := fs.Bool("check", false, "only say whether a newer release exists")
@@ -117,7 +118,9 @@ const (
 // from the daemon. It only asks GitHub for the newest version and records
 // it for the tray and doctor; it never downloads or installs anything.
 func updateLoop(ctx context.Context, log *slog.Logger, dataDir string, live *liveConfig) {
-	updateLoopWith(ctx, log, dataDir, live, update.New().Check, updateFirst, updateWake)
+	u, ch := update.New(), update.ChannelFor(version)
+	check := func(ctx context.Context) (update.Version, error) { return u.Check(ctx, ch) }
+	updateLoopWith(ctx, log, dataDir, live, check, updateFirst, updateWake)
 }
 
 func updateLoopWith(ctx context.Context, log *slog.Logger, dataDir string, live *liveConfig,

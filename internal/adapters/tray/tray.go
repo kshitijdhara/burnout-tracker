@@ -8,8 +8,14 @@ package tray
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 )
+
+// ErrIconGone means the icon went away while work ran, so work was
+// stopped: nothing is recorded without it (privacy & security §5.2 AC-1).
+// The service manager restarts the daemon, which shows the icon again.
+var ErrIconGone = errors.New("tray: the icon went away, so recording stopped")
 
 // Status is the recording state the icon shows.
 type Status struct {
@@ -76,7 +82,9 @@ type Work func(ctx context.Context, shown bool) error
 
 // Run shows the icon, then runs work until it returns, and removes the
 // icon. Call it on the main goroutine: on macOS the menu bar belongs to the
-// main thread. It returns work's error. The standard logger goes to m.Log
+// main thread. It returns work's error. On Windows and Linux, if the icon
+// goes away while work runs, work's context is cancelled and Run returns
+// ErrIconGone. The standard logger goes to m.Log
 // from then on.
 func Run(ctx context.Context, m Menu, work Work) error {
 	logTo(m.Log)

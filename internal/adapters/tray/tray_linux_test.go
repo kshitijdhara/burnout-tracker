@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"fyne.io/systray"
 	"github.com/godbus/dbus/v5"
 	"github.com/godbus/dbus/v5/prop"
 )
@@ -267,7 +268,7 @@ func TestTrayOnLinux(t *testing.T) {
 	p := startPanel(t)
 	f := &fakeControls{status: Status{Text: "Recording"}}
 
-	err := Run(context.Background(), f.menu(), func(_ context.Context, shown bool) error {
+	err := Run(context.Background(), f.menu(), func(ctx context.Context, shown bool) error {
 		if !shown {
 			t.Error("work started without the icon")
 			return nil
@@ -331,9 +332,18 @@ func TestTrayOnLinux(t *testing.T) {
 		if got, want := strings.Join(f.called(), ","), "pause 1h,resume,delete today,delete hour,review"; got != want {
 			t.Errorf("calls %s, want %s", got, want)
 		}
+
+		// The icon goes away while recording (on Windows, a logoff that is
+		// then cancelled): work must be stopped (AC-1).
+		systray.Quit()
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Error("work kept running after the icon went away")
+		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrIconGone) {
+		t.Fatalf("Run = %v, want ErrIconGone", err)
 	}
 }
