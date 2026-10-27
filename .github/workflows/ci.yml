@@ -120,7 +120,13 @@ jobs:
         if: runner.os == 'macOS'
         with:
           go-version-file: go.mod
-      - name: goreleaser check and snapshot build
+      - name: goreleaser check
+        if: runner.os == 'macOS'
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: v2.19.0
+          args: check
+      - name: goreleaser snapshot build
         if: runner.os == 'macOS'
         uses: goreleaser/goreleaser-action@v7
         with:

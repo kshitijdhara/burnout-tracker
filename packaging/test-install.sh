@@ -45,6 +45,23 @@ run() {
 	expect_fail "different hash" verify_checksum "$td/checksums.txt" "$td/asset.bin" other.bin
 	expect_fail "unlisted asset" verify_checksum "$td/checksums.txt" "$td/asset.bin" missing.bin
 	expect_fail "name prefix only" verify_checksum "$td/checksums.txt" "$td/asset.bin" asset
+
+	# End to end: main against testdata/release, a fixture release signed
+	# by the fixture key, with downloads served from disk.
+	fetch() { cp "$td/release/${1##*/}" "$2"; }
+	if (main --version v0.0.0 --dir "$tmp/pinned") >/dev/null 2>&1 || [ -e "$tmp/pinned/burnout" ]; then
+		bad "install with the pinned keys (accepted)"
+	else
+		ok "install with the pinned keys (rejected, nothing installed)"
+	fi
+	BURNOUT_KEY_CURRENT=$fixture
+	if out=$(main --version v0.0.0 --dir "$tmp/bin" 2>&1) &&
+		[ "$("$tmp/bin/burnout")" = "burnout fixture" ] &&
+		case $out in *"burnout setup"*"burnout service install"*) true ;; *) false ;; esac; then
+		ok "install with the fixture key"
+	else
+		bad "install with the fixture key: $out"
+	fi
 	rm -rf "$tmp"
 }
 

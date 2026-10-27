@@ -53,4 +53,27 @@ Expect 'DER r too long' $false {
     ConvertFrom-DerSignature ([byte[]](@(0x30, 39, 0x02, 35) + @(1) * 35 + @(0x02, 0)))
 }
 
+# End to end: Install-Burnout against testdata/release, a fixture release
+# signed by the fixture key, with downloads served from disk. CI only,
+# because it adds the install folder to the user PATH.
+if ($env:CI) {
+    function Invoke-Download([string]$Url, [string]$OutFile) {
+        Copy-Item -LiteralPath (Join-Path $td "release\$(Split-Path -Leaf $Url)") -Destination $OutFile
+    }
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("burnout-e2e-" + [Guid]::NewGuid())
+    try {
+        $pinned = Join-Path $root 'pinned'
+        Expect 'install with the pinned keys' $false { Install-Burnout 'v0.0.0' $pinned; $true }
+        Expect 'nothing installed after a rejected signature' $false { Test-Path (Join-Path $pinned 'burnout.exe') }
+
+        $BurnoutKeys = @($fixture)
+        $dir = Join-Path $root 'bin'
+        Expect 'install with the fixture key' $true { Install-Burnout 'v0.0.0' $dir; $true }
+        Expect 'burnout.exe installed' $true { Test-Path (Join-Path $dir 'burnout.exe') }
+        Expect 'reinstall over an existing burnout.exe' $true { Install-Burnout 'v0.0.0' $dir; $true }
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $root -ErrorAction SilentlyContinue
+    }
+}
+
 if ($script:fails -ne 0) { exit 1 }
