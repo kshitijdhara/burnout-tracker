@@ -1,0 +1,86 @@
+//go:build linux
+
+package wayland
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"testing"
+	"time"
+)
+
+// TestCollectorAgainstFakeExtension runs the collector against a fake
+// extension. It needs the screen to read as unlocked, which holds on a CI
+// runner (no logind session, no GNOME screensaver).
+func TestCollectorAgainstFakeExtension(t *testing.T) {
+	dir := shortDir(t)
+	n := 0
+	fakeExtension(t, dir, func(req request) string {
+		if req.Op == "hello" {
+			return helloReply
+		}
+		n++
+		return fmt.Sprintf(`{"v":1,"op":"snapshot","windows":[{"id":7,"pid":1,"wm_class":"firefox","app":"","type":"normal","minimised":false,"on_workspace":true,"frame":{"x":0,"y":0,"w":100,"h":100},"title":"secret"}],"monitors":[{"x":0,"y":0,"w":100,"h":100}],"focus":7,"pointer":{"x":%d,"y":10}}`, n)
+	})
+	at := time.Unix(100, 0)
+	c, err := newCollector(context.Background(), Options{Dir: dir, Now: func() time.Time { return at }}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if ext, shell := c.Hello(); ext != "1" || shell != "48.2" {
+		t.Errorf("hello = %q, %q", ext, shell)
+	}
+	if c.bus.Locked(context.Background()) {
+		t.Skip("this machine reports a locked session")
+	}
+
+	first, err := c.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.At.Equal(at) || len(first.Windows) != 1 || first.PointerWindow != 7 || first.PointerMoved {
+		t.Fatalf("first = %+v", first)
+	}
+	if title := first.Windows[0].Title.Reveal(); title != "" {
+		t.Errorf("title kept with titles off: %q", title)
+	}
+	second, err := c.Snapshot(context.Background())
+	if err != nil || !second.PointerMoved {
+		t.Fatalf("second: %+v, %v", second, err)
+	}
+}
+
+func TestCollectorRedialsAfterTheBridgeGoes(t *testing.T) {
+	dir := shortDir(t)
+	fakeExtension(t, dir, standard)
+	c, err := newCollector(context.Background(), Options{Dir: dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if c.bus.Locked(context.Background()) {
+		t.Skip("this machine reports a locked session")
+	}
+	// The extension went away (disabled, GNOME Shell restarted).
+	_ = c.c.conn.(*net.UnixConn).CloseRead()
+	if _, err := c.Snapshot(context.Background()); err == nil {
+		t.Fatal("snapshot on a dead connection succeeded")
+	}
+	// Redials are spaced out.
+	if _, err := c.Snapshot(context.Background()); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("immediate redial: %v", err)
+	}
+	c.lastDial = time.Now().Add(-redialAfter)
+	if _, err := c.Snapshot(context.Background()); err != nil {
+		t.Fatalf("redial: %v", err)
+	}
+}
+
+func TestNewNotRunning(t *testing.T) {
+	if _, err := newCollector(context.Background(), Options{Dir: shortDir(t)}, nil); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("no extension: %v", err)
+	}
+}
