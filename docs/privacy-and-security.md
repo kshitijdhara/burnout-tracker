@@ -451,28 +451,53 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   command runs, until Ctrl-C. The tray's "Open dashboard" starts one inside
   the daemon on first use, which runs until the daemon stops; each click
   opens it with a new launch token. Each server has its own port, and both
-  read the database read-only.
+  read the database through a read-only connection.
 - **Launch token:** 256 bits, compared in constant time, single-use, and
   valid for 60 s.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
   named after the port.
+- **CSRF token:** 256 bits per session, minted with the cookie. The page
+  reads it from `GET /api/session`; a cross-origin page can send that
+  request but never read the answer, because there are no CORS headers.
   - It is not `Secure`. The server is plain HTTP on loopback, and Safari
     refuses `Secure` cookies from `http://127.0.0.1`.
 - **Every request** must:
   - carry an allowed `Host` (`127.0.0.1:<port>` or `localhost:<port>`);
-  - be GET or HEAD;
+  - be GET or HEAD, unless it is one of the write routes below;
   - not be marked cross-site or same-site by `Sec-Fetch-Site`. `none` (a
     typed URL) is allowed only for the page and the launch link, never the
     API.
+- **Every write** (POST or DELETE) must also:
+  - match a write route exactly; any other method or path is `405`;
+  - be marked `Sec-Fetch-Site: same-origin`, or, from a browser without
+    Fetch Metadata, carry no `Sec-Fetch-Site` and an `Origin` of this
+    server. `none`, `null` and a missing `Origin` are refused;
+  - carry the session's CSRF token in `X-CSRF-Token`, compared in constant
+    time. A token in the URL or a body doesn't count;
+  - for POST, have `Content-Type: application/json`, which an HTML form
+    can't send; bodies are capped at 8 KiB and parsed strictly.
 - **Responses** carry:
   - `default-src 'none'; script-src 'self'; style-src 'self'; …;
     frame-ancestors 'none'`;
   - `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, `no-store`, and
     same-origin COOP/CORP;
   - no CORS headers.
-- **Data access:** reads only. No endpoint changes data yet, so there is
-  nothing for CSRF to forge. Endpoints that change data will carry CSRF
-  tokens.
+- **Write routes:** `POST /api/pause` (`1h`, `tomorrow` or
+  `until-resumed`), `POST /api/resume`, `DELETE /api/data?range=hour|today`,
+  `POST /api/annotations`, `DELETE /api/annotations/{id}` and
+  `POST /api/checkins` (the weekly CBI, every item). The page asks before
+  deleting.
+- **Data access:** both dashboards (the CLI's and the tray's) can change
+  data, the same way the CLI does, so a button and its command can't
+  disagree:
+  - pause, resume and delete go through the control files the daemon's
+    loop reads. While the daemon runs it does the deleting, as for
+    `burnout forget`;
+  - annotations and check-ins open a short-lived read-write connection, as
+    `burnout annotate` and `burnout checkin` do while the daemon runs.
+  Errors are logged, never shown; the page sees only validation messages
+  about its own request. A high check-in score shows the same support
+  message and lines as the CLI (system design §8.4).
 - **Errors:** API errors are logged to the terminal, never sent to the
   page, since they can name paths.
 - **The page itself:**

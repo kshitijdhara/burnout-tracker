@@ -967,13 +967,21 @@ These, plus §7.5, are the alpha exit criteria.
 - **Phase 1 so far:** `burnout dashboard` serves the page from the CLI
   while it runs (`internal/adapters/dashboard`), hardened as in Privacy &
   Security §8.2. The tray's "Open dashboard" serves the same page from the
-  daemon, read-only, with a new launch token per click. It is read-only for now, so the POST and DELETE routes
-  above aren't built.
+  daemon, with a new launch token per click.
+  - **Writes:** the dashboard has the routes above as `POST /api/pause`,
+    `POST /api/resume`, `DELETE /api/data?range=hour|today`,
+    `POST /api/annotations`, `DELETE /api/annotations/{id}` and
+    `POST /api/checkins`, each behind a per-session CSRF token and a
+    same-origin check (Privacy & Security §8.2). They go through the CLI's
+    control files and its short-lived read-write connection, so both
+    dashboards can change data. The socket's `/v1` query API isn't built.
   - **Overview:** 90-day strain with drivers, limits and calibration.
   - **Today:** categories, apps, a 10-minute timeline with calendar
     meetings, terminal and agents.
-  - **This week:** the weekly review.
-  - **Privacy:** the same rows as `burnout privacy`.
+  - **This week:** the weekly review, marked days (add and remove) and
+    the weekly check-in form, with the support flow (§8.4).
+  - **Privacy:** pause, resume and delete the last hour or today (with a
+    confirm step), then the same rows as `burnout privacy`.
   - **Accessibility:** WCAG work covers keyboard and screen-reader
     navigation, tables behind every chart, colour never the only cue,
     dark mode, reduced motion and "blur numbers".

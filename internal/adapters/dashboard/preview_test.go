@@ -20,7 +20,7 @@ func TestPreview(t *testing.T) {
 	if err != nil {
 		t.Skip("set BURNOUT_DASHBOARD_PREVIEW to a duration to serve a preview")
 	}
-	s, err := Listen(previewSource{}, slog.Default())
+	s, err := Listen(previewSource{}, &memControl{}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
