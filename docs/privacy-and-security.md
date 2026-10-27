@@ -581,10 +581,17 @@ The APIs we use to count input are the same ones keyloggers use. So:
 - Never logged: window titles, command lines, paths, ICS URLs, keystore
   material, check-in content. The app's own file locations can appear in
   error messages, with the home folder shown as `~`.
-- `burnout doctor --bundle` builds a redacted diagnostics archive: versions,
-  component compatibility, collector and permission states, SLIs, config
-  with secrets removed, and the last N log lines. It **shows the user a full
-  preview** before writing it to a path they choose. It never uploads.
+- `burnout doctor --bundle FILE` builds a redacted diagnostics archive (a
+  zip): the `doctor` report (version, collector and permission states,
+  disk encryption, keystore, daemon and database health), today's health
+  SLIs, the config file, and the last 200 lines of the daemon log. Secrets
+  are never in the config. Apps in `privacy.exclude_apps` are replaced with
+  `[excluded app]` everywhere in the bundle, and the home folder is shown as
+  `~`. A config file that doesn't parse is left out, with its error,
+  because the error can quote it. The bundle **shows the user every file in
+  full** and writes nothing until they type `yes` in a terminal. It goes to a
+  new owner-only file at a path they choose, never over an existing one.
+  It never uploads.
 
 ---
 
