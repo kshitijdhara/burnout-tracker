@@ -427,7 +427,7 @@ func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 	}
 	caps := c.Capabilities()
 	log.Info("collector ready", "name", caps.Name, "titles", caps.Titles, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
-	return c
+	return presenceCollector{Collector: c, blind: !caps.Calls}
 }
 
 // liveConfig is the config file as the daemon last read it. The loop
@@ -495,6 +495,7 @@ func saveScores(ctx context.Context, store *sqlite.Store, now time.Time, c confi
 	if err := store.SaveFeatureDays(ctx, sc.Computed, opts.Features.Key()); err != nil {
 		return err
 	}
+	publishGuardrails(sc.Scores)
 	return store.SaveScores(ctx, sc.Scores)
 }
 

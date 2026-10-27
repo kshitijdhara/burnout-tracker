@@ -53,19 +53,24 @@ func trayMenu(log *slog.Logger, dataDir string, settings *liveConfig, dash *tray
 			}
 			return control.SetReminderSeen(dataDir, time.Now())
 		},
-		Log: log,
+		SnoozeNudge:  func(kind string) error { return snoozeNudge(dataDir, kind, time.Now()) },
+		TurnOffNudge: func(kind string) error { return turnOffNudge(dataDir, kind, time.Now()) },
+		Log:          log,
 	}
 }
 
 // trayStatus is what the icon shows: paused (by the user or private
 // hours), safe mode or recording, then a newer release if the weekly
-// update check found one, and whether the monthly reminder is due. The
-// reminder shows whatever the recording state (AC-4).
+// update check found one, whether the monthly reminder is due, and the
+// day's nudge. The reminder shows whatever the recording state (AC-4); the
+// nudge only while nothing holds it back (trayNudge).
 func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 	st := tray.Status{Text: "Recording"}
-	if paused, p := control.PauseState(dataDir, now); paused {
+	paused, p := control.PauseState(dataDir, now)
+	private := c.PrivateHours().Contains(now)
+	if paused {
 		st = tray.Status{Paused: true, Text: "Paused " + describePause(p, now)}
-	} else if c.PrivateHours().Contains(now) {
+	} else if private {
 		st = tray.Status{Paused: true, Text: "Private hours: nothing is recorded"}
 	} else if safeMode.Load() {
 		st = tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
@@ -77,6 +82,7 @@ func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 	consented, _ := consentedAt()
 	seen, _ := control.ReminderSeen(dataDir)
 	st.Reminder = reminderDue(consented, seen, now)
+	st.Nudge = trayNudge(dataDir, c, now, paused, private)
 	return st
 }
 

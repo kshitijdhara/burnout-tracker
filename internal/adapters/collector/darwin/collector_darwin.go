@@ -382,9 +382,10 @@ func New(opts Options) (*Collector, error) {
 		windows:  make([]C.bt_window, maxWindows),
 		displays: make([]C.bt_rect, maxDisplays),
 		caps: ports.Capabilities{
-			Name: "darwin", Windows: true, Pointer: true, Idle: true,
+			Name: "darwin", Windows: true, Pointer: true, Idle: true, Calls: true,
 			Limitations: []string{
 				"focus is inferred from window z-order (no Accessibility permission)",
+				"Focus, Do Not Disturb and screen sharing aren't detected without a new permission; nudges wait out calls and video instead",
 			},
 		},
 	}

@@ -1,8 +1,9 @@
 // Package control carries requests from the CLI to a running daemon
 // through small files in the owner-only data folder: pausing collection
 // (privacy & security §5.1 "Pause"), forgetting recent data ("Delete
-// recent", "Forget") and when the monthly "what's collected" reminder was
-// last seen (§5.2 AC-4). Files, not the hook socket, so the socket stays
+// recent", "Forget"), when the monthly "what's collected" reminder was
+// last seen (§5.2 AC-4), and the day's nudge with the kinds turned off
+// from the tray (system design §8.3). Files, not the hook socket, so the socket stays
 // hooks-only and its wire contract doesn't change.
 package control
 
@@ -15,6 +16,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
@@ -26,6 +28,7 @@ const (
 	forgetFile     = "forget-request"
 	forgetDoneFile = "forget-done"
 	reminderFile   = "reminder-seen"
+	nudgesFile     = "nudges"
 )
 
 // Pause is a pause of collection. A zero Until means until resumed.
@@ -134,6 +137,60 @@ func ReminderSeen(dataDir string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.UnixMilli(r.SeenMs), true
+}
+
+// Nudges is the tray's nudge state: the day's nudge and whether it was
+// snoozed, and the kinds the user asked never to see again.
+type Nudges struct {
+	Day     string   `json:"day,omitempty"` // logical day Kind first showed on
+	Kind    string   `json:"kind,omitempty"`
+	Snoozed bool     `json:"snoozed,omitempty"` // until the next day
+	Off     []string `json:"off,omitempty"`
+}
+
+// ReadNudges returns the nudge state; none yet is the zero state. An
+// unreadable file is an error, and the caller shows no nudge: unlike the
+// reminder, the safe direction is silence, so a kind turned off stays off.
+func ReadNudges(dataDir string) (Nudges, error) {
+	b, err := os.ReadFile(filepath.Join(dataDir, nudgesFile)) //nolint:gosec // our own data folder
+	if errors.Is(err, fs.ErrNotExist) {
+		return Nudges{}, nil
+	}
+	if err != nil {
+		return Nudges{}, fmt.Errorf("control: %w", err)
+	}
+	var n Nudges
+	if err := json.Unmarshal(b, &n); err != nil {
+		return Nudges{}, fmt.Errorf("control: nudges: %w", err)
+	}
+	return n, nil
+}
+
+// ShowNudge records that kind is day's nudge, so no other shows that day.
+func ShowNudge(dataDir, day, kind string) error {
+	n, err := ReadNudges(dataDir)
+	if err != nil {
+		return err
+	}
+	n.Day, n.Kind, n.Snoozed = day, kind, false
+	return writeJSON(filepath.Join(dataDir, nudgesFile), n)
+}
+
+// SnoozeNudge hides day's nudge until the next day.
+func SnoozeNudge(dataDir, day, kind string) error {
+	n, _ := ReadNudges(dataDir) // an unreadable file is replaced
+	n.Day, n.Kind, n.Snoozed = day, kind, true
+	return writeJSON(filepath.Join(dataDir, nudgesFile), n)
+}
+
+// NudgeOff turns kind off for good, and hides it for the rest of day.
+func NudgeOff(dataDir, day, kind string) error {
+	n, _ := ReadNudges(dataDir) // an unreadable file is replaced
+	if !slices.Contains(n.Off, kind) {
+		n.Off = append(n.Off, kind)
+	}
+	n.Day, n.Kind, n.Snoozed = day, kind, true
+	return writeJSON(filepath.Join(dataDir, nudgesFile), n)
 }
 
 type doneJSON struct {

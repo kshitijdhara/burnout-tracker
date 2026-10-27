@@ -283,6 +283,14 @@ Phase 1 so far:
   - An invalid file is never half-applied. A running daemon keeps its
     current settings, and a starting one refuses to run on defaults,
     which could silently drop private hours or exclusions.
+- **Screen-share safety** is partly built (system design §8.3). Nudges
+  are held back during calls and video, and while paused, in private
+  hours or outside waking hours. The tray keeps them out of its first line
+  and tooltip. Focus/Do Not Disturb and screen sharing aren't detected:
+  - macOS exposes neither without a new permission, so calls stand in;
+  - Windows and Linux can't see calls yet either.
+  Each collector lists the gap in its limitations (`burnout doctor`).
+  The "blur numbers" option isn't built.
 - **Export** is built: `burnout export --out FILE [--format csv]
   [--since DATE] [--until DATE]`.
   - It reads one consistent snapshot, read-only, so the daemon keeps
