@@ -11,7 +11,6 @@ import (
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -66,7 +65,7 @@ func runBoundary(ctx context.Context, args []string) error {
 }
 
 func boundaryCommand(ctx context.Context, st boundaryStore, out io.Writer, args []string, source string, now time.Time) error {
-	today := model.LogicalDay(now, app.DefaultConfig().Rollover)
+	today := model.LogicalDay(now, rollover)
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "list":
 		history := len(rest) == 1 && (rest[0] == "--history" || rest[0] == "-history")

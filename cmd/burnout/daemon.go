@@ -393,7 +393,7 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 		},
 		Controls: controlFiles{dataDir: dataDir},
 		Forget: func(ctx context.Context, since time.Time) error {
-			return store.Forget(ctx, since, model.LogicalDay(since, app.DefaultConfig().Rollover))
+			return store.Forget(ctx, since, model.LogicalDay(since, rollover))
 		},
 		LoadHealth:  store.Health,
 		IngestStats: func() map[string]uint64 { return ingestStatsMap(server.Stats()) },

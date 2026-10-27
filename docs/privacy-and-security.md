@@ -66,7 +66,7 @@ user's account and protected at rest by OS full-disk encryption
 |-------|--------|---------|-----------|-----------|----------------|
 | App identifier (bundle id / exe name) | OS window APIs | on | Clear text in minute rollups. Apps on the sensitive denylist or the user's exclusions are stored as `private` (identity dropped) | 180 d | Never |
 | Window identity (`window_key`) | OS window APIs | on | HMAC-SHA256 (per-install key, §4.5) of app id + OS window id. Used to join a window's minutes; not reversible to a title | 180 d | Never |
-| Window title | OS window APIs (macOS: needs Screen Recording) | **opt-in** ("title classification") | **Never persisted.** Redacted (§4.1), classified in memory, discarded. Title hashes are never persisted; the classification cache is in memory only, keyed by HMAC | — | Never |
+| Window title | OS window APIs (macOS: needs Screen Recording) | **opt-in** ("title classification") | **Never persisted.** Redacted (§4.1), classified in memory, discarded. Title hashes are never persisted; any classification cache is in memory only, keyed by HMAC (none exists yet: it comes with the optional model, ADR-0006) | — | Never |
 | Activity category | Classifier output | on | Clear text label (e.g. `code`, `comms`, `browser`, `private`) | 180 d (rollups), 2 y (as daily features) | Never |
 | Monitor topology | OS display APIs | on | Count, resolutions, arrangement, primary flag, snapshot on change | 180 d | Never |
 | Focus / visibility / attention rollups | Attention engine | on | Per minute per window: `focused_s`, `visible_s`, `attended_s`, monitor index | 180 d | Never |
@@ -147,9 +147,10 @@ process that produces the data, and always before persistence.
 2. Redact before any classifier sees it: remove email addresses, URLs, file
    paths, numbers of 3+ digits, and tokens ≥ 20 characters that look like
    identifiers or secrets (high entropy, base64/hex).
-3. Classify (rules → user overrides → in-memory cache → optional Laya).
-4. Keep only the category. The in-memory cache is keyed by HMAC of the
-   redacted title and is cleared on restart.
+3. Classify (rules → user overrides → optional Laya).
+4. Keep only the category. A classification cache, once the optional
+   model makes one worthwhile (ADR-0006), MUST be in memory only, keyed by
+   HMAC of the redacted title and cleared on restart. There is none yet.
 
 ### 4.2 Shell commands
 
@@ -249,19 +250,22 @@ Phase 1 so far:
     page puts in its title ("Inbox - Gmail") or a host name in it. A
     page is recognised only when its title names its site. Sensitive
     and excluded sites are matched more widely: their names (each
-    sensitive site has one; an excluded site's main label, such as
-    "mybank" for mybank.com) as whole words anywhere in the title.
+    sensitive site has one; a whole excluded site's main label, such as
+    "mybank" for mybank.com) as whole words anywhere in the title. An
+    excluded subdomain, such as mail.google.com, matches by its host
+    name only, so it doesn't make every page of its parent's brand
+    private. A browser's own name at the end of a title ("- Google
+    Chrome") is ignored when matching.
   - The title is redacted (`internal/domain/redact`, fuzzed in CI):
     emails, URLs, paths, 3+ digit numbers and 20+ character id- or
     secret-like tokens become placeholders.
   - Cascade: app exclusions and sensitive apps; site exclusions and
     sensitive sites (`private`, whatever an override says); the user's
-    site overrides; bundled sites; the in-memory cache; the browser's
-    own category.
-  - The cache is keyed by HMAC of the browser, the site and the
-    redacted title. It is bounded, cleared when settings change and
-    never written. Titles, sites and cache keys never reach the
-    database, logs, exports or the doctor bundle; canary tests check
+    site overrides; bundled sites; the browser's own category.
+  - There is no title cache yet; ADR-0006's model step adds one (keyed
+    by HMAC, bounded, cleared when settings change, never written).
+    Titles and sites never reach the database, logs, exports or the
+    doctor bundle; canary tests check
     the sink, a real database and its WAL, the log, an export and the
     bundle.
 - **The config file** is built (system design §3.4): `burnout config

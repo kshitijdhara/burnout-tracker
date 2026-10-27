@@ -10,7 +10,6 @@ import (
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -21,7 +20,7 @@ const mediaMinS = 30
 // runTimeline prints a day as runs of minutes, so it can be checked
 // against the user's own notes of what they did.
 func runTimeline(ctx context.Context, args []string) error {
-	day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+	day := model.LogicalDay(time.Now(), rollover)
 	switch len(args) {
 	case 0:
 	case 1:

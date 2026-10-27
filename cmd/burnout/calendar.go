@@ -19,7 +19,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/calendar"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -341,7 +340,6 @@ func syncCalendar(ctx context.Context, dataDir string, src ics.Source, now time.
 // syncInto is syncCalendar with an open store (the daemon's). Meetings
 // starting in private hours are left out: private hours record nothing.
 func syncInto(ctx context.Context, store *sqlite.Store, dataDir string, src ics.Source, now time.Time, private schedule.Schedule) (int, error) {
-	rollover := app.DefaultConfig().Rollover
 	from, to := now.Add(-calendarBack), now.Add(calendarAhead)
 	n, err := func() (int, error) {
 		blocks, err := fetchBlocks(ctx, src, from, to)

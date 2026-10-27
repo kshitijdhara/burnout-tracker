@@ -35,7 +35,7 @@ func runStatus(ctx context.Context, _ []string) error {
 	defer func() { _ = store.Close() }()
 
 	now := time.Now()
-	day := model.LogicalDay(now, app.DefaultConfig().Rollover)
+	day := model.LogicalDay(now, rollover)
 	cfg := profileConfig()
 	if paused, p := control.PauseState(dataDir, now); paused {
 		fmt.Printf("Paused %s: nothing is being recorded. `burnout resume` starts again.\n\n", describePause(p, now))

@@ -537,7 +537,7 @@ activity (app id, domain-from-title*, redacted title*, argv0)
   ├─► 1. sensitive-apps denylist + user exclusions  → category `private` (identity dropped)
   ├─► 2. bundled rules (app ids, domains, commands)  ~80% of time, µs
   ├─► 3. user overrides
-  ├─► 4. in-memory cache (HMAC key → category; never persisted)
+  ├─► 4. in-memory cache (HMAC key → category; never persisted), with step 5
   ├─► 5. Laya sidecar, optional (ADR-0006): Choice[taxonomy], p < 0.6 → uncategorized
   └─► 6. `uncategorized`, offered for labelling in the weekly review
 ```
@@ -570,8 +570,8 @@ Phase 1 so far:
   browsers only, the site is read from the raw title in memory and the
   title is redacted. Sites are matched against exclusions and sensitive
   sites, then the user's site overrides, then a small bundled site list
-  (`internal/domain/classify/domain_rules.go`), then the in-memory cache.
-  Without a match the window keeps its browser category. A browser
+  (`internal/domain/classify/domain_rules.go`). There is no cache until
+  step 5 exists. Without a match the window keeps its browser category. A browser
   window whose category changes within a minute gets one row per
   category. There is no Laya step yet (ADR-0009).
 - **Core hours** (`profile.core_hours`, default 09:00-18:00, weekdays)

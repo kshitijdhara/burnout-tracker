@@ -143,5 +143,5 @@ enable it pay nothing.
 3. [ ] `burnout-classify` sidecar: ONNX Runtime, tokenizer, versioned stdin/stdout JSON protocol, SHA-256-pinned model download.
 4. [ ] Sidecar limits (AC-only, daily cap, memory ceiling, idle exit) and per-OS sandbox, with tests asserting no network and no unexpected file access.
 5. [x] Redactor with canary tests: emails, numbers, URLs, paths and tokens never reach the classifier or the DB.
-6. [x] In-memory HMAC-keyed classification cache; assert no title or title hash is ever written.
+6. [ ] In-memory HMAC-keyed classification cache, with the model step (a first version was removed in Phase 1: with rules only it saved no work); the canary tests already assert no title or title hash is ever written.
 7. [ ] Role-profile taxonomies (developer, student, researcher, PM).
