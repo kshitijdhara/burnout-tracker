@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/crashloop"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/fde"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
@@ -41,6 +42,8 @@ func runDoctor(ctx context.Context, _ []string) error {
 
 	checkFix("daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
 	reportService()
+	checkFix("not in safe mode", !crashloop.Load(dataDir).Safe, "the desktop collector is off after 3 starts in 10 minutes; "+
+		"hooks still record, and it comes back after an hour without a crash (see the daemon log)")
 	cfg, cfgPath, cfgErr := loadConfig()
 	switch {
 	case cfgErr != nil && cfgPath == "":

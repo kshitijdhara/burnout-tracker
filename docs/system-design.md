@@ -1021,8 +1021,8 @@ Days below the coverage threshold aren't scored (§7.1).
 | Failure | Behaviour |
 |---------|-----------|
 | Crash | launchd `KeepAlive` (on failure only) + `ThrottleInterval` 30 s; systemd `Restart=on-failure` + `RestartSec=30`, no start limit. Conditions a restart can't fix (no consent, a newer schema, an unusable data folder) exit 0 and stay down. Windows task restart: not yet |
-| Crash loop (3 in 10 min) | Not yet: start in **safe mode** without the last-enabled native collector; report in `doctor` and the tray. Phase 0 keeps restarting every 30 s |
-| Hang | Not yet: systemd `WatchdogSec` + `sd_notify`; an internal heartbeat per collector restarts a stuck collector |
+| Crash loop (3 in 10 min) | The service records its start times in an owner-only `starts` file in the data folder (a clean stop doesn't count). On the 3rd start within 10 minutes it starts in **safe mode**: no native desktop collector, hooks still recorded. `doctor` and the tray's first line report it. After an hour without a crash it clears the file and exits for launchd or systemd to restart it normally. Daemons started in a terminal don't take part |
+| Hang | systemd: `Type=notify` + `WatchdogSec=60`; the daemon sends `READY=1` once collecting (or once it starts waiting for a terminal daemon) and `WATCHDOG=1` from its loop every flush (15 s), paused or not, so a stuck loop is killed and restarted. launchd has no watchdog. Not yet: an internal heartbeat per collector restarts a stuck collector |
 | Disk full | Stop `raw_events`, keep rollups in memory and flush when space returns, alert once |
 | DB corruption | `PRAGMA quick_check` at start; restore from the latest nightly `VACUUM INTO` recovery copy (3 generations); quarantine the bad file |
 | Migration failure | Back up before migrating; each migration runs in a transaction; refuse to start on a schema newer than the binary knows |

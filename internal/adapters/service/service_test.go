@@ -263,6 +263,7 @@ func TestSystemdInstallUninstall(t *testing.T) {
 		`ExecStart="/Users/me/.local/bin/burnout" daemon --service`,
 		`Environment="BURNOUT_DATA_DIR=/Users/me/data"`,
 		"StartLimitIntervalSec=0", "Restart=on-failure", "RestartSec=30",
+		"Type=notify", "WatchdogSec=60",
 	} {
 		if !strings.Contains(string(def), s) {
 			t.Fatalf("unit lacks %q:\n%s", s, def)
