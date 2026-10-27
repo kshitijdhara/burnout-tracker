@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
 func TestMissingFileIsDefaults(t *testing.T) {
@@ -27,6 +28,10 @@ func TestRenderRoundTrips(t *testing.T) {
 	c.Privacy.PrivateHours = []string{"Mon-Fri 19:00-08:00", "Sat,Sun"}
 	c.Privacy.ExcludeApps = []string{"com.spotify.client", `odd "name" \ here`}
 	c.Privacy.AggregateOnly = true
+	c.Privacy.ExcludeDomains = []string{"bank.example.com"}
+	c.Privacy.TitleClassification = true
+	// Dotted keys must be quoted, or TOML reads them as nested tables.
+	c.Classify.Overrides = map[string]string{"notion.id": "comms", "domain:github.com": "docs", `odd "app" \ id`: "other"}
 	c.Retention.MinutesDays = 30
 	back, err := Parse(Render(c))
 	if err != nil {
@@ -140,7 +145,7 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	if err := c.Add("retention.minutes_days", []string{"1"}); err == nil {
 		t.Error("add to a number accepted")
 	}
-	if len(Keys()) != 12 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
+	if len(Keys()) != 15 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
 		t.Errorf("keys: %v", Keys())
 	}
 }
@@ -230,6 +235,7 @@ func TestDerived(t *testing.T) {
 func FuzzParse(f *testing.F) {
 	f.Add(Render(Default()))
 	f.Add([]byte("[privacy]\nprivate_hours = [\"Mon-Fri 19:00-08:00\"]\nexclude_apps = [\"a\"]\n"))
+	f.Add([]byte("[privacy]\nexclude_domains = [\"a.example\"]\n[classify.overrides]\n\"a.b\" = \"code\"\n\"domain:x.example\" = \"docs\"\n"))
 	f.Fuzz(func(t *testing.T, b []byte) {
 		c, err := Parse(b)
 		if err != nil {
@@ -286,5 +292,68 @@ func TestUpdateCheck(t *testing.T) {
 	}
 	if err := c.Unset("update.check"); err != nil || c.Update.Check != UpdateOff {
 		t.Errorf("unset: %v, %v", c.Update.Check, err)
+	}
+}
+
+func TestTitlesAndOverrides(t *testing.T) {
+	c, err := Parse([]byte(`[privacy]
+exclude_domains = ["WWW.Bank.example.", "domain:bank.example", "health.example"]
+title_classification = true
+
+[classify.overrides]
+"Notion.ID" = " Comms "
+"domain:WWW.GitHub.com" = "code"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(c.Privacy.ExcludeDomains, []string{"bank.example", "health.example"}) || !c.Privacy.TitleClassification {
+		t.Errorf("privacy %+v", c.Privacy)
+	}
+	if want := map[string]string{"notion.id": "comms", "domain:github.com": "code"}; !reflect.DeepEqual(c.Classify.Overrides, want) {
+		t.Errorf("overrides %v", c.Classify.Overrides)
+	}
+	if got := c.Exclusions(); !reflect.DeepEqual(got, []string{"domain:bank.example", "domain:health.example"}) {
+		t.Errorf("exclusions %q", got)
+	}
+	if got := c.Overrides(); got["domain:github.com"] != model.CategoryCode {
+		t.Errorf("Overrides() %v", got)
+	}
+
+	for name, file := range map[string]string{
+		"bad category":     "[classify.overrides]\n\"notion.id\" = \"work\"\n",
+		"private override": "[classify.overrides]\n\"notion.id\" = \"private\"\n",
+		"bad domain key":   "[classify.overrides]\n\"domain:not a site\" = \"code\"\n",
+		"empty app key":    "[classify.overrides]\n\" \" = \"code\"\n",
+		"bad site":         "[privacy]\nexclude_domains = [\"https://x.example/path\"]\n",
+		"unquoted dotted":  "[classify.overrides]\nnotion.id = \"comms\"\n",
+		"title not bool":   "[privacy]\ntitle_classification = \"on\"\n",
+	} {
+		if c, err := Parse([]byte(file)); err == nil {
+			t.Errorf("%s: accepted as %+v", name, c)
+		}
+	}
+
+	d := Default()
+	if err := d.Set("classify.overrides", []string{"notion.id=docs", "domain:GitHub.com=code"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Add("classify.overrides", []string{"Notion.id=comms", "zoom=meeting"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.Remove("classify.overrides", []string{"zoom", "domain:github.com=code", "absent"}); err != nil || n != 2 {
+		t.Fatalf("remove: %d, %v", n, err)
+	}
+	if got, _ := d.Get("classify.overrides"); !reflect.DeepEqual(got, []string{"notion.id=comms"}) {
+		t.Errorf("get %q", got)
+	}
+	if err := d.Set("classify.overrides", []string{"no-equals"}); err == nil {
+		t.Error("an item without = accepted")
+	}
+	if err := d.Unset("classify.overrides"); err != nil || len(d.Classify.Overrides) != 0 || d.Classify.Overrides == nil {
+		t.Errorf("unset: %v %v", d.Classify.Overrides, err)
+	}
+	if !IsList("classify.overrides") || IsList("privacy.title_classification") {
+		t.Error("IsList")
 	}
 }

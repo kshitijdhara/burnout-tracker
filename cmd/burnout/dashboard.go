@@ -93,9 +93,18 @@ func openBrowser(url string) error {
 	return nil
 }
 
-// collected is what is and isn't collected, for the Privacy page.
-var collected = []string{
-	"Which apps and windows hold your attention, per minute. Window titles are not collected.",
+// collected is what is and isn't collected, for the Privacy page. titles
+// says whether title classification is on.
+func collected(titles bool) []string {
+	window := "Which apps and windows hold your attention, per minute. Window titles are not collected."
+	if titles {
+		window = "Which apps and windows hold your attention, per minute. Browser titles are read to tell sites apart: " +
+			"redacted and classified in memory, never stored; only the category is kept."
+	}
+	return append([]string{window}, collectedRest...)
+}
+
+var collectedRest = []string{
 	"Whether you are present: idle time, screen lock, calls and visible video.",
 	"Shell commands: the command name and a known subcommand only, never arguments, plus exit code, duration and a keyed hash of the project.",
 	"Claude Code session timing: when it works, waits for you and stops. Never your prompts or its responses.",
@@ -336,7 +345,7 @@ func (d dashSource) Week(ctx context.Context) (dashboard.Week, error) {
 }
 
 func (d dashSource) Privacy(ctx context.Context) (dashboard.Privacy, error) {
-	return dashboard.Privacy{Collected: collected, Settings: privacySettings(ctx, d.dataDir)}, nil
+	return dashboard.Privacy{Collected: collected(titlesOn()), Settings: privacySettings(ctx, d.dataDir)}, nil
 }
 
 // dashControl makes the dashboard's changes the way the CLI does, so a

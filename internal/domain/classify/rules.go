@@ -10,6 +10,8 @@ var bundledApps = map[model.Category][]string{
 		"io.alacritty", "com.mitchellh.ghostty", "dev.warp.Warp-Stable",
 		"WindowsTerminal.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wezterm-gui.exe", "alacritty.exe",
 		"gnome-terminal-server", "konsole", "kitty", "alacritty", "wezterm-gui", "ghostty", "foot", "xterm",
+		// X11 WM_CLASS names that differ from the executable's.
+		"Gnome-terminal", "org.wezfurlong.wezterm",
 	},
 	model.CategoryCode: {
 		"com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.todesktop.230313mzl4w4u92", "dev.zed.Zed",
@@ -26,6 +28,7 @@ var bundledApps = map[model.Category][]string{
 		"company.thebrowser.Browser", "com.brave.Browser", "com.vivaldi.Vivaldi", "com.operasoftware.Opera",
 		"chrome.exe", "firefox.exe", "msedge.exe", "brave.exe", "arc.exe", "vivaldi.exe", "opera.exe",
 		"chrome", "chromium", "firefox", "brave", "vivaldi-bin",
+		"Google-chrome", "Brave-browser", "Microsoft-edge", "Vivaldi-stable",
 	},
 	model.CategoryComms: {
 		"com.tinyspeck.slackmacgap", "com.microsoft.teams2", "com.apple.mail", "com.microsoft.Outlook",

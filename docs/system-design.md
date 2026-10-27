@@ -306,6 +306,8 @@ day minute by minute for checking against a hand-written log.
   |-------------|-------------|
   | macOS Spaces / full-screen | Only the current Space |
   | Windows virtual desktops | Cloaked windows excluded |
+  | Linux X11 workspaces | Only the current workspace (`_NET_WM_DESKTOP` vs `_NET_CURRENT_DESKTOP`), sticky windows included; minimised (`_NET_WM_STATE_HIDDEN`), desktop and dock windows excluded |
+  | Linux Wayland | No desktop collector until the GNOME bridge; hooks only |
   | Clamshell mode | External monitors only |
   | RDP/Citrix/VM | One window, classified as `remote-desktop` |
 
@@ -318,10 +320,17 @@ day minute by minute for checking against a hand-written log.
 | | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
 | Focus | `NSWorkspace` + AX | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` | bridge |
-| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` | GNOME extension / KWin script; Sway/Hyprland IPC |
-| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` | bridge; wlroots limited |
+| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` (reversed to topmost first), client origin translated to root plus `_NET_FRAME_EXTENTS`; monitors from RandR 1.5 | GNOME extension / KWin script; Sway/Hyprland IPC |
+| App + pid | bundle id + pid | exe name + pid | `WM_CLASS` class (else `/proc/<pid>/comm`) + `_NET_WM_PID` | bridge |
+| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` root position, hit-tested against the stacking order | bridge; wlroots limited |
 | Idle | `CGEventSourceSecondsSinceLastEventType` | `GetLastInputInfo` | XScreenSaver | `ext-idle-notify-v1` / Mutter IdleMonitor |
-| Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw | not available → idle deltas |
+| Lock | `CGSessionCopyCurrentDictionary` | input desktop + `LockApp.exe` | logind `LockedHint`/`Active` (system bus), else `org.gnome.ScreenSaver.GetActive` | same as X11 |
+| Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw (not yet) | not available → idle deltas |
+
+The X11 collector is pure Go (`jezek/xgb`), so Linux builds stay
+`CGO_ENABLED=0`. It is chosen when `DISPLAY` is set and
+`XDG_SESSION_TYPE` isn't `wayland` (under Wayland, Xwayland would show
+only X clients).
 
 The Wayland bridges talk to the daemon over a **private peer-to-peer
 connection** with a token handshake, never as a public session-bus service
@@ -535,6 +544,18 @@ Phase 1 so far:
   They are starting points for Phase 4 to fit.
 - **Changing role** rescores all of history at once, because weights are
   applied at scoring time.
+- **User overrides** (`classify.overrides`) map an app id or a site
+  (`domain:example.com`) to a category. They win over bundled rules but
+  never over exclusions or the sensitive lists, so step 3 runs before
+  step 2 in practice; the privacy step stays first.
+- **Titles** (opt-in `privacy.title_classification`): for bundled
+  browsers only, the site is read from the raw title in memory and the
+  title is redacted. Sites are matched against exclusions and sensitive
+  sites, then the user's site overrides, then a small bundled site list
+  (`internal/domain/classify/domain_rules.go`), then the in-memory cache.
+  Without a match the window keeps its browser category. A browser
+  window whose category changes within a minute gets one row per
+  category. There is no Laya step yet (ADR-0009).
 - **Core hours** (`profile.core_hours`, default 09:00-18:00, weekdays)
   define after-hours work. Changing them changes the features themselves:
   - each stored day records the feature parameters it was computed with;

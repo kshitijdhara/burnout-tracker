@@ -3,6 +3,7 @@ package classify
 import (
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
@@ -83,6 +84,49 @@ func DomainFromTitle(title string) string {
 		}
 	}
 	return ""
+}
+
+// PrivateTitle reports whether a browser title names a sensitive or
+// excluded site anywhere, as whole words in any case: "Accounts Overview |
+// Bank of America" or "MyBank - Statements" when mybank.com is excluded.
+// Call it on the raw title, in memory.
+func (r *Rules) PrivateTitle(title string) bool {
+	t := " " + words(title) + " "
+	for _, n := range r.privateNames {
+		if strings.Contains(t, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// words lower-cases s and turns every run of other than letters and digits
+// into one space.
+func words(s string) string {
+	return strings.Join(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}), " ")
+}
+
+// genericLabels are second-level labels that name no site ("co" in
+// example.co.uk).
+var genericLabels = map[string]bool{"co": true, "com": true, "org": true, "net": true, "gov": true, "ac": true, "edu": true}
+
+// siteWord is the word an excluded site's titles are likely to carry: the
+// longest label other than the top-level one and generic ones
+// ("example" for wiki.example.org, "mybank" for mybank.com).
+func siteWord(domain string) string {
+	labels := strings.Split(domain, ".")
+	best := ""
+	for _, l := range labels[:len(labels)-1] {
+		if !genericLabels[l] && len(l) > len(best) {
+			best = l
+		}
+	}
+	if len(best) < 3 {
+		return ""
+	}
+	return words(best)
 }
 
 // Domain returns the category of a site and whether any rule knows it.

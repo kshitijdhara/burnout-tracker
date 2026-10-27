@@ -50,9 +50,11 @@ func TestTitleCascade(t *testing.T) {
 		w    model.Window
 		want model.Category
 	}{
-		{titled(1, chrome, "Design doc - Google Docs"), model.CategoryCode},                  // site override
-		{titled(2, chrome, "Pull request #42 · a/b · GitHub"), model.CategoryCode},           // bundled site
-		{titled(3, chrome, "Summary - PayPal"), model.CategoryPrivate},                       // sensitive beats override
+		{titled(1, chrome, "Design doc - Google Docs"), model.CategoryCode},        // site override
+		{titled(2, chrome, "Pull request #42 · a/b · GitHub"), model.CategoryCode}, // bundled site
+		{titled(3, chrome, "Summary - PayPal"), model.CategoryPrivate},
+		{titled(9, chrome, "Bank of America | Online Banking | Accounts Overview"), model.CategoryPrivate},
+		{titled(10, chrome, "Intranet home - Example"), model.CategoryPrivate},               // the excluded site's word                       // sensitive beats override
 		{titled(4, chrome, "Wiki | intranet.example.com"), model.CategoryPrivate},            // domain exclusion
 		{titled(5, chrome, "Some page nobody knows"), model.CategoryOther},                   // the app's own category
 		{titled(6, chrome, ""), model.CategoryOther},                                         // no title

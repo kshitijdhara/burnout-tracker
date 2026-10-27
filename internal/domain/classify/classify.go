@@ -23,6 +23,7 @@ type Rules struct {
 	domains         map[string]model.Category
 	domainOverrides map[string]model.Category
 	privateDomains  map[string]model.Category // all CategoryPrivate
+	privateNames    []string                  // padded words (" bank of america "), see PrivateTitle
 }
 
 type prefixRule struct {
@@ -60,6 +61,9 @@ func New(exclusions []string, overrides map[string]model.Category) *Rules {
 	for _, d := range sensitiveDomains {
 		r.privateDomains[d] = model.CategoryPrivate
 	}
+	for name := range sensitiveNames {
+		r.privateNames = append(r.privateNames, " "+words(name)+" ")
+	}
 	for _, p := range bundledPrefixes {
 		r.prefixes = append(r.prefixes, prefixRule{strings.ToLower(p.prefix), p.cat})
 	}
@@ -69,6 +73,10 @@ func New(exclusions []string, overrides map[string]model.Category) *Rules {
 	for _, id := range exclusions {
 		if d, ok := cutDomain(id); ok {
 			r.privateDomains[d] = model.CategoryPrivate
+			r.privateNames = append(r.privateNames, " "+words(d)+" ")
+			if n := siteWord(d); n != "" {
+				r.privateNames = append(r.privateNames, " "+n+" ")
+			}
 			continue
 		}
 		r.private[strings.ToLower(id)] = true
