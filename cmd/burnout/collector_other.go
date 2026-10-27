@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !darwin && !windows && !linux
 
 package main
 
@@ -8,7 +8,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
 )
 
-// Linux desktop collectors (X11, GNOME, KDE) arrive in Phase 1.
 func newCollector(collectorOptions) (ports.Collector, error) {
-	return nil, errors.New("no desktop collector for this platform yet (Linux arrives in Phase 1)")
+	return nil, errors.New("no desktop collector for this platform")
 }

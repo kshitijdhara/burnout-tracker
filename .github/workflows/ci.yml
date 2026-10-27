@@ -64,9 +64,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install shells for hook tests
+      - name: Install shells for hook tests, and X for the X11 collector
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y zsh fish
+        run: sudo apt-get update && sudo apt-get install -y zsh fish xvfb openbox x11-utils
+      # The X11 collector's live tests need a display and an EWMH window
+      # manager. Wait until openbox advertises itself on the root window.
+      - name: Start Xvfb and openbox
+        if: runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 >/dev/null 2>&1 &
+          for _ in $(seq 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
+          DISPLAY=:99 openbox >/dev/null 2>&1 &
+          for _ in $(seq 50); do DISPLAY=:99 xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 'window id' && break; sleep 0.2; done
+          DISPLAY=:99 xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id'
+          echo DISPLAY=:99 >> "$GITHUB_ENV"
       # CI has no terminal, but developers run the tests from one. On Linux
       # the race run happens under a pseudo-terminal, so a test that grabs
       # /dev/tty (as an interactive zsh does) fails here instead of hanging
