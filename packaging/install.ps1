@@ -67,8 +67,11 @@ function ConvertTo-EccPublicBlob([string]$Pem) {
         if ($der[$i] -ne $P256SpkiPrefix[$i]) { throw 'release key: not a P-256 public key' }
     }
     # "ECS1" (BCRYPT_ECDSA_PUBLIC_P256_MAGIC), key length 32, then X and Y.
+    # (Cast into a variable first: `[byte[]](...).CopyTo()` would call
+    # CopyTo on the uncast object[].)
+    [byte[]]$header = 0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00
     $blob = New-Object byte[] 72
-    [byte[]](0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00).CopyTo($blob, 0)
+    [Array]::Copy($header, 0, $blob, 0, 8)
     [Array]::Copy($der, 27, $blob, 8, 64)
     return , $blob
 }
