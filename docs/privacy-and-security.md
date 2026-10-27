@@ -332,6 +332,17 @@ AC-1 in Phase 1:
 - The end-to-end test binary, built with `-tags e2e`, skips the tray.
   Release builds have no flag, setting or variable that does.
 
+AC-4 in Phase 1:
+- 30 days after consent, and 30 days after it was last opened, the tray
+  menu shows "Review what's collected…" (on macOS, "Review" also appears
+  beside the icon). It shows whether or not recording is paused.
+- Opening it shows the dashboard's Privacy page: what is collected, the
+  current settings, and how to pause, change settings and uninstall
+  (`burnout uninstall`, `--purge` to delete all data too).
+- When it was last opened is kept in the data folder (`reminder-seen`). If
+  that or the consent date can't be read, or lies in the future, the
+  reminder shows.
+
 ---
 
 ## 6. Network egress

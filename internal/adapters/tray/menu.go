@@ -18,6 +18,9 @@ const (
 	noteFor = 6 * time.Second
 	// tooltip names the icon.
 	tooltip = "Burnout tracker"
+	// reviewTitle sits beside the icon while the reminder is due, where the
+	// platform shows titles (the macOS menu bar; most Linux panels don't).
+	reviewTitle = "Review"
 )
 
 // action is a menu item's request, run off the menu goroutine.
@@ -36,14 +39,16 @@ func (m Menu) actions() map[string]action {
 		"delete-hour":    {func() error { return m.Delete(LastHour) }, "Deleted the last hour", "Couldn't delete the last hour"},
 		"delete-today":   {func() error { return m.Delete(Today) }, "Deleted today", "Couldn't delete today"},
 		"dashboard":      {m.OpenDashboard, "", "Couldn't open the dashboard"},
+		"review":         {m.Review, "", "Couldn't open what's collected"},
 	}
 }
 
 // view is what the menu shows at one moment.
 type view struct {
-	Paused bool   // which icon, and Resume instead of the pauses
-	Line   string // the first line
-	Busy   bool   // an action is running: the action items are off
+	Paused   bool   // which icon, and Resume instead of the pauses
+	Line     string // the first line
+	Busy     bool   // an action is running: the action items are off
+	Reminder bool   // the review item and the title beside the icon
 }
 
 // state is the menu's own state between refreshes: the running action and
@@ -59,7 +64,7 @@ func (s *state) view(st Status, now time.Time) view {
 	if s.note != "" && now.Before(s.noteUntil) {
 		line = s.note
 	}
-	return view{Paused: st.Paused, Line: line, Busy: s.busy}
+	return view{Paused: st.Paused, Line: line, Busy: s.busy, Reminder: st.Reminder}
 }
 
 // finished records an action's outcome.
@@ -101,8 +106,9 @@ func show(ctx context.Context, m Menu, ic icons) {
 	systray.SetTooltip(tooltip)
 	first := systray.AddMenuItem("", "")
 	first.Disable()
-	systray.AddSeparator()
 	add := func(key, title, tip string) item { return item{key, systray.AddMenuItem(title, tip)} }
+	review := add("review", "Review what's collected…", "Your monthly look at what burnout records, with pause, settings and uninstall")
+	systray.AddSeparator()
 	pauses := []item{
 		add("pause-hour", "Pause for an hour", ""),
 		add("pause-tomorrow", "Pause until tomorrow", ""),
@@ -116,7 +122,7 @@ func show(ctx context.Context, m Menu, ic icons) {
 	}
 	systray.AddSeparator()
 	dash := add("dashboard", "Open dashboard", "Your data in the browser, from this device only")
-	all := slices.Concat(pauses, []item{resume}, deletes, []item{dash})
+	all := slices.Concat([]item{review}, pauses, []item{resume}, deletes, []item{dash})
 
 	// One goroutine per item turns its clicks into keys.
 	clicks := make(chan string)
@@ -152,6 +158,14 @@ func show(ctx context.Context, m Menu, ic icons) {
 				visible(p.mi, !v.Paused)
 			}
 			visible(resume.mi, v.Paused)
+		}
+		if shown == nil || v.Reminder != shown.Reminder {
+			visible(review.mi, v.Reminder)
+			title := ""
+			if v.Reminder {
+				title = reviewTitle
+			}
+			systray.SetTitle(title)
 		}
 		if shown == nil || v.Line != shown.Line {
 			first.SetTitle(v.Line)

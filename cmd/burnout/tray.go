@@ -46,24 +46,33 @@ func trayMenu(log *slog.Logger, dataDir string, settings *liveConfig, dash *tray
 			}
 			return forgetThroughDaemon(dataDir, from)
 		},
-		OpenDashboard: dash.open,
-		Log:           log,
+		OpenDashboard: func() error { return dash.open("") },
+		Review: func() error {
+			if err := dash.open("privacy"); err != nil {
+				return err
+			}
+			return control.SetReminderSeen(dataDir, time.Now())
+		},
+		Log: log,
 	}
 }
 
 // trayStatus is what the icon shows: paused (by the user or private
-// hours) or recording.
+// hours), safe mode or recording, and whether the monthly reminder is due.
+// The reminder shows whatever the recording state (AC-4).
 func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
+	st := tray.Status{Text: "Recording"}
 	if paused, p := control.PauseState(dataDir, now); paused {
-		return tray.Status{Paused: true, Text: "Paused " + describePause(p, now)}
+		st = tray.Status{Paused: true, Text: "Paused " + describePause(p, now)}
+	} else if c.PrivateHours().Contains(now) {
+		st = tray.Status{Paused: true, Text: "Private hours: nothing is recorded"}
+	} else if safeMode.Load() {
+		st = tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
 	}
-	if c.PrivateHours().Contains(now) {
-		return tray.Status{Paused: true, Text: "Private hours: nothing is recorded"}
-	}
-	if safeMode.Load() {
-		return tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
-	}
-	return tray.Status{Text: "Recording"}
+	consented, _ := consentedAt()
+	seen, _ := control.ReminderSeen(dataDir)
+	st.Reminder = reminderDue(consented, seen, now)
+	return st
 }
 
 // trayDashboard is the dashboard the tray opens. The daemon serves it,
@@ -80,7 +89,8 @@ type trayDashboard struct {
 	done   chan struct{}
 }
 
-func (t *trayDashboard) open() error {
+// open opens the dashboard at view ("" for the default one).
+func (t *trayDashboard) open(view string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.srv != nil {
@@ -112,7 +122,7 @@ func (t *trayDashboard) open() error {
 		}()
 		t.srv, t.store, t.cancel, t.done = srv, store, cancel, done
 	}
-	return openBrowser(t.srv.LaunchURL())
+	return openBrowser(t.srv.LaunchURLTo(view))
 }
 
 // close stops the dashboard, if it was opened.

@@ -140,6 +140,25 @@ func askProfile(in *bufio.Reader, out io.Writer, c config.Config) config.Config 
 	return c
 }
 
+// consentedAt returns when consent was given, from the consent file's
+// "consented <RFC3339> version <v>" line.
+func consentedAt() (time.Time, bool) {
+	dir, err := paths.ConfigDir()
+	if err != nil {
+		return time.Time{}, false
+	}
+	b, err := os.ReadFile(filepath.Join(dir, consentFile)) //nolint:gosec // our own config folder
+	if err != nil {
+		return time.Time{}, false
+	}
+	f := strings.Fields(string(b))
+	if len(f) < 2 || f[0] != "consented" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, f[1])
+	return t, err == nil
+}
+
 func hasConsent() bool {
 	dir, err := paths.ConfigDir()
 	if err != nil {
