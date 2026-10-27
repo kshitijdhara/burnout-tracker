@@ -17,14 +17,17 @@ import (
 )
 
 // TestBundleCanary is the privacy canary for `doctor --bundle` (privacy &
-// security §10): the home folder and an excluded app, planted in every
-// file the bundle draws on, and a window title and command arguments the
-// collector saw, must not appear in the archive.
+// security §10): the home folder, an excluded app and sites named in
+// classify.overrides, planted in every file the bundle draws on, and a
+// window title and command arguments the collector saw, must not appear
+// in the archive.
 func TestBundleCanary(t *testing.T) {
 	const (
 		titleCanary = "CANARYtitle31"
 		argvCanary  = "CANARYargv31"
 		privateApp  = "com.Canary.Private31"
+		siteCanary  = "canary-site31.example"
+		siteCanary2 = "therapist-canary31.example"
 	)
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home-CANARYhome31")
@@ -41,6 +44,9 @@ func TestBundleCanary(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Privacy.ExcludeApps = []string{privateApp}
+	cfg.Classify.Overrides = map[string]string{
+		"domain:" + siteCanary: "docs", "domain:" + siteCanary2: "other", "com.example.editor": "code",
+	}
 	if err := os.WriteFile(config.Path(configDir), config.Render(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +56,7 @@ func TestBundleCanary(t *testing.T) {
 			log.WriteString("too old to be in the bundle " + home + "\n")
 			continue
 		}
-		log.WriteString("level=INFO msg=tick app=" + strings.ToUpper(privateApp) + " dir=" + home + "\n")
+		log.WriteString("level=INFO msg=tick app=" + strings.ToUpper(privateApp) + " dir=" + home + " site=" + siteCanary + "\n")
 	}
 	if err := os.WriteFile(filepath.Join(paths.LogDir(dataDir), paths.DaemonLogFile), []byte(log.String()), 0o600); err != nil {
 		t.Fatal(err)
@@ -95,6 +101,11 @@ func TestBundleCanary(t *testing.T) {
 	if !strings.Contains(got["config.toml"], `exclude_apps = ["[excluded app]"]`) {
 		t.Errorf("config doesn't show one excluded app:\n%s", got["config.toml"])
 	}
+	for _, want := range []string{`"domain:[site] 1" = "docs"`, `"domain:[site] 2" = "other"`, `"com.example.editor" = "code"`} {
+		if !strings.Contains(got["config.toml"], want) {
+			t.Errorf("config doesn't show override %s:\n%s", want, got["config.toml"])
+		}
+	}
 	if !strings.Contains(got["doctor.txt"], "a private app") || !strings.Contains(got["doctor.txt"], "~") {
 		t.Errorf("doctor report:\n%s", got["doctor.txt"])
 	}
@@ -104,7 +115,7 @@ func TestBundleCanary(t *testing.T) {
 	}
 	got["(raw zip)"] = string(raw)
 	for name, data := range got {
-		for _, c := range []string{titleCanary, argvCanary, "CANARYhome31", "canary.private31"} {
+		for _, c := range []string{titleCanary, argvCanary, "CANARYhome31", "canary.private31", "canary-site31", "therapist-canary31"} {
 			if strings.Contains(strings.ToLower(data), strings.ToLower(c)) {
 				t.Errorf("%s in %s:\n%s", c, name, data)
 			}

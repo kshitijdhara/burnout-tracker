@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 )
 
@@ -29,6 +31,8 @@ const (
 	bundleLogBytes = 256 << 10
 	excludedApp    = "[excluded app]"
 	excludedSite   = "[excluded site]"
+	// overrideSite stands for a site named in classify.overrides.
+	overrideSite = "[site]"
 )
 
 // bundleFile is one file in a diagnostics bundle, already redacted.
@@ -86,6 +90,7 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 		shown := cfg
 		shown.Privacy.ExcludeApps = slices.Repeat([]string{excludedApp}, len(cfg.Privacy.ExcludeApps))
 		shown.Privacy.ExcludeDomains = slices.Repeat([]string{excludedSite}, len(cfg.Privacy.ExcludeDomains))
+		shown.Classify.Overrides = maskedOverrides(cfg.Classify.Overrides)
 		files = append(files, bundleFile{"config.toml", config.Render(shown)})
 	}
 
@@ -106,18 +111,49 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 		return nil, fmt.Errorf("read the daemon log: %w", err)
 	}
 
-	redact := bundleRedactor(cfg.Privacy.ExcludeApps, cfg.Privacy.ExcludeDomains)
+	redact := bundleRedactor(cfg.Privacy.ExcludeApps, cfg.Privacy.ExcludeDomains, overrideSites(cfg.Classify.Overrides))
 	for i := range files {
 		files[i].Data = redact(files[i].Data)
 	}
 	return files, nil
 }
 
+// overrideSites are the sites classify.overrides names. Like a window
+// title, a site names what the user browses (privacy & security §5.1).
+func overrideSites(overrides map[string]string) []string {
+	var out []string
+	for k := range overrides {
+		if d, ok := strings.CutPrefix(k, classify.DomainPrefix); ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// maskedOverrides is classify.overrides with each site replaced by a
+// numbered "[site]", so the bundle keeps how many there are and their
+// categories. App overrides stay, except for excluded apps, which
+// bundleRedactor masks like everywhere else.
+func maskedOverrides(overrides map[string]string) map[string]string {
+	out := make(map[string]string, len(overrides))
+	n := 0
+	for _, k := range slices.Sorted(maps.Keys(overrides)) {
+		key := k
+		if strings.HasPrefix(k, classify.DomainPrefix) {
+			n++
+			key = fmt.Sprintf("%s%s %d", classify.DomainPrefix, overrideSite, n)
+		}
+		out[key] = overrides[k]
+	}
+	return out
+}
+
 // bundleRedactor returns a function that shows the home folder as ~ and
 // replaces the apps and sites the user excluded, in any case, as their
-// names are what they wanted kept private. It runs over whole files, so a
-// name split across writes is still caught.
-func bundleRedactor(excluded, sites []string) func([]byte) []byte {
+// names are what they wanted kept private, and the sites named in
+// overrides. It runs over whole files, so a name split across writes is
+// still caught.
+func bundleRedactor(excluded, sites, overridden []string) func([]byte) []byte {
 	var homes []string
 	if home, err := os.UserHomeDir(); err == nil {
 		homes = append(homes, home)
@@ -128,13 +164,16 @@ func bundleRedactor(excluded, sites []string) func([]byte) []byte {
 	// Longest first, so one name that contains another is replaced whole.
 	byLength := func(a, b string) int { return len(b) - len(a) }
 	slices.SortFunc(homes, byLength)
-	appRE, siteRE := anyOf(excluded), anyOf(sites)
+	appRE, siteRE, overrideRE := anyOf(excluded), anyOf(sites), anyOf(overridden)
 	return func(p []byte) []byte {
 		if appRE != nil {
 			p = appRE.ReplaceAllLiteral(p, []byte(excludedApp))
 		}
 		if siteRE != nil {
 			p = siteRE.ReplaceAllLiteral(p, []byte(excludedSite))
+		}
+		if overrideRE != nil {
+			p = overrideRE.ReplaceAllLiteral(p, []byte(overrideSite))
 		}
 		for _, h := range homes {
 			var b bytes.Buffer
