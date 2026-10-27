@@ -159,9 +159,10 @@ func runServiceDaemon(ctx context.Context) (err error) {
 		log.Warn("could not record this start for crash-loop detection", "err", recErr)
 	}
 	err = serveDaemon(ctx, log, dataDir, history.Safe)
-	if err == nil && ctx.Err() != nil {
-		// Stopped, not crashed: logging out or restarting the service
-		// doesn't count towards safe mode.
+	if !errors.Is(err, errSafeModeOver) {
+		// It returned, so it didn't crash: a stop, a logout or an error
+		// a restart may fix doesn't count towards safe mode. A panic, a
+		// native fault or the watchdog's kill never gets here.
 		_ = crashloop.Forget(dataDir, started)
 	}
 	if errors.Is(err, errSafeModeOver) {
@@ -189,6 +190,7 @@ func waitForLock(ctx context.Context, log *slog.Logger, dataDir string) (func() 
 	for waiting := false; ; waiting = true {
 		release, err := lock.Acquire(dataDir)
 		if !errors.Is(err, lock.ErrLocked) {
+			_ = sdnotify.Watchdog() // a fresh ping for the start that follows
 			return release, err
 		}
 		if !waiting {
@@ -396,7 +398,7 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 
 	runCalendar(runCtx)
 	log.Info("daemon started", "version", version, "keystore", keys.Backend(), "safe_mode", safe)
-	_ = sdnotify.Ready()
+	_ = sdnotify.Send("READY=1\nWATCHDOG=1")
 	if err := d.Run(runCtx); err != nil {
 		return err
 	}
