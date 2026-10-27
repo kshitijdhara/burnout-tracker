@@ -97,8 +97,12 @@ func newServer(src Source, log *slog.Logger, ln net.Listener, now func() time.Ti
 // one) and returns the URL that redeems it.
 func (s *Server) LaunchURL() string { return s.LaunchURLTo("") }
 
-// views are the page's views a launch link may open; they match app.js.
-var views = map[string]bool{"overview": true, "today": true, "week": true, "privacy": true}
+// landings maps the views a launch link may open (they match app.js) to
+// where the redeemed link goes. Only these constant paths are ever
+// redirected to.
+var landings = map[string]string{
+	"overview": "/#overview", "today": "/#today", "week": "/#week", "privacy": "/#privacy",
+}
 
 // LaunchURLTo is LaunchURL for a link that opens view (e.g. "privacy").
 // An unknown view opens the default one.
@@ -108,7 +112,7 @@ func (s *Server) LaunchURLTo(view string) string {
 	s.launch, s.expires = tok, s.now().Add(TokenTTL)
 	s.mu.Unlock()
 	u := fmt.Sprintf("http://127.0.0.1:%d/launch?t=%s", s.port, tok)
-	if views[view] {
+	if _, ok := landings[view]; ok {
 		u += "&v=" + view
 	}
 	return u
@@ -116,8 +120,8 @@ func (s *Server) LaunchURLTo(view string) string {
 
 // landing is where a redeemed launch link goes: the page, at its view.
 func landing(r *http.Request) string {
-	if v := r.URL.Query().Get("v"); views[v] {
-		return "/#" + v
+	if to, ok := landings[r.URL.Query().Get("v")]; ok {
+		return to
 	}
 	return "/"
 }
