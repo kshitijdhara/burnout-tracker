@@ -25,9 +25,11 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
 	"github.com/kshitijdhara/burnout-tracker/internal/wire"
 )
 
@@ -251,14 +253,23 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 		return fmt.Errorf("hmac key: %w", err)
 	}
 
-	collector, err := newCollector(collectorOptions{Now: time.Now})
-	if err != nil {
-		log.Warn("no desktop collector; recording hook data only", "err", err)
-		collector = nil // drop a typed nil so the daemon sees "no collector"
-	} else {
+	dash := &trayDashboard{dataDir: dataDir, log: log}
+	defer dash.close()
+	// The tray icon shows before anything is collected, and the screen is
+	// watched only while it does (privacy & security §5.2 AC-1).
+	return tray.Run(ctx, trayMenu(log, dataDir, settings, dash), func(ctx context.Context, shown bool) error {
+		return collect(ctx, log, dataDir, settings, store, keys, key, shown)
+	})
+}
+
+// collect records until ctx ends: hooks always, the screen only when shown
+// says the tray icon is visible.
+func collect(ctx context.Context, log *slog.Logger, dataDir string, settings *liveConfig, store *sqlite.Store,
+	keys *keystore.Store, key model.Sensitive[[]byte], shown bool,
+) error {
+	collector := screenCollector(log, shown)
+	if collector != nil {
 		defer func() { _ = collector.Close() }()
-		caps := collector.Capabilities()
-		log.Info("collector ready", "name", caps.Name, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
 	}
 
 	server, err := ingest.Listen(ctx)
@@ -332,6 +343,23 @@ func serveDaemon(ctx context.Context, log *slog.Logger, dataDir string) error {
 	runCalendar(runCtx)
 	log.Info("daemon started", "version", version, "keystore", keys.Backend())
 	return d.Run(runCtx)
+}
+
+// screenCollector is the desktop collector, or nil: none for this
+// platform, or no tray icon to show that it runs.
+func screenCollector(log *slog.Logger, shown bool) ports.Collector {
+	if !shown {
+		log.Warn("no tray icon, so the screen isn't watched (privacy & security AC-1); recording hook data only")
+		return nil
+	}
+	c, err := newCollector(collectorOptions{Now: time.Now})
+	if err != nil {
+		log.Warn("no desktop collector; recording hook data only", "err", err)
+		return nil
+	}
+	caps := c.Capabilities()
+	log.Info("collector ready", "name", caps.Name, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
+	return c
 }
 
 // liveConfig is the config file as the daemon last read it. The loop

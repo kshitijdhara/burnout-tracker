@@ -86,7 +86,11 @@ func openBrowser(url string) error {
 	default:
 		cmd = exec.Command("xdg-open", url) //nolint:gosec // see above
 	}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }() // the daemon opens it too, and must reap it
+	return nil
 }
 
 // collected is what is and isn't collected, for the Privacy page.

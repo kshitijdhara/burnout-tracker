@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="burn" cx=".5" cy=".55" r=".62">
+      <stop offset="0" stop-color="#24150E"/>
+      <stop offset=".62" stop-color="#3E2416"/>
+      <stop offset=".88" stop-color="#6B3F22"/>
+      <stop offset="1" stop-color="#8E5A2E"/>
+    </radialGradient>
+  </defs>
+  <path d="M512 340 C 360 340 290 390 296 450 C 300 492 340 510 340 540 V790 Q340 812 362 812 H662 Q684 812 684 790 V540 C684 510 724 492 728 450 C 734 390 664 340 512 340 Z" fill="url(#burn)"/>
+  <g fill="#120A06" opacity=".55">
+    <ellipse cx="410" cy="440" rx="34" ry="26"/>
+    <ellipse cx="628" cy="730" rx="44" ry="34"/>
+    <ellipse cx="636" cy="430" rx="16" ry="12"/>
+    <ellipse cx="396" cy="760" rx="18" ry="14"/>
+  </g>
+</svg>
