@@ -93,10 +93,9 @@ gh attestation verify burnout_<ver>_linux_amd64.tar.gz --repo kshitijdhara/burno
 
 ## Key ceremony
 
-The keys embedded today are **placeholders**: throwaway keys whose private
-halves were discarded. Until they are replaced, the release workflow's
-"Verify with the installers' pinned keys" step fails, so nothing can be
-published.
+The real *current* and *next* keys were generated and embedded on
+2026-10-27, replacing the placeholders. The steps below are the record of
+that ceremony and the procedure for a fresh one.
 
 Do this once, on a trusted machine, offline if you can:
 
