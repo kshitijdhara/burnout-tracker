@@ -31,8 +31,9 @@ type Collector struct {
 	verify func(*net.UnixConn) error
 
 	mu        sync.Mutex
-	c         *client // nil after the bridge went away; redialled by Snapshot
+	c         *client // nil until the bridge answers or after it went away; redialled by Snapshot
 	lastDial  time.Time
+	dialErr   error // why the bridge has not answered since the start; nil once it has
 	bus       desktopbus.Reader
 	idle      bool // Mutter's idle monitor answered
 	lastX     int
@@ -46,10 +47,20 @@ var _ ports.Collector = (*Collector)(nil)
 // ErrNotRunning when nothing listens, so the caller can say why there is
 // no desktop collector.
 func New(ctx context.Context, opts Options) (*Collector, error) {
-	return newCollector(ctx, opts, verifyShell)
+	return newCollector(ctx, opts, verifyShell, false)
 }
 
-func newCollector(ctx context.Context, opts Options, verify func(*net.UnixConn) error) (*Collector, error) {
+// NewWaiting is New for the daemon, which runs for the whole session: a
+// bridge that doesn't answer yet is not an error. The extension may be
+// enabled after the daemon starts, GNOME disables it while the screen is
+// locked, and the service may start before GNOME Shell. The Collector then
+// starts disconnected, Snapshot redials at most every redialAfter, and
+// Capabilities says what is missing until the bridge answers.
+func NewWaiting(ctx context.Context, opts Options) (*Collector, error) {
+	return newCollector(ctx, opts, verifyShell, true)
+}
+
+func newCollector(ctx context.Context, opts Options, verify func(*net.UnixConn) error, wait bool) (*Collector, error) {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
@@ -61,10 +72,10 @@ func newCollector(ctx context.Context, opts Options, verify func(*net.UnixConn) 
 		opts.Dir = d
 	}
 	c, err := dial(ctx, opts.Dir, opts.Titles, verify)
-	if err != nil {
+	if err != nil && !wait {
 		return nil, err
 	}
-	col := &Collector{opts: opts, verify: verify, c: c, lastDial: time.Now()}
+	col := &Collector{opts: opts, verify: verify, c: c, lastDial: opts.Now(), dialErr: err}
 	_, col.idle = col.bus.MutterIdle(ctx)
 	return col, nil
 }
@@ -84,7 +95,21 @@ func (c *Collector) Hello() (extension, shell string) {
 func (c *Collector) Capabilities() ports.Capabilities {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return capabilities(c.opts, c.idle)
+	caps := capabilities(c.opts, c.idle)
+	if c.dialErr != nil {
+		caps.Limitations = append([]string{notAnswering(c.dialErr)}, caps.Limitations...)
+	}
+	return caps
+}
+
+// notAnswering says why a waiting collector has recorded no windows yet,
+// and the fix.
+func notAnswering(err error) string {
+	if errors.Is(err, ErrNotRunning) {
+		return "the burnout GNOME Shell extension is not answering yet, so no windows are recorded; burnout keeps trying. " +
+			"If it is not enabled, run `" + EnableCommand + "`"
+	}
+	return fmt.Sprintf("the GNOME Shell bridge failed (%v), so no windows are recorded; burnout keeps trying", err)
 }
 
 // Close disconnects from the extension and the D-Bus buses.
@@ -120,15 +145,18 @@ func (c *Collector) Snapshot(ctx context.Context) (model.Snapshot, error) {
 		return lockedSnapshot(e), nil
 	}
 	if c.c == nil {
-		if time.Since(c.lastDial) < redialAfter {
+		// Between redials the tick is skipped, as with no collector at
+		// all: an empty or locked snapshot would record presence wrongly.
+		now := c.opts.Now()
+		if now.Sub(c.lastDial) < redialAfter {
 			return model.Snapshot{}, ErrNotRunning
 		}
-		c.lastDial = time.Now()
+		c.lastDial = now
 		cl, err := dial(ctx, c.opts.Dir, c.opts.Titles, c.verify)
 		if err != nil {
 			return model.Snapshot{}, err
 		}
-		c.c = cl
+		c.c, c.dialErr = cl, nil
 	}
 	r, err := c.c.snapshot(ctx)
 	if err != nil {

@@ -74,7 +74,10 @@ func New(exclusions []string, overrides map[string]model.Category) *Rules {
 		if d, ok := cutDomain(id); ok {
 			r.privateDomains[d] = model.CategoryPrivate
 			r.privateNames = append(r.privateNames, " "+words(d)+" ")
-			if n := siteWord(d); n != "" {
+			// Only a whole site's word: the parent's word of a subdomain
+			// ("google" for mail.google.com) names many other sites, and
+			// browsers ("Google Chrome").
+			if n := siteWord(d); n != "" && registrable(d) {
 				r.privateNames = append(r.privateNames, " "+n+" ")
 			}
 			continue
