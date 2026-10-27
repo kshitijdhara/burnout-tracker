@@ -21,12 +21,48 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Service is the keyring service name.
-const Service = "burnout"
+const Service = "burntout"
+
+// LegacyService is the keyring service name from before the rename to
+// BurntOut.
+const LegacyService = "burnout"
+
+// MigrateKeyring moves the named secrets from LegacyService to Service in
+// the OS keyring, keeping a value already under Service. It reports how
+// many it moved. Without an OS keyring there is nothing to move: the file
+// fallback lives in the data folder, which moves as a whole.
+func MigrateKeyring(names ...string) (int, error) {
+	if !probeKeyring(probeTimeout) {
+		return 0, nil
+	}
+	moved := 0
+	for _, name := range names {
+		v, err := keyring.Get(LegacyService, name)
+		if errors.Is(err, keyring.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return moved, fmt.Errorf("keystore: read old %s: %w", name, err)
+		}
+		if _, err := keyring.Get(Service, name); errors.Is(err, keyring.ErrNotFound) {
+			if err := keyring.Set(Service, name, v); err != nil {
+				return moved, fmt.Errorf("keystore: copy %s: %w", name, err)
+			}
+		} else if err != nil {
+			return moved, fmt.Errorf("keystore: read %s: %w", name, err)
+		}
+		if err := keyring.Delete(LegacyService, name); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return moved, fmt.Errorf("keystore: delete old %s: %w", name, err)
+		}
+		moved++
+	}
+	return moved, nil
+}
 
 // SecretSize is the size of generated secrets in bytes.
 const SecretSize = 32

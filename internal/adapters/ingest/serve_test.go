@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 // flakyListener fails Accept with a temporary error a few times, then

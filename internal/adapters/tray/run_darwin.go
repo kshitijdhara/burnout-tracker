@@ -52,7 +52,7 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/kshitijdhara/burnout-tracker/assets"
+	"github.com/kshitijdhara/burntout/assets"
 )
 
 // exitWait bounds how long a logout waits for work to write out what it

@@ -38,9 +38,9 @@ Two separate problems could use such a model:
   used to produce the burnout score.
 - **Laya is an optional, local classifier**, step 4 of the classification
   cascade (rules → user overrides → cache → Laya → ask the user). It is
-  downloaded on demand (`burnout model pull laya`, from a `models-*` release in
+  downloaded on demand (`burntout model pull laya`, from a `models-*` release in
   this repo), never bundled, and runs in
-  a **sidecar process** (`burnout-classify`) with ONNX Runtime. That keeps the
+  a **sidecar process** (`burntout-classify`) with ONNX Runtime. That keeps the
   main agent pure Go, small and crash-isolated.
 - **Jev is not used.** The `Classifier` interface would technically allow a
   remote backend. The project won't ship one by default, because it would
@@ -140,7 +140,7 @@ enable it pay nothing.
 ## Action Items
 1. [ ] Spike: hand-label ~500 (app, domain, title) samples across 4 roles; compare rules-only, kNN, Laya on accuracy, CPU latency, RAM.
 2. [ ] Define `Classifier` interface + cascade in `internal/classify`.
-3. [ ] `burnout-classify` sidecar: ONNX Runtime, tokenizer, versioned stdin/stdout JSON protocol, SHA-256-pinned model download.
+3. [ ] `burntout-classify` sidecar: ONNX Runtime, tokenizer, versioned stdin/stdout JSON protocol, SHA-256-pinned model download.
 4. [ ] Sidecar limits (AC-only, daily cap, memory ceiling, idle exit) and per-OS sandbox, with tests asserting no network and no unexpected file access.
 5. [x] Redactor with canary tests: emails, numbers, URLs, paths and tokens never reach the classifier or the DB.
 6. [ ] In-memory HMAC-keyed classification cache, with the model step (a first version was removed in Phase 1: with rules only it saved no work); the canary tests already assert no title or title hash is ever written.

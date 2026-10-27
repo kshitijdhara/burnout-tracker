@@ -126,10 +126,10 @@ user's account and protected at rest by OS full-disk encryption
 |-------|--------|---------|-----------|-----------|----------------|
 | Logs | Agent | on | Structured `slog`, PII-free by construction (§10); the home folder is shown as `~`. Crash output (panics, failed starts) goes to `logs/stderr.log` on macOS and the user journal on Linux | Size-capped rotation (default 3 × 10 MB); `stderr.log` rotated at 1 MB on each start; the journal follows the system's settings | Never |
 | Health metrics (SLIs: coverage, drops, hook delivery, seconds of presence held by calls, video and confirmed idle time) | Agent | on | Counters per day | 180 d | Never |
-| Diagnostics bundle | `burnout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
+| Diagnostics bundle | `burntout doctor --bundle` | on demand | Redacted archive at a user-chosen path, previewed before writing (§10) | User-managed | Only if the user attaches it somewhere |
 | Local recovery copies | Nightly `VACUUM INTO` | on | Database copies, 3 generations, in the data dir (same permissions) | 3 nights | Never |
-| Portable backup archive | `burnout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |
-| Exports | `burnout export` | on demand | Plaintext JSON or CSV at a user-chosen path, owner-only; the data folder keeps only a list of export paths and times, so `forget` and `privacy` can point at them | User-managed; a path leaves the list once its file is gone | Only where the user puts it |
+| Portable backup archive | `burntout backup` | on demand | Passphrase-encrypted archive (Argon2id + AES-256-GCM) at a user-chosen path | User-managed | Only where the user puts it |
+| Exports | `burntout export` | on demand | Plaintext JSON or CSV at a user-chosen path, owner-only; the data folder keeps only a list of export paths and times, so `forget` and `privacy` can point at them | User-managed; a path leaves the list once its file is gone | Only where the user puts it |
 | Spool (events buffered while the DB is busy) | Agent | on | Same redaction as raw events | Until flushed (minutes) | Never |
 | Raw events | Collectors / hooks | on | Only already-redacted events (classification and redaction happen before persistence) | 7 d | Never |
 
@@ -193,7 +193,7 @@ A canary test confirms none of them reach the database.
 Every identity hash (project root, window key, session id, in-memory
 classifier cache key) is **HMAC-SHA256 with a per-install 256-bit key** held
 in the OS keystore. A plain hash is never used, because low-entropy inputs
-(paths, titles) can be reversed by guessing. Rotating the key (`burnout keys
+(paths, titles) can be reversed by guessing. Rotating the key (`burntout keys
 rotate`) produces new identities, so history stops joining across the
 rotation. That is documented as the price of rotation.
 
@@ -212,20 +212,20 @@ The agent MUST provide:
 | **Exclusions** | Per app and per domain (when known). Time is kept as category `private`; identity is dropped |
 | **Sensitive-apps denylist** | On by default: password managers, banking, health, dating and similar apps are recorded as `private` |
 | **Delete recent** | "Delete last hour" and "Delete today", one click from the tray |
-| **Forget** | `burnout forget --since <date>` / `--all`. Also removes backups, spools, logs, caches and exports created by the app (§7.2) |
+| **Forget** | `burntout forget --since <date>` / `--all`. Also removes backups, spools, logs, caches and exports created by the app (§7.2) |
 | **Aggregate-only mode** | Keep only category rollups and daily features; drop per-app/per-window detail. New minutes are recorded per category; days recorded before the mode was on are reduced at the next nightly maintenance |
 | **Retention** | Every retention period in §3 is configurable downwards |
-| **Export** | `burnout export` (JSON/CSV) with a warning that the export is plaintext |
-| **Privacy view** | `burnout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
+| **Export** | `burntout export` (JSON/CSV) with a warning that the export is plaintext |
+| **Privacy view** | `burntout privacy` and a dashboard page render §3 with the user's current settings and what is enabled |
 | **Screen-share safety** | Nudges are suppressed in Do Not Disturb / Focus mode or while a screen share is active; the dashboard has a "blur numbers" option |
 
 Phase 1 so far:
-- **Pause** is built: `burnout pause [DURATION|tomorrow]` and `resume`.
+- **Pause** is built: `burntout pause [DURATION|tomorrow]` and `resume`.
   - The daemon checks a pause file in the data folder every second.
   - While paused it samples nothing, discards hook events, and drops
     the paused span from agent sessions that stay open.
   - An unreadable pause file counts as paused.
-- **Delete recent and Forget** are built: `burnout forget --last D |
+- **Delete recent and Forget** are built: `burntout forget --last D |
   --today | --since DATE | --all`. A running daemon does the deleting:
   1. It writes out what it holds in memory.
   2. It deletes rows from then on and the derived rows of those days,
@@ -233,7 +233,7 @@ Phase 1 so far:
   3. It overwrites freed pages and truncates the WAL.
   - Annotations, boundaries, consent and hooks are kept.
   - Logs aren't touched: they hold no activity data (§10).
-- **Privacy view** is built: `burnout privacy`.
+- **Privacy view** is built: `burntout privacy`.
 - **Sensitive-apps denylist** is built for desktop apps: password
   managers, finance and tax apps, crypto wallets and a few health apps.
   Banking, health and dating mostly happen in a browser, where only the
@@ -268,7 +268,7 @@ Phase 1 so far:
     doctor bundle; canary tests check
     the sink, a real database and its WAL, the log, an export and the
     bundle.
-- **The config file** is built (system design §3.4): `burnout config
+- **The config file** is built (system design §3.4): `burntout config
   get|set|add|remove|unset|validate`. It carries:
   - **private hours** (`privacy.private_hours`): the daemon treats them
     exactly as a pause;
@@ -294,9 +294,9 @@ Phase 1 so far:
   and tooltip. Focus/Do Not Disturb and screen sharing aren't detected:
   - macOS exposes neither without a new permission, so calls stand in;
   - Windows and Linux can't see calls yet either.
-  Each collector lists the gap in its limitations (`burnout doctor`).
+  Each collector lists the gap in its limitations (`burntout doctor`).
   The "blur numbers" option isn't built.
-- **Export** is built: `burnout export --out FILE [--format csv]
+- **Export** is built: `burntout export --out FILE [--format csv]
   [--since DATE] [--until DATE]`.
   - It reads one consistent snapshot, read-only, so the daemon keeps
     running.
@@ -313,7 +313,7 @@ Phase 1 so far:
   - Exports live wherever the user saved them, so `forget` can't delete
     them. The data folder keeps a list of export paths (no contents), and
     `forget` and `privacy` show the ones still on disk.
-- **Calendar** is built: `burnout calendar add|sync|status|remove`.
+- **Calendar** is built: `burntout calendar add|sync|status|remove`.
   - The feed URL is kept in the OS keystore only. It is never in config,
     logs, errors or the sync status file, which names only the host.
   - The ICS fetch is the only network call so far. `doctor` and `privacy`
@@ -325,7 +325,7 @@ Phase 1 so far:
     never re-import meetings from before the last forget.
   - `calendar remove --forget` deletes everything stored from the feed.
 - **Dashboard:** its Privacy page shows the same settings as
-  `burnout privacy`, from the same code. "Blur numbers" covers screen
+  `burntout privacy`, from the same code. "Blur numbers" covers screen
   sharing.
 - **The tray** is built (`internal/adapters/tray`): a menu-bar icon on
   macOS, a notification-area icon on Windows and Linux. The daemon shows
@@ -335,7 +335,7 @@ Phase 1 so far:
     changes too;
   - pause for an hour, until tomorrow or until resumed, and resume;
   - "Delete the last hour" and "Delete today", one click each. They go
-    through the daemon like `burnout forget`, and the first line says
+    through the daemon like `burntout forget`, and the first line says
     whether they worked;
   - "Open dashboard" (§8.2).
   - There is no hide or quit item (§5.2).
@@ -353,7 +353,7 @@ them. These are requirements, not intentions:
    the first-run flow interactively, including reading the data summary
    (§3) and consenting. Consent is to a numbered version of that summary
    (`consentVersion`); when the summary changes, the daemon refuses to start
-   until the user runs `burnout setup` again and consents to the new one.
+   until the user runs `burntout setup` again and consents to the new one.
 4. **AC-4** The agent MUST show a "here's what's being collected" reminder
    at least monthly, with one-click access to pause, settings and uninstall.
 5. **AC-5** The agent MUST NOT offer remote access of any kind: no network
@@ -384,7 +384,7 @@ AC-4 in Phase 1:
   beside the icon). It shows whether or not recording is paused.
 - Opening it shows the dashboard's Privacy page: what is collected, the
   current settings, and how to pause, change settings and uninstall
-  (`burnout uninstall`, `--purge` to delete all data too).
+  (`burntout uninstall`, `--purge` to delete all data too).
 - When it was last opened is kept in the data folder (`reminder-seen`). If
   that or the consent date can't be read, or lies in the future, the
   reminder shows.
@@ -394,23 +394,23 @@ AC-4 in Phase 1:
 ## 6. Network egress
 
 The agent makes **exactly three kinds of outbound connection**. Each is
-**opt-in**, listed in `burnout doctor`, and can be turned off with one
+**opt-in**, listed in `burntout doctor`, and can be turned off with one
 config key. No other code path may open a network connection. CI enforces
 this by checking that only the packages below import the network client
 code (§12).
 
 | Call | Enabled by | Sends | To | Disable |
 |------|-----------|-------|----|---------|
-| **ICS fetch** | Adding an ICS URL | An HTTPS GET of the user's own feed URL (no cookies, no identifying headers beyond a generic User-Agent) | The calendar provider host in the URL | `burnout config set calendar.ics.enabled false` or remove the URL |
-| **Update check** | `burnout update` (manual) or `update.check = "weekly"` | An HTTPS GET of the GitHub Releases API for this repository (no token, no cookies, a generic User-Agent). `burnout update` also downloads `checksums.txt`, its signature and the one asset for this platform; the weekly check reads the release list only and never downloads or installs | `api.github.com`; downloads from `github.com`, which redirects to `release-assets.githubusercontent.com` (formerly `objects.githubusercontent.com`) | `update.check = "off"` (the default); `burnout update` runs only when you type it |
-| **Model pull** | `burnout model pull laya` | An HTTPS GET of a pinned asset from this repository's `models-*` release | `github.com` / `objects.githubusercontent.com` | Don't run it; delete the model with `burnout model rm` |
+| **ICS fetch** | Adding an ICS URL | An HTTPS GET of the user's own feed URL (no cookies, no identifying headers beyond a generic User-Agent) | The calendar provider host in the URL | `burntout config set calendar.ics.enabled false` or remove the URL |
+| **Update check** | `burntout update` (manual) or `update.check = "weekly"` | An HTTPS GET of the GitHub Releases API for this repository (no token, no cookies, a generic User-Agent). `burntout update` also downloads `checksums.txt`, its signature and the one asset for this platform; the weekly check reads the release list only and never downloads or installs | `api.github.com`; downloads from `github.com`, which redirects to `release-assets.githubusercontent.com` (formerly `objects.githubusercontent.com`) | `update.check = "off"` (the default); `burntout update` runs only when you type it |
+| **Model pull** | `burntout model pull laya` | An HTTPS GET of a pinned asset from this repository's `models-*` release | `github.com` / `objects.githubusercontent.com` | Don't run it; delete the model with `burntout model rm` |
 
 HTTPS only, with certificate verification. Proxies come from the OS settings.
 No telemetry, crash reporting or analytics exist.
 
 The update client (`internal/adapters/egress/update`) refuses any request,
 redirects included, that isn't HTTPS to one of the four GitHub hosts in the
-table, and `burnout doctor` and `burnout privacy` list them while the weekly
+table, and `burntout doctor` and `burntout privacy` list them while the weekly
 check is on. It trusts nothing it downloads until `checksums.txt` verifies
 against a pinned release key and the asset matches its SHA-256 there
 (ADR-0005).
@@ -426,14 +426,14 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
 - **At-rest protection is OS full-disk encryption** (FileVault, BitLocker /
   Device Encryption, LUKS). The database itself is not encrypted by the app.
 - Onboarding MUST check FDE status and explain the risk when it is off.
-  `burnout doctor` and the dashboard MUST show a persistent warning while it
+  `burntout doctor` and the dashboard MUST show a persistent warning while it
   is off. Install is not blocked.
 - Owner-only permissions (§7.3) protect against other local users.
 - The data directory is kept out of places FDE doesn't cover:
   - excluded from Time Machine (sticky exclusion);
   - never in OneDrive/Documents;
   - documented exclusion for Linux backup tools.
-- **Portable backups** (`burnout backup`) are passphrase-encrypted
+- **Portable backups** (`burntout backup`) are passphrase-encrypted
   (Argon2id + AES-256-GCM), because they're meant to leave the device.
 - **Claim:** "Your data stays on your device, readable only by your user
   account. Turn on disk encryption to protect it if your device is lost or
@@ -457,9 +457,9 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
 
 | OS | Data dir | Notes |
 |----|----------|-------|
-| macOS | `~/Library/Application Support/burnout` | Not synced by iCloud Drive; **excluded from Time Machine** (sticky `tmutil addexclusion`), since backup drives are often unencrypted |
-| Windows | `%LOCALAPPDATA%\burnout` | Never under Documents (OneDrive Known Folder Move syncs it) |
-| Linux | `$XDG_DATA_HOME/burnout` (default `~/.local/share/burnout`) | |
+| macOS | `~/Library/Application Support/burntout` | Not synced by iCloud Drive; **excluded from Time Machine** (sticky `tmutil addexclusion`), since backup drives are often unencrypted |
+| Windows | `%LOCALAPPDATA%\burntout` | Never under Documents (OneDrive Known Folder Move syncs it) |
+| Linux | `$XDG_DATA_HOME/burntout` (default `~/.local/share/burntout`) | |
 
 Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 
@@ -469,8 +469,8 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 
 ### 8.1 IPC (hooks, CLI, local API)
 
-- **Unix socket** in a `0700` directory: `$XDG_RUNTIME_DIR/burnout/` on
-  Linux, `~/Library/Application Support/burnout/run/` on macOS. The daemon
+- **Unix socket** in a `0700` directory: `$XDG_RUNTIME_DIR/burntout/` on
+  Linux, `~/Library/Application Support/burntout/run/` on macOS. The daemon
   MUST check peer credentials (`SO_PEERCRED` / `LOCAL_PEERCRED`) and reject
   other UIDs.
 - **Windows named pipe** with an explicit DACL granting access only to the
@@ -483,7 +483,7 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 ### 8.2 Dashboard
 
 - Served on `127.0.0.1:<random port>`.
-- `burnout dashboard` opens a URL with a **one-time launch token**. The
+- `burntout dashboard` opens a URL with a **one-time launch token**. The
   server exchanges it for an `HttpOnly; SameSite=Strict` session cookie and
   redirects to a token-free URL. Tokens are single-use and expire in 60 s.
 - **`Host` header allowlist** (`127.0.0.1:<port>`, `localhost:<port>`), which
@@ -492,18 +492,18 @@ Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
   `X-Frame-Options: DENY`, `frame-ancestors 'none'`, and a CSRF token on
   every state-changing request.
 
-Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
-- **Lifecycle:** `burnout dashboard` runs the server for as long as the
+Phase 1 implementation (`internal/adapters/dashboard`, `burntout dashboard`):
+- **Lifecycle:** `burntout dashboard` runs the server for as long as the
   command runs, until Ctrl-C. The tray's "Open dashboard" starts one inside
   the daemon on first use, which runs until the daemon stops; each click
   opens it with a new launch token. Each server has its own port, and both
   read the database through a read-only connection.
 - **Launch token:** 256 bits, compared in constant time, single-use, and
   valid for 60 s. It never goes on a command line, which other local users
-  can read (T1): `burnout dashboard` and the tray write the launch URL into
+  can read (T1): `burntout dashboard` and the tray write the launch URL into
   an owner-only `dashboard-launch-*.html` file in the data folder, a
   script-free meta refresh, and open that file. The file is removed once
-  the token has expired, or by the next launch if burnout stopped first.
+  the token has expired, or by the next launch if BurntOut stopped first.
   `--no-open` prints the URL in the terminal instead.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
   named after the port. A session ends after 12 hours without a request,
@@ -548,10 +548,10 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   disagree:
   - pause, resume and delete go through the control files the daemon's
     loop reads. While the daemon runs it does the deleting, as for
-    `burnout forget`;
+    `burntout forget`;
   - annotations, boundaries and check-ins open a short-lived read-write
-    connection, as `burnout annotate`, `burnout boundary` and
-    `burnout checkin` do while the daemon runs.
+    connection, as `burntout annotate`, `burntout boundary` and
+    `burntout checkin` do while the daemon runs.
   Errors are logged, never shown; the page sees only validation messages
   about its own request. A high check-in score shows the same support
   message and lines as the CLI (system design §8.4).
@@ -573,7 +573,7 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   stacking, focus, pointer position, and titles only when title
   classification is on.
 - **GNOME, as built (ADR-0010):**
-  - The extension listens on `$XDG_RUNTIME_DIR/burnout/gnome-bridge.sock`
+  - The extension listens on `$XDG_RUNTIME_DIR/burntout/gnome-bridge.sock`
     in an owner-only directory. There is no bus name and no exported
     object.
   - The agent checks that the listener is `gnome-shell` running as its own
@@ -602,7 +602,7 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
 
 `install-hooks` edits shell rc files and `~/.claude/settings.json`. It MUST:
 - merge and never overwrite;
-- use a marked block (`# >>> burnout >>>` … `# <<< burnout <<<`);
+- use a marked block (`# >>> burntout >>>` … `# <<< burntout <<<`);
 - take a backup first, into the app's data directory (`hook-backups/`,
   `0600`, unique names), never next to the file;
 - validate JSON before writing, and write atomically (temp file + rename);
@@ -646,7 +646,7 @@ The APIs we use to count input are the same ones keyloggers use. So:
 
 ### 9.2 Updates
 
-- `burnout update` MUST reject versions ≤ the current one unless
+- `burntout update` MUST reject versions ≤ the current one unless
   `--allow-downgrade` is passed. It keeps the previous binary for
   `update --to vX` rollback.
 - Install-type aware:
@@ -660,7 +660,7 @@ The APIs we use to count input are the same ones keyloggers use. So:
 
 ### 9.3 macOS self-signed code-signing key
 
-- Created by `burnout setup-signing` in the login keychain, with an access
+- Created by `burntout setup-signing` in the login keychain, with an access
   control list restricted to `/usr/bin/codesign` and **user confirmation on
   every use**.
 - Re-signing happens only during user-initiated install or update.
@@ -696,7 +696,7 @@ The APIs we use to count input are the same ones keyloggers use. So:
 - Never logged: window titles, command lines, paths, ICS URLs, keystore
   material, check-in content. The app's own file locations can appear in
   error messages, with the home folder shown as `~`.
-- `burnout doctor --bundle FILE` builds a redacted diagnostics archive (a
+- `burntout doctor --bundle FILE` builds a redacted diagnostics archive (a
   zip): the `doctor` report (version, collector and permission states,
   disk encryption, keystore, daemon and database health), today's health
   SLIs, the config file, and the last 200 lines of the daemon log. Secrets
@@ -714,7 +714,7 @@ The APIs we use to count input are the same ones keyloggers use. So:
 
 ### 11.1 Research export (Phase 4 only)
 
-`burnout export --research` is **not built** until all of these are in
+`burntout export --research` is **not built** until all of these are in
 place:
 - features coarsened and bucketed, with no exact timestamps (week granularity);
 - a k-anonymity threshold enforced on the export;
@@ -749,7 +749,7 @@ The privacy guarantees above are only as good as their tests. CI MUST run:
 |------|----------------|
 | **Canary test** | Secret-looking canary strings are injected into window titles, argv, cwd, Claude Code payloads (prompt, tool input), ICS fields and check-in free text. After a full trace replay, the DB file bytes, WAL, logs, exports, backups and spool are grepped. **Any hit fails the build** |
 | **ps-leak test** | While a hooked command with a canary in its arguments runs, process listings (`ps`, `/proc/*/cmdline`, Windows process command lines) contain no canary. `TestPSLeak` runs the real binary, daemon, zsh, bash and fish hooks, and Claude Code hook on Linux (`/proc` command lines and environments) and macOS (`ps -E`), and fails unless it saw the hook processes. Windows: not yet |
-| **Hook stdout test** | `burnout hook claude` produces zero bytes on stdout for every event type and for malformed input |
+| **Hook stdout test** | `burntout hook claude` produces zero bytes on stdout for every event type and for malformed input |
 | **Fuzzing** | Ingest parser, hook payload parser, ICS parser and the bridge protocol (`go test -fuzz`, run continuously) |
 | **Contract tests** | Recorded payloads per Claude Code version, per shell and per extension version parse correctly. The allowlisted fields are the only ones decoded |
 | **Egress test** | Only the packages behind the three opt-in calls (§6) import the network client code |

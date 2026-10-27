@@ -34,7 +34,7 @@ const MaxPathBytes = 2048
 const (
 	KindShellCommand = "shell.cmd"
 	KindAgentHook    = "agent.hook"
-	// KindPing carries no body. `burnout doctor` sends it to check the
+	// KindPing carries no body. `burntout doctor` sends it to check the
 	// daemon is listening; the daemon drops it without counting an error.
 	KindPing = "ping"
 )
@@ -48,7 +48,7 @@ type Message struct {
 	Agent  *AgentHook    `json:"agent,omitempty"`
 }
 
-// ShellCommand is sent by `burnout emit shell` after each interactive command.
+// ShellCommand is sent by `burntout emit shell` after each interactive command.
 // It never contains the command line: the shell hook extracts argv0 and a
 // candidate subcommand itself.
 type ShellCommand struct {
@@ -62,7 +62,7 @@ type ShellCommand struct {
 	ShellPID int    `json:"shell_pid,omitempty"`
 }
 
-// AgentHook is sent by `burnout hook <agent>` for each agent hook event.
+// AgentHook is sent by `burntout hook <agent>` for each agent hook event.
 // Only allowlisted fields of the agent's payload are ever copied here.
 type AgentHook struct {
 	Agent     string `json:"agent"`

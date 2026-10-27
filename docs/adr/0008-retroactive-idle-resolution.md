@@ -107,7 +107,7 @@ makes media state stale; it never blocks the daemon.
   unchanged. The daily health record counts seconds of call, video and
   confirmed idle (`confirmed_idle_s`), so the effect can be measured.
   Ticks released after the 04:00 rollover don't count toward the new day.
-- **`burnout timeline`** shows a day minute by minute, so the result can be
+- **`burntout timeline`** shows a day minute by minute, so the result can be
   checked against a hand-written log. That is the Phase 0 exit test.
 
 ## Revisit when

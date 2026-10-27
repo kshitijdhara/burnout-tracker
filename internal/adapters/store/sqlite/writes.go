@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // WriteRollups stores per-minute attention rollups. A rollup for a minute and

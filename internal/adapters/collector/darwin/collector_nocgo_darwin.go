@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 var errNoCgo = errors.New("darwin: the macOS collector needs cgo; build with CGO_ENABLED=1")

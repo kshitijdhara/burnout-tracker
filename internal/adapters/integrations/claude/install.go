@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
 )
 
 // ErrInvalidSettings means the existing settings file isn't a JSON object.
@@ -67,7 +67,7 @@ func DefaultSettingsPath() (string, error) {
 	return filepath.Join(home, ".claude", "settings.json"), nil
 }
 
-// CommandFor returns the hook command for the given burnout binary. The
+// CommandFor returns the hook command for the given BurntOut binary. The
 // trailing `|| true` guarantees exit 0 even if the Go runtime itself crashes
 // (exit 2), which Claude Code would treat as blocking the user's action.
 func CommandFor(binPath string) string {
@@ -80,7 +80,8 @@ const (
 )
 
 // isOurs reports whether a hook command is one of ours, wherever the
-// binary lived when it was installed: `<burnout binary> hook claude`, with
+// binary lived when it was installed: `<burntout binary> hook claude` (or
+// the pre-rename `burnout` binary), with
 // an optional trailing `|| true`. Matching on the binary's base name rather
 // than its full path keeps install idempotent after the binary moves.
 func isOurs(command string) bool {
@@ -94,7 +95,13 @@ func isOurs(command string) bool {
 		return false
 	}
 	base := strings.ToLower(bin[strings.LastIndexAny(bin, `/\`)+1:])
-	return base == "burnout" || base == "burnout.exe"
+	switch base {
+	case "burntout", "burntout.exe":
+		return true
+	case "burnout", "burnout.exe": // from before the rename: replaced or removed
+		return true
+	}
+	return false
 }
 
 // firstShellWord unquotes a word written by fileedit.ShellQuote (single

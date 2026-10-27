@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/boundary"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
 )
 
 // csrfHeader carries the session's CSRF token on every write.

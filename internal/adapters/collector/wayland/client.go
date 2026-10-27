@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 )
 
 // requestTimeout bounds one request and its reply, so a busy or hung

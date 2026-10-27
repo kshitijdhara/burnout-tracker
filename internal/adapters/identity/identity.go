@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // KeyLen is the length of keys returned by Hasher.Key, in hex characters

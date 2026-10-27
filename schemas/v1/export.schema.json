@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/export.schema.json",
-  "title": "burnout export, version 1",
-  "description": "What `burnout export` writes as JSON. The CSV export has one file per array with the same fields as columns. Kept in step with internal/adapters/export by TestSchemaMatchesTypes. Times are RFC 3339 in the UTC offset they were recorded at; days are logical days (YYYY-MM-DD, starting at 04:00). Keyed hashes (session, project) are opaque: they only match each other within one install.",
+  "$id": "https://github.com/kshitijdhara/burntout/schemas/v1/export.schema.json",
+  "title": "burntout export, version 1",
+  "description": "What `burntout export` writes as JSON. The CSV export has one file per array with the same fields as columns. Kept in step with internal/adapters/export by TestSchemaMatchesTypes. Times are RFC 3339 in the UTC offset they were recorded at; days are logical days (YYYY-MM-DD, starting at 04:00). Keyed hashes (session, project) are opaque: they only match each other within one install.",
   "type": "object",
   "required": ["v", "exported_at", "app_version", "from", "to", "minutes", "intervals", "days", "checkins", "annotations"],
   "properties": {

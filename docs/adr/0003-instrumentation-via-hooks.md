@@ -44,7 +44,7 @@ prompt/PSReadLine.
 
 ### Claude Code
 
-`burnout hook claude` is registered for:
+`burntout hook claude` is registered for:
 - `SessionStart`, `SessionEnd`
 - `UserPromptSubmit`
 - `PreToolUse`, `PostToolUse`
@@ -98,8 +98,8 @@ The hook process follows these rules:
 `install-hooks` edits `.zshrc`, `.bashrc`, the PowerShell `$PROFILE` and
 `~/.claude/settings.json`. For fish it adds a file to `conf.d` instead of
 editing `config.fish`.
-- **Dotfiles:** our lines go inside a marked block (`# >>> burnout >>>` …
-  `# <<< burnout <<<`). Re-running is idempotent.
+- **Dotfiles:** our lines go inside a marked block (`# >>> burntout >>>` …
+  `# <<< burntout <<<`). Re-running is idempotent.
 - **Claude settings:** we *merge* into the existing JSON and preserve
   existing hooks. We validate before writing and respect managed and
   project-level settings, without overriding them.

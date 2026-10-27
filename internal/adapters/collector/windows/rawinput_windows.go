@@ -136,7 +136,7 @@ func (ic *inputCounter) run(ready chan<- error) {
 	runtime.LockOSThread()
 	defer close(ic.done)
 
-	className, err := w32.UTF16PtrFromString(fmt.Sprintf("BurnoutRawInput%p", ic))
+	className, err := w32.UTF16PtrFromString(fmt.Sprintf("BurntoutRawInput%p", ic))
 	if err != nil {
 		ready <- fmt.Errorf("windows: raw input class name: %w", err)
 		return

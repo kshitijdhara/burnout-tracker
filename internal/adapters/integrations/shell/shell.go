@@ -14,17 +14,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 var (
-	//go:embed hooks/burnout.zsh
+	//go:embed hooks/burntout.zsh
 	zshScript string
-	//go:embed hooks/burnout.bash
+	//go:embed hooks/burntout.bash
 	bashScript string
-	//go:embed hooks/burnout.fish
+	//go:embed hooks/burntout.fish
 	fishScript string
 	// BashPreexec is the vendored bash-preexec library (hooks/README.md).
 	//go:embed hooks/bash-preexec.sh
@@ -32,24 +32,24 @@ var (
 )
 
 const (
-	binPlaceholder     = "__BURNOUT_BIN__"
-	subcmdsPlaceholder = "__BURNOUT_SUBCMDS__"
-	preexecPlaceholder = "__BURNOUT_PREEXEC__"
+	binPlaceholder     = "__BURNTOUT_BIN__"
+	subcmdsPlaceholder = "__BURNTOUT_SUBCMDS__"
+	preexecPlaceholder = "__BURNTOUT_PREEXEC__"
 )
 
-// Environment variables the hook sets for `burnout emit shell`.
+// Environment variables the hook sets for `burntout emit shell`.
 const (
-	EnvArgv0    = "BURNOUT_ARGV0"
-	EnvSubcmd   = "BURNOUT_SUBCMD"
-	EnvExit     = "BURNOUT_EXIT"
-	EnvStart    = "BURNOUT_T0"
-	EnvEnd      = "BURNOUT_T1"
-	EnvTTY      = "BURNOUT_TTY"
-	EnvShellPID = "BURNOUT_SHELL_PID"
+	EnvArgv0    = "BURNTOUT_ARGV0"
+	EnvSubcmd   = "BURNTOUT_SUBCMD"
+	EnvExit     = "BURNTOUT_EXIT"
+	EnvStart    = "BURNTOUT_T0"
+	EnvEnd      = "BURNTOUT_T1"
+	EnvTTY      = "BURNTOUT_TTY"
+	EnvShellPID = "BURNTOUT_SHELL_PID"
 	// EnvDuration replaces EnvStart and EnvEnd for shells without a
 	// millisecond clock (bash before 5, fish): the command ended now and
 	// took this many milliseconds.
-	EnvDuration = "BURNOUT_DURATION_MS"
+	EnvDuration = "BURNTOUT_DURATION_MS"
 )
 
 // RenderZsh returns the zsh hook script with binPath and the subcommand

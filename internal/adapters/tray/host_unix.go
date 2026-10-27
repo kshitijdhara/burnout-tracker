@@ -9,7 +9,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"github.com/kshitijdhara/burnout-tracker/assets"
+	"github.com/kshitijdhara/burntout/assets"
 )
 
 const (

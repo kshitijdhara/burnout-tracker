@@ -1,4 +1,4 @@
-# Burnout Tracker — System Design
+# BurntOut — System Design
 
 **Status:** Draft v0.3 (incorporates the [2026-10-20 design review](reviews/2026-10-20-design-review.md) and the maintainer decisions of 2026-10-21)
 **Date:** 2026-10-20
@@ -61,7 +61,7 @@ no streaks, no guilt-driven copy, and no red badges at 11 p.m.
 | F3 | Capture terminal activity: command name, allowlisted subcommand, duration, exit code, project (HMAC) | 1 |
 | F4 | Capture AI-agent sessions (Claude Code first) as one human timeline plus N agent timelines (§4.3) | 1 |
 | F5 | Compute daily features and a strain score from personal baselines plus absolute limits | 1 |
-| F6 | Show today/week/trend in a local dashboard, a tray icon and a CLI (`burnout status`) | 1 |
+| F6 | Show today/week/trend in a local dashboard, a tray icon and a CLI (`burntout status`) | 1 |
 | F7 | Short check-ins: weekly CBI, optional daily micro check-in (labels for the model) | 1 |
 | F8 | Forecast time-to-threshold, shown only when the trend is statistically meaningful | 2 |
 | F9 | Browser extension (per-tab domain + visibility) | Deferred |
@@ -72,8 +72,8 @@ no streaks, no guilt-driven copy, and no red badges at 11 p.m.
 | F14 | Context annotations: on-call, exam week, release, vacation, sick | 1 |
 | F15 | Weekly review loop: drivers, suggestions, user-set boundaries, adherence | 1 |
 | F16 | Safety: supportive copy and regional resources when check-ins are in the high band | 1 |
-| F17 | Portable backup/restore (`burnout backup`/`restore`, passphrase-encrypted archive), and import of daily features from another machine | 2 |
-| F18 | `burnout doctor` (health, permissions, SLIs) and `doctor --bundle` (redacted diagnostics) | 1 |
+| F17 | Portable backup/restore (`burntout backup`/`restore`, passphrase-encrypted archive), and import of daily features from another machine | 2 |
+| F18 | `burntout doctor` (health, permissions, SLIs) and `doctor --bundle` (redacted diagnostics) | 1 |
 
 ### 2.2 Non-functional
 
@@ -130,9 +130,9 @@ component.
 
 | Component | Language | Role |
 |-----------|----------|------|
-| `burnout` | Go | Daemon (`burnout daemon`), hot-path ingest (`emit`, `hook`), CLI, dashboard server |
-| Shell hook scripts | zsh/bash/fish/PowerShell | Emit command events; embedded in `burnout`, installed by `install-hooks` |
-| `burnout-classify` | Go + ONNX Runtime | Optional Laya sidecar, sandboxed, on demand (ADR-0006) |
+| `burntout` | Go | Daemon (`burntout daemon`), hot-path ingest (`emit`, `hook`), CLI, dashboard server |
+| Shell hook scripts | zsh/bash/fish/PowerShell | Emit command events; embedded in `burntout`, installed by `install-hooks` |
+| `burntout-classify` | Go + ONNX Runtime | Optional Laya sidecar, sandboxed, on demand (ADR-0006) |
 | GNOME Shell extension | JS (GPL-2.0+) | Wayland window/pointer bridge over a private owner-only socket (§12, ADR-0010) |
 | KWin script | JS | Same, for KDE |
 
@@ -140,21 +140,21 @@ component.
 ┌──────────────────────────── user's machine ─────────────────────────────┐
 │  OS / desktop              Integrations (push)                           │
 │  ┌──────────────┐   ┌──────────────────────────────┐                     │
-│  │ focus events │   │ shell hooks → `burnout emit` │                     │
+│  │ focus events │   │ shell hooks → `burntout emit` │                     │
 │  │ window geom. │   │ Claude Code hooks →          │                     │
-│  │ pointer/idle │   │   `burnout hook claude`      │                     │
+│  │ pointer/idle │   │   `burntout hook claude`      │                     │
 │  │ input counts │   └──────────────┬───────────────┘                     │
 │  │ media/call   │                  │ v-tagged messages, ≤ 4 KiB          │
 │  └──────┬───────┘                  │ socket (0700 dir, peer-cred) / pipe │
 │  ┌──────▼──────────────────────────▼────────────────────────────────┐    │
-│  │ burnout daemon                                                   │    │
+│  │ burntout daemon                                                   │    │
 │  │  adapters: collectors · ingest · store(sqlite) · keystore · api  │    │
 │  │  ─────────────────────── ports ───────────────────────────────── │    │
 │  │  domain:  sessionize → attention → timeline → classify(rules)    │    │
 │  │           → rollups → features → score → review                  │    │
 │  └──────┬───────────────┬──────────────────┬────────────────────────┘    │
 │         ▼               ▼                  ▼                             │
-│   SQLite (WAL,     burnout-classify   tray · dashboard (127.0.0.1,       │
+│   SQLite (WAL,     burntout-classify   tray · dashboard (127.0.0.1,       │
 │   0600, on FDE,     (optional,        cookie auth) · CLI                 │
 │   ADR-0007)          sandboxed)                                          │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -187,7 +187,7 @@ Every cross-process message is versioned:
 - hook messages (one per stream connection);
 - the GNOME/KWin bridge protocol;
 - the sidecar's stdin/stdout protocol;
-- the export format (`schemas/v1/export.schema.json`, `burnout export`).
+- the export format (`schemas/v1/export.schema.json`, `burntout export`).
 
 The rules:
 - Every message carries `"v": <int>`, with a JSON Schema in `schemas/`.
@@ -199,18 +199,18 @@ The rules:
 
 ### 3.4 Configuration
 
-- There is one TOML file at `<config dir>/burnout/config.toml`. Its schema,
+- There is one TOML file at `<config dir>/burntout/config.toml`. Its schema,
   defaults and validation live in code.
-- `burnout config get|set|add|remove|unset|validate` manages it, and the
+- `burntout config get|set|add|remove|unset|validate` manages it, and the
   daemon reloads it within a second of a change. Unknown keys are an
   error, so a typo never silently leaves a privacy control off. An invalid
   file is never half-applied: a running daemon keeps its current settings
   and logs a warning, a starting one refuses to start, and `doctor`
   reports it.
 - **Secrets never go in the config file.** The ICS URL and the HMAC key live
-  in the OS keystore (ADR-0007). `burnout keys rotate` rotates the HMAC key,
+  in the OS keystore (ADR-0007). `burntout keys rotate` rotates the HMAC key,
   which starts new identities (Privacy & Security §4.5).
-- Every privacy opt-in is a config key, and `burnout doctor` and the
+- Every privacy opt-in is a config key, and `burntout doctor` and the
   dashboard's Privacy page list them all with their current values.
 
 ### 3.5 Feature registry
@@ -287,7 +287,7 @@ presence ∈ [0,1]:
 ```
 
 Idle ticks are held until their stretch ends, so rollups for those minutes
-are written late (additive upserts merge them). `burnout timeline` shows a
+are written late (additive upserts merge them). `burntout timeline` shows a
 day minute by minute for checking against a hand-written log.
 
 - The weights `a_*`, the temperature `T`, and the constants `τ`, `θ` and `k`
@@ -338,7 +338,7 @@ The Wayland bridges talk to the daemon over a **private peer-to-peer
 connection** with a token handshake, never as a public session-bus service
 (§12). On GNOME (ADR-0010) the extension
 (`extensions/gnome-shell`) listens on the owner-only socket
-`$XDG_RUNTIME_DIR/burnout/gnome-bridge.sock`. The agent checks that the
+`$XDG_RUNTIME_DIR/burntout/gnome-bridge.sock`. The agent checks that the
 socket belongs to `gnome-shell` running as the same user. It then says
 hello with the token it wrote to `gnome-bridge.token` (mode 0600) and
 whether titles are wanted. The extension checks the caller's uid
@@ -358,8 +358,8 @@ dashboard will say so.
 ### 4.2 Terminal instrumentation
 
 Shell hooks, not process scanning or keylogging (ADR-0003).
-`burnout install-hooks` adds a **marked block** (`# >>> burnout >>>` …
-`# <<< burnout <<<`) to `.zshrc`, `.bashrc`, `config.fish` and the
+`burntout install-hooks` adds a **marked block** (`# >>> burntout >>>` …
+`# <<< burntout <<<`) to `.zshrc`, `.bashrc`, `config.fish` and the
 PowerShell `$PROFILE`. The rules for that block:
 - the original file is backed up first, into the app's data directory
   (`hook-backups/`, owner-only), never next to the file, so a backup can't
@@ -437,7 +437,7 @@ Invariant (property-tested): Σ human sub-states ≤ wall time. Features use
 both timelines: agent parallelism, time blocked on the human, human
 context switches while agents work, and reading vs. composing.
 
-**Hook events** registered by `burnout install-hooks --claude`. The
+**Hook events** registered by `burntout install-hooks --claude`. The
 settings merge follows the same rules as §4.2: merge into the existing
 file, preserve other hooks, back up first, write atomically, restore on
 uninstall. It also handles user, project and managed settings.
@@ -505,7 +505,7 @@ Mozilla-signed `.xpi`.
 - Target effort is about 30 s a week. High-band results trigger the safety
   flow (§8.4).
 
-Phase 1 implementation (`internal/domain/checkin`, `burnout checkin`):
+Phase 1 implementation (`internal/domain/checkin`, `burntout checkin`):
 - **Weekly:** both CBI subscales in English (6 personal and 7
   work-related items, original wording and response scales). Each is
   scored as the mean of 0–100 item values, with the leisure-energy item
@@ -609,7 +609,7 @@ matter for PMs and researchers.
   fragmentation, after-hours meetings.
 
 Phase 1 so far (`internal/domain/calendar`, `internal/adapters/egress/ics`):
-- **Setup:** `burnout calendar add URL|FILE` accepts https:// or webcal://
+- **Setup:** `burntout calendar add URL|FILE` accepts https:// or webcal://
   feeds, or a local `.ics` file. Plain http:// is refused.
   - The URL goes into the OS keystore, after a confirmation that it is a
     key to the whole calendar.
@@ -622,7 +622,7 @@ Phase 1 so far (`internal/domain/calendar`, `internal/adapters/egress/ics`):
     0 rather than missing.
   - Meetings starting in private hours are dropped.
   - Nothing that starts before the last `forget` is ever imported again.
-  - `burnout calendar sync | status | remove [--forget]` manage it.
+  - `burntout calendar sync | status | remove [--forget]` manage it.
 - **Parsing:** the parser streams the feed. It expands RRULE (DAILY,
   WEEKLY, MONTHLY and YEARLY, with INTERVAL, COUNT, UNTIL, BYDAY with
   ordinals, BYMONTHDAY, BYMONTH and BYSETPOS), EXDATE and RECURRENCE-ID
@@ -720,9 +720,9 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 
 | OS | Data directory | Note |
 |----|----------------|------|
-| macOS | `~/Library/Application Support/burnout` | Excluded from Time Machine (backup drives are often unencrypted) |
-| Windows | `%LOCALAPPDATA%\burnout` | Never Documents or OneDrive |
-| Linux | `$XDG_DATA_HOME/burnout` | |
+| macOS | `~/Library/Application Support/burntout` | Excluded from Time Machine (backup drives are often unencrypted) |
+| Windows | `%LOCALAPPDATA%\burntout` | Never Documents or OneDrive |
+| Linux | `$XDG_DATA_HOME/burntout` | |
 
 Directories are `0700` and files `0600`.
 
@@ -831,7 +831,7 @@ v1 implementation notes (`internal/domain/features`, registry version 3):
    work +2.1σ vs. your usual weekdays").
 
 v1 implementation choices (`internal/domain/strain`, `strain-v1`):
-- **Annotations** (`burnout annotate`): vacation and sick days are
+- **Annotations** (`burntout annotate`): vacation and sick days are
   excluded at scoring time, so an annotation added later also applies to
   days already stored. Planned crunch is scored and listed in the weekly
   review.
@@ -854,7 +854,7 @@ v1 implementation choices (`internal/domain/strain`, `strain-v1`):
 - **Determinism:** each day sees only earlier days, so past scores never
   change. Same input, same score.
 - **Storage:** the daemon stores completed days' features and scores
-  during maintenance, recomputing the last two days. `burnout status`
+  during maintenance, recomputing the last two days. `burntout status`
   computes missing days in memory, so it is current even before
   maintenance runs.
 
@@ -909,10 +909,10 @@ v1 implementation choices (`internal/domain/strain`, `strain-v1`):
 4. Offer the optional integrations: shell hooks, Claude Code hooks, ICS.
 5. Explain the 14-day calibration and the data-quality badge.
 
-Built (CLI): `burnout setup` covers all five steps, interactively only.
+Built (CLI): `burntout setup` covers all five steps, interactively only.
 - **Steps 1–2:** the data summary, the disk-encryption check and a typed
   "yes"; then a role and core hours (Enter keeps the defaults), saved to the
-  config file, where `burnout config set profile.role|profile.core_hours`
+  config file, where `burntout config set profile.role|profile.core_hours`
   changes them later.
 - **Step 3:** it says it starts in zero-permission mode, then offers title
   classification with what it adds, defaulting to "not now". On macOS a yes
@@ -926,10 +926,10 @@ Built (CLI): `burnout setup` covers all five steps, interactively only.
   command to run later.
 - **Step 5:** the calibration days and what makes a day count, from the
   strain model's parameters. There is no separate data-quality badge yet:
-  `burnout status` shows "calibrating, N of 14" and marks a day missing
+  `burntout status` shows "calibrating, N of 14" and marks a day missing
   with how much of it was observed.
 - **Consent versioning:** the consent file records the version of the data
-  summary consented to (`consentVersion` in `cmd/burnout/consent.go`). When
+  summary consented to (`consentVersion` in `cmd/burntout/consent.go`). When
   the summary changes, the version is bumped (a test fails otherwise), and
   the daemon won't start until `setup` is run again; under the service it
   logs why and exits 0, as with no consent. A consent file from before
@@ -949,7 +949,7 @@ The first run must be completed **interactively by the logged-in user**
 - the user sets or edits **boundaries** (shutdown time, no-weekend rule,
   deep-work blocks), and adherence is tracked gently.
 
-Phase 1 so far (`burnout review`, `internal/domain/review`):
+Phase 1 so far (`burntout review`, `internal/domain/review`):
 - **Built:**
   - the last 7 completed days against the 7 before (average and peak
     strain);
@@ -959,15 +959,15 @@ Phase 1 so far (`burnout review`, `internal/domain/review`):
   - up to two suggestions, guardrails first, from a fixed table tied to
     features, each offering the matching boundary when none is set;
   - boundaries and adherence (below);
-  - in a terminal, `burnout review` then asks (Enter skips, q stops):
+  - in a terminal, `burntout review` then asks (Enter skips, q stops):
     the offered boundaries, any other boundary change, marks for the
-    week (the `burnout annotate` syntax), and a category for up to three
+    week (the `burntout annotate` syntax), and a category for up to three
     apps whose time this week was uncategorized, saved to
     `classify.overrides`. Apps that already have an override aren't
     asked again. Sites can't be listed, since titles and the domains read
     from them are never stored: add `domain:` overrides by hand. Piped
-    (`burnout review | less`), it asks nothing.
-- **Boundaries** (`internal/domain/boundary`, `burnout boundary
+    (`burntout review | less`), it asks nothing.
+- **Boundaries** (`internal/domain/boundary`, `burntout boundary
   add|list|remove`, the dashboard's week view). Workdays are Monday to
   Friday:
   - `shutdown HH:MM`: no work after that time on workdays. Times before
@@ -1025,7 +1025,7 @@ Phase 1 so far (`internal/domain/nudge`, the tray):
   - "Snooze until tomorrow" and "Don't show this kind again" in the
     item's submenu; `nudges.enabled` and one switch per kind in the
     config. "Don't show this kind again" turns that switch off in the
-    config file, so `burnout config set nudges.KIND true` turns it back
+    config file, so `burntout config set nudges.KIND true` turns it back
     on. Every unknown state, such as an unreadable control file,
     shows nothing.
   - The tray decides and records the day's nudge once a minute; its
@@ -1036,7 +1036,7 @@ Phase 1 so far (`internal/domain/nudge`, the tray):
     neither without a new permission (Focus authorization, Full Disk
     Access), so calls and video stand in. Windows and Linux can't see
     calls either. Each collector lists the gap in `Limitations`, and
-    `burnout doctor` shows it;
+    `burntout doctor` shows it;
   - the dashboard's "blur numbers" option.
 
 ### 8.4 Safety
@@ -1080,8 +1080,8 @@ These, plus §7.5, are the alpha exit criteria.
 ## 9. Local API and UI
 
 - **Transport:**
-  - **Unix socket** in a `0700` directory (`$XDG_RUNTIME_DIR/burnout`,
-    `~/Library/Application Support/burnout/run`), with a **peer-credential
+  - **Unix socket** in a `0700` directory (`$XDG_RUNTIME_DIR/burntout`,
+    `~/Library/Application Support/burntout/run`), with a **peer-credential
     check** (`SO_PEERCRED` / `LOCAL_PEERCRED`) for the same UID.
   - **Windows named pipe** with an explicit DACL for the user's SID and
     `PIPE_REJECT_REMOTE_CLIENTS`.
@@ -1110,7 +1110,7 @@ These, plus §7.5, are the alpha exit criteria.
     rebinding.
   - No CORS, a strict CSP, `X-Frame-Options: DENY`, and CSRF tokens on
     state-changing requests.
-- **Phase 1 so far:** `burnout dashboard` serves the page from the CLI
+- **Phase 1 so far:** `burntout dashboard` serves the page from the CLI
   while it runs (`internal/adapters/dashboard`), hardened as in Privacy &
   Security §8.2. The tray's "Open dashboard" serves the same page from the
   daemon, with a new launch token per click.
@@ -1130,11 +1130,11 @@ These, plus §7.5, are the alpha exit criteria.
     (add and remove), and the weekly check-in form, with the support
     flow (§8.4).
   - **Privacy:** pause, resume and delete the last hour or today (with a
-    confirm step), then the same rows as `burnout privacy`.
+    confirm step), then the same rows as `burntout privacy`.
   - **Accessibility:** WCAG work covers keyboard and screen-reader
     navigation, tables behind every chart, colour never the only cue,
     dark mode, reduced motion and "blur numbers".
-  - **Preview:** `BURNOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview
+  - **Preview:** `BURNTOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview
     ./internal/adapters/dashboard/` serves it with made-up data for UI
     work.
 - **UI:** a tray icon (always visible while collecting) and an embedded SPA
@@ -1150,7 +1150,7 @@ These, plus §7.5, are the alpha exit criteria.
     Security §5.2 AC-1).
   - **Menu:** pause and resume, delete the last hour or today, and open
     the dashboard. It reuses the CLI's control files, so the daemon's loop
-    handles a click exactly like `burnout pause` or `forget`.
+    handles a click exactly like `burntout pause` or `forget`.
   - **Icons:** template images on macOS, colour icons on Windows (.ico)
     and Linux (StatusNotifierItem over D-Bus), built into the binary from
     `assets/icon/tray`.
@@ -1211,7 +1211,7 @@ Days below the coverage threshold aren't scored (§7.1).
 - **Logging:** structured `log/slog` with size-capped rotation (10 MB × 3).
   Sensitive values are wrapped in `Sensitive[T]`, whose `String()` and
   `LogValue()` return `[redacted]`, so a careless log line can't leak.
-- **Diagnostics:** `burnout doctor` shows versions, the component
+- **Diagnostics:** `burntout doctor` shows versions, the component
   compatibility check, collector and permission states, opt-ins, SLIs,
   safe-mode status and FDE status. `doctor --bundle` writes a **redacted**
   archive that the user previews before attaching it to an issue.
@@ -1222,7 +1222,7 @@ Days below the coverage threshold aren't scored (§7.1).
 
 - Releases use semver with conventional-commit release notes, plus a beta
   channel (GitHub pre-releases).
-- Rollback is `burnout update --to vX`, and the previous binary is kept.
+- Rollback is `burntout update --to vX`, and the previous binary is kept.
 - **Data compatibility:** version N reads data written by N-2, and
   migrations are forward-only, with a backup first.
 - Install-type-aware updates and signature checks are covered in ADR-0005.
@@ -1279,14 +1279,14 @@ document on what is collected. The essentials:
   - a `.dmg` (ad-hoc-signed universal `.app`);
   - `.deb`, `.rpm` and tarballs;
   - `.msi` and `.zip`;
-  - the `burnout-classify` sidecar;
+  - the `burntout-classify` sidecar;
   - a `models-*` release carrying the Laya weights.
 - **Integrity:** `checksums.txt` is signed with a **pinned ECDSA P-256
   release key**, whose public key is embedded in `install.sh`,
   `install.ps1` and the binary. The scripts verify it with
   `openssl`/.NET, so users don't need extra tools. Cosign keyless
   signatures and build-provenance attestations are additional checks.
-- **Updates:** `burnout update` rejects downgrades and keeps the previous
+- **Updates:** `burntout update` rejects downgrades and keeps the previous
   binary.
   - Package installs (`.deb`/`.rpm`/`.msi`) download and verify the new
     package and ask the user to install it.
@@ -1324,10 +1324,10 @@ document on what is collected. The essentials:
 ## 15. Repository layout
 
 ```
-burnout-tracker/
+burntout/
 ├── cmd/
-│   ├── burnout/                 # wiring only: daemon, emit, hook, status, doctor, config, service, update…
-│   └── burnout-classify/        # optional Laya sidecar
+│   ├── burntout/                 # wiring only: daemon, emit, hook, status, doctor, config, service, update…
+│   └── burntout-classify/        # optional Laya sidecar
 ├── internal/
 │   ├── domain/                  # pure, no I/O, no goroutines
 │   │   ├── types/               # Event, Interval, Window, Category, Sensitive[T]…

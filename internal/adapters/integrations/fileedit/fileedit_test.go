@@ -102,7 +102,7 @@ func TestResolveTarget(t *testing.T) {
 }
 
 func TestShellQuote(t *testing.T) {
-	if got := ShellQuote("/Applications/It's here/burnout"); got != `'/Applications/It'\''s here/burnout'` {
+	if got := ShellQuote("/Applications/It's here/burntout"); got != `'/Applications/It'\''s here/burntout'` {
 		t.Fatalf("got %s", got)
 	}
 }

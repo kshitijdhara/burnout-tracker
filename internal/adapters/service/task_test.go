@@ -16,16 +16,16 @@ import (
 
 const (
 	testSID   = "S-1-5-21-1004336348-1177238915-682003330-1001"
-	testExe   = `C:\Users\me\AppData\Local\Programs\burnout\burnout.exe`
-	stQuery   = "schtasks /Query /TN burnout-tracker-" + testSID
-	stEnd     = "schtasks /End /TN burnout-tracker-" + testSID
-	stRun     = "schtasks /Run /TN burnout-tracker-" + testSID
-	stDelete  = "schtasks /Delete /TN burnout-tracker-" + testSID + " /F"
-	psCommand = "powershell -NoProfile -NonInteractive -Command (Get-ScheduledTask -TaskPath '\\' -TaskName 'burnout-tracker-" + testSID + "' -ErrorAction Stop).State"
+	testExe   = `C:\Users\me\AppData\Local\Programs\burntout\burntout.exe`
+	stQuery   = "schtasks /Query /TN burntout-" + testSID
+	stEnd     = "schtasks /End /TN burntout-" + testSID
+	stRun     = "schtasks /Run /TN burntout-" + testSID
+	stDelete  = "schtasks /Delete /TN burntout-" + testSID + " /F"
+	psCommand = "powershell -NoProfile -NonInteractive -Command (Get-ScheduledTask -TaskPath '\\' -TaskName 'burntout-" + testSID + "' -ErrorAction Stop).State"
 )
 
 func stCreate(path string) string {
-	return "schtasks /Create /XML " + path + " /TN burnout-tracker-" + testSID + " /F"
+	return "schtasks /Create /XML " + path + " /TN burntout-" + testSID + " /F"
 }
 
 func taskManager(t *testing.T, r *fakeRunner) Manager {
@@ -125,8 +125,8 @@ func TestTaskFailedNewInstallCleansUp(t *testing.T) {
 func TestTaskRefusesFolderOverrides(t *testing.T) {
 	r := &fakeRunner{}
 	m := taskManager(t, r)
-	m.Env = map[string]string{"BURNOUT_DATA_DIR": `D:\burnout`}
-	if err := m.Install(); err == nil || !strings.Contains(err.Error(), "BURNOUT_DATA_DIR") {
+	m.Env = map[string]string{"BURNTOUT_DATA_DIR": `D:\burntout`}
+	if err := m.Install(); err == nil || !strings.Contains(err.Error(), "BURNTOUT_DATA_DIR") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(r.calls) != 0 {
@@ -157,7 +157,7 @@ func TestTaskStatus(t *testing.T) {
 }
 
 func TestRenderTask(t *testing.T) {
-	def, err := RenderTask(`C:\Program Files\R&D <tools>\burnout.exe`, testArgs, testSID)
+	def, err := RenderTask(`C:\Program Files\R&D <tools>\burntout.exe`, testArgs, testSID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestRenderTask(t *testing.T) {
 		{set.MultipleInstancesPolicy, "StopExisting"}, // a reinstall replaces the daemon
 		{set.ExecutionTimeLimit, "PT0S"},              // the default stops it after 72 h
 		{set.RestartOnFailure.Interval, "PT1M"},
-		{task.Actions.Exec.Command, `C:\Program Files\R&D <tools>\burnout.exe`},
+		{task.Actions.Exec.Command, `C:\Program Files\R&D <tools>\burntout.exe`},
 		{task.Actions.Exec.Arguments, "daemon --service"},
 	} {
 		if c.got != c.want {
@@ -221,12 +221,12 @@ func TestRenderTask(t *testing.T) {
 
 func TestRenderTaskRejectsUnsafeValues(t *testing.T) {
 	for name, f := range map[string]func() error{
-		"relative bin":   func() error { _, err := RenderTask(`burnout.exe`, testArgs, testSID); return err },
-		"unix bin":       func() error { _, err := RenderTask(`/opt/burnout`, testArgs, testSID); return err },
-		"quote in bin":   func() error { _, err := RenderTask(`C:\a"b\burnout.exe`, testArgs, testSID); return err },
-		"percent in bin": func() error { _, err := RenderTask(`C:\%USERNAME%\burnout.exe`, testArgs, testSID); return err },
+		"relative bin":   func() error { _, err := RenderTask(`burntout.exe`, testArgs, testSID); return err },
+		"unix bin":       func() error { _, err := RenderTask(`/opt/burntout`, testArgs, testSID); return err },
+		"quote in bin":   func() error { _, err := RenderTask(`C:\a"b\burntout.exe`, testArgs, testSID); return err },
+		"percent in bin": func() error { _, err := RenderTask(`C:\%USERNAME%\burntout.exe`, testArgs, testSID); return err },
 		"space in arg":   func() error { _, err := RenderTask(testExe, []string{"daemon", "a b"}, testSID); return err },
-		"newline in bin": func() error { _, err := RenderTask("C:\\a\nb\\burnout.exe", testArgs, testSID); return err },
+		"newline in bin": func() error { _, err := RenderTask("C:\\a\nb\\burntout.exe", testArgs, testSID); return err },
 		"name for SID":   func() error { _, err := RenderTask(testExe, testArgs, `DOMAIN\me`); return err },
 		"empty SID":      func() error { _, err := RenderTask(testExe, testArgs, ""); return err },
 		"SID injection":  func() error { _, err := RenderTask(testExe, testArgs, "S-1-5-21-1</UserId>"); return err },
@@ -235,7 +235,7 @@ func TestRenderTaskRejectsUnsafeValues(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	if _, err := RenderTask(`\\server\share\burnout.exe`, testArgs, testSID); err != nil {
+	if _, err := RenderTask(`\\server\share\burntout.exe`, testArgs, testSID); err != nil {
 		t.Errorf("UNC path rejected: %v", err)
 	}
 }

@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/release"
+	"github.com/kshitijdhara/burntout/internal/release"
 )
 
 const testArch = "amd64"
@@ -130,7 +130,7 @@ func archive(t *testing.T, binary []byte) []byte {
 	var buf bytes.Buffer
 	if runtime.GOOS == "windows" {
 		zw := zip.NewWriter(&buf)
-		for _, name := range []string{"README.md", "burnout.exe"} {
+		for _, name := range []string{"README.md", "burntout.exe"} {
 			w, err := zw.Create(name)
 			if err != nil {
 				t.Fatal(err)
@@ -144,7 +144,7 @@ func archive(t *testing.T, binary []byte) []byte {
 	}
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	for _, name := range []string{"LICENSE", "burnout"} {
+	for _, name := range []string{"LICENSE", "burntout"} {
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(binary)), Typeflag: tar.TypeReg}); err != nil {
 			t.Fatal(err)
 		}
@@ -193,7 +193,7 @@ func sign(t *testing.T, key *ecdsa.PrivateKey, b []byte) []byte {
 func installed(t *testing.T) Install {
 	t.Helper()
 	dir := t.TempDir()
-	name := "burnout"
+	name := "burntout"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -545,14 +545,14 @@ func TestManagedPath(t *testing.T) {
 		path, goos string
 		want       Kind
 	}{
-		{"/Applications/Burnout.app/Contents/MacOS/burnout", "darwin", App},
-		{"/Users/me/.local/bin/burnout", "darwin", UserPrefix},
-		{"/usr/bin/burnout", "linux", Package},
-		{"/bin/burnout", "linux", Package},
-		{"/usr/local/bin/burnout", "linux", UserPrefix},
-		{"/home/me/.local/bin/burnout", "linux", UserPrefix},
-		{`C:\Program Files\burnout\burnout.exe`, "windows", Package},
-		{`C:\Users\me\AppData\Local\Programs\burnout\burnout.exe`, "windows", UserPrefix},
+		{"/Applications/BurntOut.app/Contents/MacOS/burntout", "darwin", App},
+		{"/Users/me/.local/bin/burntout", "darwin", UserPrefix},
+		{"/usr/bin/burntout", "linux", Package},
+		{"/bin/burntout", "linux", Package},
+		{"/usr/local/bin/burntout", "linux", UserPrefix},
+		{"/home/me/.local/bin/burntout", "linux", UserPrefix},
+		{`C:\Program Files\burntout\burntout.exe`, "windows", Package},
+		{`C:\Users\me\AppData\Local\Programs\burntout\burntout.exe`, "windows", UserPrefix},
 	} {
 		if got := managedPath(c.path, c.goos); got != c.want {
 			t.Errorf("%s on %s: %s, want %s", c.path, c.goos, got, c.want)
@@ -565,15 +565,15 @@ func TestDetectResolvesSymlinks(t *testing.T) {
 		t.Skip("symlinks need privileges on Windows")
 	}
 	dir := t.TempDir()
-	app := filepath.Join(dir, "Burnout.app", "Contents", "MacOS")
+	app := filepath.Join(dir, "BurntOut.app", "Contents", "MacOS")
 	if err := os.MkdirAll(app, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(app, "burnout")
+	bin := filepath.Join(app, "burntout")
 	if err := os.WriteFile(bin, nil, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(dir, "burnout")
+	link := filepath.Join(dir, "burntout")
 	if err := os.Symlink(bin, link); err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestDetectResolvesSymlinks(t *testing.T) {
 	if in.Kind != App {
 		t.Errorf("a link into the app is a %s", in.Kind)
 	}
-	if name, _ := in.Asset(Version{Major: 1}); name != "burnout_1.0.0_darwin_all.dmg" {
+	if name, _ := in.Asset(Version{Major: 1}); name != "burntout_1.0.0_darwin_all.dmg" {
 		t.Errorf("asset %s", name)
 	}
 }
@@ -595,11 +595,11 @@ func TestAssetNames(t *testing.T) {
 		in   Install
 		want string
 	}{
-		{Install{Kind: UserPrefix, GOOS: "linux", Arch: "arm64"}, "burnout_1.2.3_linux_arm64.tar.gz"},
-		{Install{Kind: UserPrefix, GOOS: "darwin", Arch: "arm64"}, "burnout_1.2.3_darwin_all.tar.gz"},
-		{Install{Kind: UserPrefix, GOOS: "windows", Arch: "amd64"}, "burnout_1.2.3_windows_amd64.zip"},
-		{Install{Kind: Package, GOOS: "windows", Arch: "amd64"}, "burnout_1.2.3_windows_amd64.zip"},
-		{Install{Kind: ReadOnly, GOOS: "linux", Arch: "amd64"}, "burnout_1.2.3_linux_amd64.tar.gz"},
+		{Install{Kind: UserPrefix, GOOS: "linux", Arch: "arm64"}, "burntout_1.2.3_linux_arm64.tar.gz"},
+		{Install{Kind: UserPrefix, GOOS: "darwin", Arch: "arm64"}, "burntout_1.2.3_darwin_all.tar.gz"},
+		{Install{Kind: UserPrefix, GOOS: "windows", Arch: "amd64"}, "burntout_1.2.3_windows_amd64.zip"},
+		{Install{Kind: Package, GOOS: "windows", Arch: "amd64"}, "burntout_1.2.3_windows_amd64.zip"},
+		{Install{Kind: ReadOnly, GOOS: "linux", Arch: "amd64"}, "burntout_1.2.3_linux_amd64.tar.gz"},
 	} {
 		if got, _ := c.in.Asset(v); got != c.want {
 			t.Errorf("%+v: %s, want %s", c.in, got, c.want)

@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Clock is injected everywhere so domain code never calls time.Now.

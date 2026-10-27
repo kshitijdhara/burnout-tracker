@@ -26,7 +26,7 @@ func TestCheckTrustedExecutable(t *testing.T) {
 		if err := os.Chmod(dir, mode); err != nil {
 			t.Fatal(err)
 		}
-		bin := filepath.Join(dir, "burnout")
+		bin := filepath.Join(dir, "burntout")
 		if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil { //nolint:gosec // a test executable
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestCheckTrustedExecutable(t *testing.T) {
 	for name, p := range map[string]string{
 		"world-writable folder":     shared,
 		"link into a shared folder": link,
-		"relative path":             filepath.Join("good", "burnout"),
+		"relative path":             filepath.Join("good", "burntout"),
 		"missing file":              filepath.Join(base, "good", "nope"),
 	} {
 		if err := CheckTrustedExecutable(p); err == nil {

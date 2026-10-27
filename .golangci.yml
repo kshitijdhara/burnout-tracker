@@ -22,13 +22,13 @@ linters:
           files: ["**/internal/domain/**"]
           list-mode: lax
           deny:
-            - pkg: github.com/kshitijdhara/burnout-tracker/internal/adapters
+            - pkg: github.com/kshitijdhara/burntout/internal/adapters
               desc: domain must not import adapters
-            - pkg: github.com/kshitijdhara/burnout-tracker/internal/app
+            - pkg: github.com/kshitijdhara/burntout/internal/app
               desc: domain must not import the application layer
-            - pkg: github.com/kshitijdhara/burnout-tracker/internal/wire
+            - pkg: github.com/kshitijdhara/burntout/internal/wire
               desc: domain must not depend on wire formats
-            - pkg: github.com/kshitijdhara/burnout-tracker/internal/config
+            - pkg: github.com/kshitijdhara/burntout/internal/config
               desc: domain receives configuration as plain values
             - pkg: os
               desc: domain does no I/O
@@ -59,7 +59,7 @@ linters:
         linters: [forbidigo]
         text: time\.Now
       # The CLI is the one place allowed to print, and never from hook subcommands.
-      - path: cmd/burnout/
+      - path: cmd/burntout/
         linters: [forbidigo]
         text: fmt\.Print
       - path: _test\.go

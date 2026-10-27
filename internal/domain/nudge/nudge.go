@@ -9,7 +9,7 @@ package nudge
 import (
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
+	"github.com/kshitijdhara/burntout/internal/domain/schedule"
 )
 
 // Kind is what a nudge is about. Each can be turned off.

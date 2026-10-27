@@ -18,7 +18,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
 )
 
 // FileName is the start history inside the data folder.

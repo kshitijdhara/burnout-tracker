@@ -10,8 +10,8 @@ import (
 
 	w32 "golang.org/x/sys/windows"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // Collector reads desktop state through Win32. Snapshot is safe to call

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/attention"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 var t0 = time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)

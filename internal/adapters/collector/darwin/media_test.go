@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // meetingState: an editor in front on monitor 0, a browser (pid 300) with

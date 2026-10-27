@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-Installs burnout for the current user on Windows (ADR-0005).
+Installs BurntOut for the current user on Windows (ADR-0005).
 
 Please read this script before you run it. It:
   1. picks the release asset for this CPU (amd64 or arm64);
@@ -8,33 +8,33 @@ Please read this script before you run it. It:
   3. checks the signature against the release keys pinned below, using
      .NET's ECDsa (CNG), then the asset's SHA-256 against the signed
      checksums.txt;
-  4. installs burnout.exe to %LOCALAPPDATA%\Programs\burnout (or -Dir) and
+  4. installs burntout.exe to %LOCALAPPDATA%\Programs\burntout (or -Dir) and
      adds that folder to your user PATH.
 
 It records nothing and starts nothing. Collection starts only once you have
-run `burnout setup` (consent) and `burnout service install` yourself; this
+run `burntout setup` (consent) and `burntout service install` yourself; this
 script just prints those steps. There is no option to skip either (privacy
 & security section 5.2).
 
 usage: install.ps1 [-Version vX.Y.Z] [-Dir DIR]
-  BURNOUT_VERSION and BURNOUT_INSTALL_DIR set the same things.
+  BURNTOUT_VERSION and BURNTOUT_INSTALL_DIR set the same things.
 
 To verify a download by hand instead, see packaging/README.md.
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = $env:BURNOUT_VERSION,
-    [string]$Dir = $env:BURNOUT_INSTALL_DIR
+    [string]$Version = $env:BURNTOUT_VERSION,
+    [string]$Dir = $env:BURNTOUT_INSTALL_DIR
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
 
-$BurnoutRepo = 'kshitijdhara/burnout-tracker'
+$BurntoutRepo = 'kshitijdhara/burntout'
 
 # Pinned release keys, current then next. Keep in step with install.sh and
 # internal/release/keys.go (a test checks).
-$BurnoutKeys = @(
+$BurntoutKeys = @(
     @'
 -----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtWf8TGinleBqdY/75gHXSfsVXUuK
@@ -123,7 +123,7 @@ function Test-SignatureWithKey([string]$Pem, [string]$DataPath, [string]$SigPath
 
 # Test-ReleaseSignature is true if a pinned key signed DataPath.
 function Test-ReleaseSignature([string]$DataPath, [string]$SigPath) {
-    foreach ($pem in $BurnoutKeys) {
+    foreach ($pem in $BurntoutKeys) {
         if (Test-SignatureWithKey $pem $DataPath $SigPath) { return $true }
     }
     return $false
@@ -150,7 +150,7 @@ function Test-AssetChecksum([string]$ChecksumsPath, [string]$FilePath, [string]$
     return $got -ceq $want
 }
 
-function Get-BurnoutArch {
+function Get-BurntoutArch {
     $arch = $env:PROCESSOR_ARCHITECTURE
     try { $arch = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() } catch { }
     switch ($arch) {
@@ -168,34 +168,34 @@ function Invoke-Download([string]$Url, [string]$OutFile) {
     }
 }
 
-function Install-Burnout([string]$Version, [string]$Dir) {
+function Install-Burntout([string]$Version, [string]$Dir) {
     # Windows PowerShell 5.1 may default to TLS 1.0; GitHub needs 1.2.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor
         [Net.SecurityProtocolType]::Tls12
     $ProgressPreference = 'SilentlyContinue' # the progress bar slows downloads a lot
 
-    if (-not $Dir) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\burnout' }
+    if (-not $Dir) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\burntout' }
     if (-not $Version) {
         # GitHub's latest release never names a pre-release, so while there
         # are only pre-releases (an alpha), take the newest of any kind.
         try {
-            $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurnoutRepo/releases/latest").tag_name
+            $Version = (Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurntoutRepo/releases/latest").tag_name
         } catch {
             $Version = $null
         }
         if (-not $Version) {
-            $Version = @(Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurnoutRepo/releases?per_page=1")[0].tag_name
+            $Version = @(Invoke-RestMethod -UseBasicParsing "https://api.github.com/repos/$BurntoutRepo/releases?per_page=1")[0].tag_name
         }
         if (-not $Version) { throw "couldn't find a release" }
     }
     if (-not $Version.StartsWith('v')) { $Version = "v$Version" }
-    $asset = "burnout_$($Version.Substring(1))_windows_$(Get-BurnoutArch).zip"
-    $base = "https://github.com/$BurnoutRepo/releases/download/$Version"
+    $asset = "burntout_$($Version.Substring(1))_windows_$(Get-BurntoutArch).zip"
+    $base = "https://github.com/$BurntoutRepo/releases/download/$Version"
 
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("burnout-install-" + [Guid]::NewGuid())
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("burntout-install-" + [Guid]::NewGuid())
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-        Write-Host "Downloading burnout $Version"
+        Write-Host "Downloading BurntOut $Version"
         $sums = Join-Path $tmp 'checksums.txt'
         $sig = Join-Path $tmp 'checksums.txt.sig'
         Invoke-Download "$base/checksums.txt" $sums
@@ -218,12 +218,12 @@ function Install-Burnout([string]$Version, [string]$Dir) {
         $x = Join-Path $tmp 'x'
         Expand-Archive -LiteralPath $zip -DestinationPath $x
         New-Item -ItemType Directory -Force -Path $Dir | Out-Null
-        $exe = Join-Path $Dir 'burnout.exe'
-        $new = Join-Path $Dir 'burnout.exe.new'
-        Copy-Item -LiteralPath (Join-Path $x 'burnout.exe') -Destination $new -Force
-        # A running burnout.exe can't be replaced, but it can be renamed.
+        $exe = Join-Path $Dir 'burntout.exe'
+        $new = Join-Path $Dir 'burntout.exe.new'
+        Copy-Item -LiteralPath (Join-Path $x 'burntout.exe') -Destination $new -Force
+        # A running burntout.exe can't be replaced, but it can be renamed.
         if (Test-Path -LiteralPath $exe) {
-            Move-Item -LiteralPath $exe -Destination (Join-Path $Dir 'burnout.exe.old') -Force
+            Move-Item -LiteralPath $exe -Destination (Join-Path $Dir 'burntout.exe.old') -Force
         }
         Move-Item -LiteralPath $new -Destination $exe
         Write-Host "Installed $exe"
@@ -241,12 +241,12 @@ function Install-Burnout([string]$Version, [string]$Dir) {
 
     Write-Host ''
     Write-Host "Nothing is recorded yet. When you're ready:"
-    Write-Host '  burnout setup             review what is collected and consent'
-    Write-Host '  burnout service install   run in the background from login'
+    Write-Host '  burntout setup             review what is collected and consent'
+    Write-Host '  burntout service install   run in the background from login'
 }
 
-# CI dot-sources this file with BURNOUT_INSTALL_LIB=1 to test the verifiers
+# CI dot-sources this file with BURNTOUT_INSTALL_LIB=1 to test the verifiers
 # (packaging/test-install.ps1).
-if ($env:BURNOUT_INSTALL_LIB -ne '1') {
-    Install-Burnout $Version $Dir
+if ($env:BURNTOUT_INSTALL_LIB -ne '1') {
+    Install-Burntout $Version $Dir
 }

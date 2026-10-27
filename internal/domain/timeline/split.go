@@ -3,8 +3,8 @@ package timeline
 import (
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // MaxSplitDays bounds how many logical days one interval may be split into.

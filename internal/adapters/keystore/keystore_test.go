@@ -12,7 +12,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 func TestFileBackend(t *testing.T) {

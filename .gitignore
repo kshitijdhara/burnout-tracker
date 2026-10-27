@@ -4,4 +4,4 @@
 *.out
 /internal/wire/testdata/fuzz/
 /internal/adapters/collector/wayland/testdata/fuzz/
-/burnout
+/burntout

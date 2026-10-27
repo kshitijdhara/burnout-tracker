@@ -17,8 +17,8 @@ stable across versions.
 
 ## Decision
 
-Build one main Go binary (`burnout`). It runs as a user-level daemon
-(`burnout daemon`) and also provides the hot-path subcommands (`emit`,
+Build one main Go binary (`burntout`). It runs as a user-level daemon
+(`burntout daemon`) and also provides the hot-path subcommands (`emit`,
 `hook`) and the CLI. Store all data locally in SQLite; at-rest protection
 is covered by ADR-0007. No data leaves the device by default.
 
@@ -26,14 +26,14 @@ The main binary ships with **separately versioned components**:
 
 | Component | Role | Contract with the daemon |
 |-----------|------|--------------------------|
-| `burnout` | daemon, CLI, hot-path emitters | n/a |
-| `burnout-classify` | optional Laya sidecar (ADR-0006) | stdin/stdout JSON |
+| `burntout` | daemon, CLI, hot-path emitters | n/a |
+| `burntout-classify` | optional Laya sidecar (ADR-0006) | stdin/stdout JSON |
 | GNOME Shell extension | Wayland window/pointer bridge | private peer-to-peer socket |
 | KWin script | KDE bridge | private peer-to-peer socket |
 | Shell hook scripts | zsh/bash/fish/pwsh hooks (ADR-0003) | ingest message |
 
 A **compatibility matrix** in the repo lists which component versions work
-with which daemon versions. `burnout doctor` reports what's installed and
+with which daemon versions. `burntout doctor` reports what's installed and
 flags mismatches.
 
 ### Architecture rules
@@ -56,8 +56,8 @@ flags mismatches.
   tests run against recorded payloads.
 - **Config model.** One TOML file with a schema, defaults in code and
   validation at load. Secrets (ICS URL, HMAC key) live in the
-  keystore, never in the file. Use `burnout config get/set`. Every privacy
-  opt-in is a config key and is shown in `burnout doctor`.
+  keystore, never in the file. Use `burntout config get/set`. Every privacy
+  opt-in is a config key and is shown in `burntout doctor`.
 - **Feature registry.** Each daily feature is declared once: name, version,
   unit, direction (higher = worse?), role weights, doc string and a pure
   compute function. Docs, schema version and code come from the same
@@ -124,7 +124,7 @@ gracefully instead of corrupting data.
   native collectors in Phase 2; E2E-encrypted sync in Phase 4.
 
 ## Action Items
-1. [ ] Scaffold `cmd/burnout` with subcommands (`daemon`, `emit`, `hook`, `status`, `doctor`, `config`).
+1. [ ] Scaffold `cmd/burntout` with subcommands (`daemon`, `emit`, `hook`, `status`, `doctor`, `config`).
 2. [ ] Ports in the domain packages; `go-arch-lint`/`depguard` rule in CI.
 3. [ ] `/schemas` with JSON Schemas for every cross-process message; N-1 contract tests.
 4. [ ] TOML config with schema, defaults and validation; secrets via `KeyStore`.

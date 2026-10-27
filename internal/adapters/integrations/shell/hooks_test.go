@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/testsupport"
+	"github.com/kshitijdhara/burntout/internal/testsupport"
 )
 
 // runTyped types setup and commands into an interactive shell whose hook
@@ -31,8 +31,8 @@ func runTyped(t *testing.T, argv []string, render func(emitter, dir string) stri
 	if err := os.Mkdir(out, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	emitter := filepath.Join(dir, "fake-burnout")
-	// Like the real emitter (cmd/burnout hookGuard), the fake ignores
+	emitter := filepath.Join(dir, "fake-burntout")
+	// Like the real emitter (cmd/burntout hookGuard), the fake ignores
 	// SIGHUP: fish hangs up its own process group, background emitters
 	// included, when it exits.
 	script := "#!/bin/sh\ntrap '' HUP\nf=$(mktemp " + out + "/tmp.XXXXXX)\n" +
@@ -120,13 +120,13 @@ func checkHookRecords(t *testing.T, recs []record, output string, timing func(r 
 			t.Fatalf("emitter argv = %q, want exactly %q", r.args, "emit shell")
 		}
 		if strings.Contains(r.raw, "CANARY") {
-			t.Fatalf("typed text reached the emitter: %v", burnoutEnv(r))
+			t.Fatalf("typed text reached the emitter: %v", burntoutEnv(r))
 		}
 		if !timing(r) {
-			t.Errorf("bad timing: %v", burnoutEnv(r))
+			t.Errorf("bad timing: %v", burntoutEnv(r))
 		}
 		if _, err := EmitFromEnv(func(k string) string { return r.env[k] }, "/tmp", time.Now()); err != nil {
-			t.Errorf("the emitter would reject this record: %v (%v)", err, burnoutEnv(r))
+			t.Errorf("the emitter would reject this record: %v (%v)", err, burntoutEnv(r))
 		}
 	}
 }

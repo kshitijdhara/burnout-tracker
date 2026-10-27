@@ -13,11 +13,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/desktopbus"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/adapters/collector/desktopbus"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/procinfo"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // redialAfter spaces out reconnects once the bridge has gone away (the
@@ -106,10 +106,10 @@ func (c *Collector) Capabilities() ports.Capabilities {
 // and the fix.
 func notAnswering(err error) string {
 	if errors.Is(err, ErrNotRunning) {
-		return "the burnout GNOME Shell extension is not answering yet, so no windows are recorded; burnout keeps trying. " +
+		return "the BurntOut GNOME Shell extension is not answering yet, so no windows are recorded; BurntOut keeps trying. " +
 			"If it is not enabled, run `" + EnableCommand + "`"
 	}
-	return fmt.Sprintf("the GNOME Shell bridge failed (%v), so no windows are recorded; burnout keeps trying", err)
+	return fmt.Sprintf("the GNOME Shell bridge failed (%v), so no windows are recorded; BurntOut keeps trying", err)
 }
 
 // Close disconnects from the extension and the D-Bus buses.

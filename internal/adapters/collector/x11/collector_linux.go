@@ -16,10 +16,10 @@ import (
 	"github.com/jezek/xgb/screensaver"
 	"github.com/jezek/xgb/xproto"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/desktopbus"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/adapters/collector/desktopbus"
+	"github.com/kshitijdhara/burntout/internal/adapters/procinfo"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // Property reads are capped, in 32-bit units: 4096 windows in the client

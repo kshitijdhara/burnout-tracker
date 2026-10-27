@@ -17,7 +17,7 @@ func opts(t *testing.T, rc string) InstallOptions {
 	return InstallOptions{
 		RCPath:    rc,
 		ScriptDir: filepath.Join(t.TempDir(), "hooks"),
-		BinPath:   "/opt/burn out/bin/burnout", // a space and nothing else exotic
+		BinPath:   "/opt/burn out/bin/burntout", // a space and nothing else exotic
 		BackupDir: backupDirFor(rc),
 		Now:       func() time.Time { return time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC) },
 	}
@@ -45,7 +45,7 @@ func TestInstallUninstallRoundTrip(t *testing.T) {
 		"",
 		"export PATH=$HOME/bin:$PATH\n",
 		"alias g=git\n\n# comment\nsetopt autocd\n",
-		"# a burnout >>> mention that is not our marker\n",
+		"# a burntout >>> mention that is not our marker\n",
 	}
 	for _, orig := range originals {
 		t.Run(strings.SplitN(orig, "\n", 2)[0], func(t *testing.T) {
@@ -178,8 +178,8 @@ func TestUninstallWithoutRCIsNoop(t *testing.T) {
 }
 
 func TestRenderQuotesBinary(t *testing.T) {
-	got := RenderZsh("/a/it's here/burnout")
-	if !strings.Contains(got, `__burnout_bin='/a/it'\''s here/burnout'`) {
+	got := RenderZsh("/a/it's here/burntout")
+	if !strings.Contains(got, `__burntout_bin='/a/it'\''s here/burntout'`) {
 		t.Fatalf("binary not safely quoted:\n%s", got)
 	}
 	if strings.Contains(got, binPlaceholder) || strings.Contains(got, subcmdsPlaceholder) {
@@ -207,11 +207,11 @@ func TestInstallBashAndFish(t *testing.T) {
 	if !strings.Contains(got, "[[ $- == *i* ]] && [[ -r '"+o.ScriptPath()+"' ]] && source '"+o.ScriptPath()+"'") {
 		t.Fatalf(".bashrc:\n%s", got)
 	}
-	if !strings.HasSuffix(o.ScriptPath(), "burnout.bash") || read(t, filepath.Join(o.ScriptDir, preexecName)) != BashPreexec {
+	if !strings.HasSuffix(o.ScriptPath(), "burntout.bash") || read(t, filepath.Join(o.ScriptDir, preexecName)) != BashPreexec {
 		t.Fatalf("bash scripts not written to %s", o.ScriptDir)
 	}
 	if script := read(t, o.ScriptPath()); !strings.Contains(script, "source '"+filepath.Join(o.ScriptDir, preexecName)+"'") ||
-		!strings.Contains(script, "__burnout_bin='/opt/burn out/bin/burnout'") || strings.Contains(script, "__BURNOUT_") {
+		!strings.Contains(script, "__burntout_bin='/opt/burn out/bin/burntout'") || strings.Contains(script, "__BURNTOUT_") {
 		t.Fatalf("bash hook not rendered:\n%s", script)
 	}
 	if err := Uninstall(o); err != nil {
@@ -228,14 +228,14 @@ func TestInstallBashAndFish(t *testing.T) {
 
 	// fish: one file in conf.d, no rc file edited.
 	f := InstallOptions{
-		Shell: Fish, ScriptDir: filepath.Join(t.TempDir(), "fish", "conf.d"), BinPath: "/opt/it's/burnout",
+		Shell: Fish, ScriptDir: filepath.Join(t.TempDir(), "fish", "conf.d"), BinPath: "/opt/it's/burntout",
 		BackupDir: t.TempDir(), Now: time.Now,
 	}
 	if err := Install(f); err != nil {
 		t.Fatal(err)
 	}
-	if script := read(t, f.ScriptPath()); !strings.Contains(script, `set -g __burnout_bin '/opt/it\'s/burnout'`) ||
-		strings.Contains(script, "__BURNOUT_") || !strings.HasSuffix(f.ScriptPath(), filepath.Join("conf.d", "burnout.fish")) {
+	if script := read(t, f.ScriptPath()); !strings.Contains(script, `set -g __burntout_bin '/opt/it\'s/burntout'`) ||
+		strings.Contains(script, "__BURNTOUT_") || !strings.HasSuffix(f.ScriptPath(), filepath.Join("conf.d", "burntout.fish")) {
 		t.Fatalf("fish hook at %s:\n%s", f.ScriptPath(), script)
 	}
 	if err := Uninstall(f); err != nil {
@@ -272,5 +272,46 @@ func TestSubcommandNamesArePlainWords(t *testing.T) {
 				t.Errorf("%q (tool %s) can't be rendered unquoted", w, tool)
 			}
 		}
+	}
+}
+
+// Install and Uninstall replace the block and script from before the rename
+// (burnout), so a user ends up with exactly one hook.
+func TestLegacyHookReplaced(t *testing.T) {
+	rc := filepath.Join(t.TempDir(), ".zshrc")
+	legacy := "export A=1\n\n# >>> burnout >>>\n[[ -o interactive ]] && source '/old/burnout.zsh'\n# <<< burnout <<<\n"
+	if err := os.WriteFile(rc, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := opts(t, rc)
+	if err := os.MkdirAll(o.ScriptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(o.ScriptDir, "burnout.zsh")
+	if err := os.WriteFile(old, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(o); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, rc)
+	if strings.Contains(got, "# >>> burnout >>>") || strings.Contains(got, "/old/burnout.zsh") {
+		t.Fatalf("legacy block left:\n%s", got)
+	}
+	if strings.Count(got, blockBegin) != 1 || !strings.HasPrefix(got, "export A=1\n") {
+		t.Fatalf("want exactly one new block after the user's lines:\n%s", got)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("legacy hook script left")
+	}
+	// An rc that still has only the old block loses it on uninstall too.
+	if err := os.WriteFile(rc, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Uninstall(o); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, rc); got != "export A=1\n" {
+		t.Fatalf("after uninstall: %q", got)
 	}
 }

@@ -1,6 +1,6 @@
 package classify
 
-import "github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+import "github.com/kshitijdhara/burntout/internal/domain/model"
 
 // bundledApps maps macOS bundle ids and Windows/Linux executable names to
 // categories. Matching is case-insensitive.

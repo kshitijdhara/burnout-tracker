@@ -11,15 +11,15 @@
 # Local build:   goreleaser release --snapshot --clean --skip=sign,sbom
 version: 2
 
-project_name: burnout
+project_name: burntout
 
 # Reproducible: the same commit builds the same bytes. Paths are trimmed,
 # and every timestamp (binaries, archive entries, packages) is the commit's.
 # The workflow also exports SOURCE_DATE_EPOCH for the tools that read it.
 builds:
-  - id: burnout-darwin
-    main: ./cmd/burnout
-    binary: burnout
+  - id: burntout-darwin
+    main: ./cmd/burntout
+    binary: burntout
     env:
       - CGO_ENABLED=1
     goos: [darwin]
@@ -29,9 +29,9 @@ builds:
       - -s -w -buildid= -X main.version={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
-  - id: burnout
-    main: ./cmd/burnout
-    binary: burnout
+  - id: burntout
+    main: ./cmd/burntout
+    binary: burntout
     env:
       - CGO_ENABLED=0
     goos: [linux, windows]
@@ -42,23 +42,23 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 universal_binaries:
-  - id: burnout-darwin
-    ids: [burnout-darwin]
-    name_template: burnout
+  - id: burntout-darwin
+    ids: [burntout-darwin]
+    name_template: burntout
     replace: true
     mod_timestamp: "{{ .CommitTimestamp }}"
     hooks:
       # Apple Silicon refuses to run unsigned arm64 code, so ad-hoc sign
-      # (ADR-0005). Users re-sign locally with `burnout setup-signing`.
+      # (ADR-0005). Users re-sign locally with `burntout setup-signing`.
       # Then wrap the signed binary in a .app inside a .dmg; GoReleaser's
       # own dmg support is Pro-only.
       post:
-        - codesign --force --sign - --identifier io.github.kshitijdhara.burnout-tracker "{{ .Path }}"
-        - packaging/macos/build-dmg.sh "{{ .Path }}" "{{ .Version }}" "dist/burnout_{{ .Version }}_darwin_all.dmg"
+        - codesign --force --sign - --identifier io.github.kshitijdhara.burntout "{{ .Path }}"
+        - packaging/macos/build-dmg.sh "{{ .Path }}" "{{ .Version }}" "dist/burntout_{{ .Version }}_darwin_all.dmg"
 
 archives:
   - id: default
-    ids: [burnout, burnout-darwin]
+    ids: [burntout, burntout-darwin]
     formats: [tar.gz]
     format_overrides:
       - goos: windows
@@ -77,43 +77,43 @@ archives:
 
 nfpms:
   - id: packages
-    ids: [burnout]
-    package_name: burnout
+    ids: [burntout]
+    package_name: burntout
     file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    vendor: burnout-tracker
-    homepage: https://github.com/kshitijdhara/burnout-tracker
+    vendor: BurntOut
+    homepage: https://github.com/kshitijdhara/burntout
     maintainer: Kshitij Dhara <69909428+kshitijdhara@users.noreply.github.com>
-    description: Local-first burnout self-monitoring. Nothing is recorded until you run `burnout setup`.
+    description: Local-first burnout self-monitoring. Nothing is recorded until you run `burntout setup`.
     license: Apache-2.0 AND GPL-2.0-or-later
     formats: [deb, rpm]
     bindir: /usr/bin
     mtime: "{{ .CommitDate }}"
     contents:
       - src: LICENSE
-        dst: /usr/share/doc/burnout/LICENSE
+        dst: /usr/share/doc/burntout/LICENSE
         file_info:
           mtime: "{{ .CommitDate }}"
       # The GNOME Shell bridge for Wayland (ADR-0010), GPL-2.0-or-later. The
       # directory name must equal the uuid in metadata.json. It stays
       # disabled until the user enables it (AC-2); postinstall says how.
       - src: extensions/gnome-shell/metadata.json
-        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/metadata.json
+        dst: /usr/share/gnome-shell/extensions/burntout-bridge@kshitijdhara.github.io/metadata.json
         file_info:
           mode: 0644
           mtime: "{{ .CommitDate }}"
       - src: extensions/gnome-shell/extension.js
-        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/extension.js
+        dst: /usr/share/gnome-shell/extensions/burntout-bridge@kshitijdhara.github.io/extension.js
         file_info:
           mode: 0644
           mtime: "{{ .CommitDate }}"
       - src: extensions/gnome-shell/COPYING
-        dst: /usr/share/gnome-shell/extensions/burnout-bridge@kshitijdhara.github.io/COPYING
+        dst: /usr/share/gnome-shell/extensions/burntout-bridge@kshitijdhara.github.io/COPYING
         file_info:
           mode: 0644
           mtime: "{{ .CommitDate }}"
     # Prints next steps only. A package must never start collection or
     # register the service (privacy & security §5.2, AC-2); the service is
-    # per user, so the user runs `burnout service install` themselves.
+    # per user, so the user runs `burntout service install` themselves.
     scripts:
       postinstall: packaging/nfpm/postinstall.sh
 
@@ -131,7 +131,7 @@ sboms:
 
 # Cosign keyless signature of checksums.txt, an extra check for anyone who
 # wants transparency-log verification. The pinned-key signature
-# (checksums.txt.sig) is what install.sh, install.ps1 and `burnout update`
+# (checksums.txt.sig) is what install.sh, install.ps1 and `burntout update`
 # require; the release workflow adds it after this step.
 signs:
   - id: cosign

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 )
 
 const (
@@ -32,9 +32,9 @@ const (
 
 var (
 	// Nightly recovery copies are named by date and rotated to three.
-	reNightly = regexp.MustCompile(`^burnout-\d{8}\.db$`)
+	reNightly = regexp.MustCompile(`^burntout-\d{8}\.db$`)
 	// Pre-migration copies are kept for premigrateKept, then deleted.
-	rePremigrate = regexp.MustCompile(`^burnout-premigrate-v\d+-\d{8}T\d{6}\.db$`)
+	rePremigrate = regexp.MustCompile(`^burntout-premigrate-v\d+-\d{8}T\d{6}\.db$`)
 )
 
 // Retention sets how long each kind of data is kept.
@@ -159,7 +159,7 @@ func (s *Store) reclaim(ctx context.Context) error {
 	return nil
 }
 
-// Backup writes a nightly recovery copy to <dir>/backups/burnout-YYYYMMDD.db
+// Backup writes a nightly recovery copy to <dir>/backups/burntout-YYYYMMDD.db
 // and keeps the newest three. If today's copy already exists it does
 // nothing, so daemon restarts (or a crash loop) never re-copy the whole
 // database. Recovery copies stay inside the data directory and are for
@@ -169,7 +169,7 @@ func (s *Store) Backup(ctx context.Context, now time.Time) error {
 	if err := s.writable(); err != nil {
 		return err
 	}
-	dest := filepath.Join(s.dir, backupDir, "burnout-"+now.UTC().Format("20060102")+".db")
+	dest := filepath.Join(s.dir, backupDir, "burntout-"+now.UTC().Format("20060102")+".db")
 	if _, err := os.Stat(dest); err == nil {
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {

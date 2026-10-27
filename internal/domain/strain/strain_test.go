@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
 )
 
 var start = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) // a Monday

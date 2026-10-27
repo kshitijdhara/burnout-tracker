@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 const (

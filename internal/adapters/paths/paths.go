@@ -12,13 +12,16 @@ import (
 )
 
 // AppName is the directory name used under each base location.
-const AppName = "burnout"
+const AppName = "burntout"
+
+// LegacyAppName is the directory name from before the rename to BurntOut.
+const LegacyAppName = "burnout"
 
 // Env overrides, used by tests and by users with non-standard layouts.
 const (
-	EnvDataDir    = "BURNOUT_DATA_DIR"
-	EnvConfigDir  = "BURNOUT_CONFIG_DIR"
-	EnvRuntimeDir = "BURNOUT_RUNTIME_DIR"
+	EnvDataDir    = "BURNTOUT_DATA_DIR"
+	EnvConfigDir  = "BURNTOUT_CONFIG_DIR"
+	EnvRuntimeDir = "BURNTOUT_RUNTIME_DIR"
 )
 
 // Log file names, inside LogDir.
@@ -32,35 +35,58 @@ func LogDir(dataDir string) string { return filepath.Join(dataDir, "logs") }
 
 // DataDir returns the directory for the database, recovery copies and logs.
 //
-//	macOS:   ~/Library/Application Support/burnout
-//	Windows: %LOCALAPPDATA%\burnout (never Documents, which OneDrive may sync)
-//	Linux:   $XDG_DATA_HOME/burnout (default ~/.local/share/burnout)
+//	macOS:   ~/Library/Application Support/burntout
+//	Windows: %LOCALAPPDATA%\burntout (never Documents, which OneDrive may sync)
+//	Linux:   $XDG_DATA_HOME/burntout (default ~/.local/share/burntout)
 func DataDir() (string, error) {
 	if d := os.Getenv(EnvDataDir); d != "" {
 		return d, nil
 	}
+	return dataDirNamed(AppName)
+}
+
+// LegacyDirs returns the data and config folders from before the rename to
+// BurntOut, or "" for each when the folders are overridden (then there is
+// nothing to move).
+func LegacyDirs() (data, config string, err error) {
+	if os.Getenv(EnvDataDir) == "" {
+		if data, err = dataDirNamed(LegacyAppName); err != nil {
+			return "", "", err
+		}
+	}
+	if os.Getenv(EnvConfigDir) == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", "", err
+		}
+		config = filepath.Join(base, LegacyAppName)
+	}
+	return data, config, nil
+}
+
+func dataDirNamed(name string) (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, "Library", "Application Support", AppName), nil
+		return filepath.Join(home, "Library", "Application Support", name), nil
 	case "windows":
 		base := os.Getenv("LOCALAPPDATA")
 		if base == "" {
 			return "", errors.New("paths: LOCALAPPDATA is not set")
 		}
-		return filepath.Join(base, AppName), nil
+		return filepath.Join(base, name), nil
 	default:
 		if x := os.Getenv("XDG_DATA_HOME"); x != "" {
-			return filepath.Join(x, AppName), nil
+			return filepath.Join(x, name), nil
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".local", "share", AppName), nil
+		return filepath.Join(home, ".local", "share", name), nil
 	}
 }
 
@@ -78,7 +104,7 @@ func ConfigDir() (string, error) {
 
 // RuntimeDir returns the directory holding the daemon's socket.
 //
-//	Linux:  $XDG_RUNTIME_DIR/burnout, falling back to <data dir>/run
+//	Linux:  $XDG_RUNTIME_DIR/burntout, falling back to <data dir>/run
 //	macOS:  <data dir>/run
 //	Windows: unused (named pipe)
 func RuntimeDir() (string, error) {

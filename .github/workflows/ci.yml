@@ -33,7 +33,7 @@ jobs:
           go vet ./...
           GOOS=windows go vet ./...
           GOOS=darwin CGO_ENABLED=0 go vet ./...
-          go vet -tags e2e ./cmd/burnout/
+          go vet -tags e2e ./cmd/burntout/
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
@@ -95,7 +95,7 @@ jobs:
         # child's exit status, unlike BSD script(1).
         run: >-
           python3 -c 'import os, pty, sys; sys.exit(os.waitstatus_to_exitcode(pty.spawn(sys.argv[1:])))'
-          go test -count=1 -timeout=3m ./cmd/burnout/ ./internal/adapters/integrations/shell/ </dev/null
+          go test -count=1 -timeout=3m ./cmd/burntout/ ./internal/adapters/integrations/shell/ </dev/null
       - name: Test
         if: runner.os == 'Windows'
         run: go test -count=1 ./...

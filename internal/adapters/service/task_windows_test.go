@@ -33,7 +33,7 @@ func TestTaskImports(t *testing.T) {
 	if err := os.WriteFile(path, def, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	name := "burnout-tracker-test-" + filepath.Base(t.TempDir())
+	name := "burntout-test-" + filepath.Base(t.TempDir())
 	r := ExecRunner{}
 	if out, err := r.Run("schtasks", "/Create", "/XML", path, "/TN", name, "/F"); err != nil {
 		t.Fatalf("schtasks /Create: %v\n%s", err, out)

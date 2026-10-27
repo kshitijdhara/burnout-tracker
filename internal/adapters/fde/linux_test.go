@@ -72,10 +72,10 @@ func TestMountSource(t *testing.T) {
 	tests := []struct {
 		path, source, fstype string
 	}{
-		{"/home/alice/.local/share/burnout", "/dev/mapper/luks-123", "btrfs"},
+		{"/home/alice/.local/share/burntout", "/dev/mapper/luks-123", "btrfs"},
 		{"/var/lib/x", "/dev/mapper/luks-123", "btrfs"},
 		{"/mnt/my disk/data", "/dev/sdb1", "ext4"},
-		{"/run/user/1000/burnout", "tmpfs", "tmpfs"},
+		{"/run/user/1000/burntout", "tmpfs", "tmpfs"},
 		{"/homeless", "/dev/mapper/luks-123", "btrfs"}, // not under /home
 	}
 	for _, tc := range tests {

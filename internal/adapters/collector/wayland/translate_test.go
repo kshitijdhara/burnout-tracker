@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 func decodeFixture(t *testing.T, name string) reply {
@@ -143,7 +143,7 @@ func TestDescribe(t *testing.T) {
 		{Extension{Installed: true, State: 2}, false, false, EnableCommand},
 		{Extension{Installed: true, State: 6}, false, false, EnableCommand},
 		{Extension{Installed: true, State: stateError, Error: "SyntaxError"}, false, false, "SyntaxError"},
-		{Extension{Installed: true, State: stateOutOfDate}, false, false, "update burnout"},
+		{Extension{Installed: true, State: stateOutOfDate}, false, false, "update burntout"},
 		{Extension{Installed: true, State: stateActive}, false, false, "not answering"},
 	}
 	for _, tc := range tests {

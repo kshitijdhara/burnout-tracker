@@ -1,4 +1,4 @@
-// burnout dashboard. Everything is built with DOM methods and textContent:
+// burntout dashboard. Everything is built with DOM methods and textContent:
 // app names and notes come from the user's data and are never parsed as HTML.
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -37,7 +37,7 @@ function catClass(name) {
 
 async function get(path) {
   const r = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } });
-  if (r.status === 401) throw new Error("This tab's session has ended. Run `burnout dashboard` again.");
+  if (r.status === 401) throw new Error("This tab's session has ended. Run `burntout dashboard` again.");
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -61,7 +61,7 @@ async function send(method, path, body) {
     init.body = JSON.stringify(body);
   }
   const r = await fetch(path, init);
-  if (r.status === 401) throw new Error("This tab's session has ended. Run `burnout dashboard` again.");
+  if (r.status === 401) throw new Error("This tab's session has ended. Run `burntout dashboard` again.");
   if (!r.ok) throw new Error(await r.text());
   for (const v of views) loaded[v] = false;
   return r.status === 204 ? null : r.json();
@@ -113,7 +113,7 @@ function renderOverview(o) {
   if (o.calibrating) {
     latest.append(el("div", { class: "card" },
       el("p", { class: "big" }, num(`${o.calibrating.usable_days} of ${o.calibrating.needed}`)),
-      el("p", { text: "days with enough data so far. Scores start once burnout knows your usual weekdays and weekends." })));
+      el("p", { text: "days with enough data so far. Scores start once BurntOut knows your usual weekdays and weekends." })));
   } else if (o.latest) {
     const d = o.latest;
     const card = el("div", { class: "card" });
@@ -205,7 +205,7 @@ function renderToday(d) {
   body.replaceChildren();
   body.append(el("p", {}, el("span", { class: "big" }, num(hm(d.attended_s))), ` attended on ${d.date}`));
   if (!d.attended_s && !d.commands && !d.agent_sessions && !d.meetings.length) {
-    body.append(el("p", { text: "Nothing recorded yet today. Is the daemon running? Try `burnout doctor`." }));
+    body.append(el("p", { text: "Nothing recorded yet today. Is the daemon running? Try `burntout doctor`." }));
     return;
   }
   if (d.categories.length) {
@@ -318,7 +318,7 @@ function renderWeek(w) {
     if (c.previous != null) p.append(", before ", num(Math.round(c.previous)));
     body.append(p);
   }
-  if (w.checkin_due) body.append(el("p", { class: "notice", text: "This week's check-in is due: about a minute, below or with `burnout checkin`." }));
+  if (w.checkin_due) body.append(el("p", { class: "notice", text: "This week's check-in is due: about a minute, below or with `burntout checkin`." }));
   const bounds = el("div");
   if (w.suggestions.length) {
     const list = el("ul");
@@ -379,7 +379,7 @@ async function renderBoundaries(box, w, said = "") {
     el("p", { class: "fine", text: "Kept days count only days with enough data; vacation and sick days are left out. A new or changed boundary applies from tomorrow." }),
     bs.length ? list : el("p", { text: "None set." }));
   if (!s.writable) {
-    box.append(el("p", { class: "fine", text: "Set boundaries with `burnout boundary add`." }));
+    box.append(el("p", { class: "fine", text: "Set boundaries with `burntout boundary add`." }));
     return;
   }
   const kind = el("select", { id: "boundary-kind", name: "kind" }, ...boundaryKinds.map(([v, t]) => el("option", { value: v, text: t })));
@@ -433,7 +433,7 @@ async function renderAnnotations(box, said = "") {
     el("p", { class: "fine", text: "Vacation and sick days are left out of your baseline and get no score; the others are scored and tagged." }),
     notes.length ? list : el("p", { text: "Nothing marked." }));
   if (!s.writable) {
-    box.append(el("p", { class: "fine", text: "Mark days with `burnout annotate`." }));
+    box.append(el("p", { class: "fine", text: "Mark days with `burntout annotate`." }));
     return;
   }
   const now = new Date();
@@ -464,7 +464,7 @@ async function renderCheckinForm(box, due) {
   const s = await getSession();
   box.replaceChildren(el("h3", { text: "Weekly check-in" }));
   if (!s.writable) {
-    box.append(el("p", { class: "fine", text: "Answer it with `burnout checkin`." }));
+    box.append(el("p", { class: "fine", text: "Answer it with `burntout checkin`." }));
     return;
   }
   const open = button(due ? "Take this week's check-in" : "Take the check-in again", async () => {
@@ -554,7 +554,7 @@ function renderPrivacy(p) {
     el("ul", {}, ...p.collected.map((c) => el("li", { text: c }))),
     el("h3", { text: "Your settings" }),
     el("dl", { class: "settings" }, ...p.settings.flatMap((s) => [el("dt", { text: s.name }), el("dd", { text: s.value })])),
-    el("p", { class: "fine", text: "Change settings with `burnout config`; remove everything with `burnout uninstall --purge`. Details: docs/privacy-and-security.md" }));
+    el("p", { class: "fine", text: "Change settings with `burntout config`; remove everything with `burntout uninstall --purge`. Details: docs/privacy-and-security.md" }));
 }
 
 // renderControls is pause, resume and delete. Deleting asks first, in the
@@ -563,7 +563,7 @@ async function renderControls(box) {
   const s = await getSession();
   box.replaceChildren(el("h3", { text: "Your controls" }));
   if (!s.writable) {
-    box.append(el("p", { text: "Pause with `burnout pause 1h` or `burnout pause tomorrow`, resume with `burnout resume`, and delete with `burnout forget --last 1h` or `--today`." }));
+    box.append(el("p", { text: "Pause with `burntout pause 1h` or `burntout pause tomorrow`, resume with `burntout resume`, and delete with `burntout forget --last 1h` or `--today`." }));
     return;
   }
   const status = el("p", { role: "status", class: "status" });
@@ -632,14 +632,14 @@ async function show(view) {
 function setBlur(on) {
   document.documentElement.classList.toggle("blurred", on);
   document.getElementById("blur").setAttribute("aria-pressed", String(on));
-  try { localStorage.setItem("burnout-blur", on ? "1" : "0"); } catch { /* storage may be off */ }
+  try { localStorage.setItem("burntout-blur", on ? "1" : "0"); } catch { /* storage may be off */ }
 }
 
 document.getElementById("blur").addEventListener("click", () => {
   setBlur(!document.documentElement.classList.contains("blurred"));
 });
 let saved = false;
-try { saved = localStorage.getItem("burnout-blur") === "1"; } catch { /* storage may be off */ }
+try { saved = localStorage.getItem("burntout-blur") === "1"; } catch { /* storage may be off */ }
 setBlur(saved);
 
 window.addEventListener("hashchange", async () => {

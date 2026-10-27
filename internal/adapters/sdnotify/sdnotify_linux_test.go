@@ -57,7 +57,7 @@ func TestPathSocket(t *testing.T) {
 }
 
 func TestAbstractSocket(t *testing.T) {
-	addr := "@burnout-sdnotify-test-" + strconv.Itoa(os.Getpid())
+	addr := "@burntout-sdnotify-test-" + strconv.Itoa(os.Getpid())
 	c := listen(t, addr)
 	t.Setenv(EnvSocket, addr)
 	if err := Ready(); err != nil {

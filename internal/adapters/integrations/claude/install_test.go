@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const ourCmd = "'/opt/burnout/bin/burnout' hook claude"
+const ourCmd = "'/opt/burntout/bin/burntout' hook claude"
 
 func installOpts(path, version string) InstallOptions {
 	return InstallOptions{
@@ -271,8 +271,8 @@ func TestEventsVersionGating(t *testing.T) {
 }
 
 func TestCommandForQuotes(t *testing.T) {
-	got := CommandFor("/a/it's/burnout")
-	if got != `'/a/it'\''s/burnout' hook claude || true` {
+	got := CommandFor("/a/it's/burntout")
+	if got != `'/a/it'\''s/burntout' hook claude || true` {
 		t.Fatalf("got %s", got)
 	}
 	if !isOurs(got) {
@@ -285,18 +285,22 @@ func TestIsOurs(t *testing.T) {
 		cmd  string
 		want bool
 	}{
-		{`'/opt/burnout/bin/burnout' hook claude`, true},
-		{`'/opt/burnout/bin/burnout' hook claude || true`, true},
-		{`'/Users/me/.local/bin/burnout' hook claude || true`, true},
-		{`'C:\Users\me\burnout.exe' hook claude || true`, true},
-		{`/usr/local/bin/burnout hook claude`, true},
-		{`'/a/it'\''s/burnout' hook claude`, true},
-		{`'/opt/other/notburnout' hook claude`, false},
-		{`'/opt/burnout/bin/burnout' hook codex`, false},
-		{`'/opt/burnout/bin/burnout' hook claude; rm -rf ~`, false},
+		{`'/opt/burntout/bin/burntout' hook claude`, true},
+		{`'/opt/burntout/bin/burntout' hook claude || true`, true},
+		{`'/Users/me/.local/bin/burntout' hook claude || true`, true},
+		{`'C:\Users\me\burntout.exe' hook claude || true`, true},
+		{`/usr/local/bin/burntout hook claude`, true},
+		{`'/a/it'\''s/burntout' hook claude`, true},
+		{`'/opt/other/notburntout' hook claude`, false},
+		{`'/opt/burntout/bin/burntout' hook codex`, false},
+		{`'/opt/burntout/bin/burntout' hook claude; rm -rf ~`, false},
 		{`echo hi`, false},
 		{`'/unterminated hook claude`, false},
-		{`'/a/burnout' '/b' hook claude`, false},
+		{`'/a/burntout' '/b' hook claude`, false},
+		// From before the rename: ours, so install replaces it.
+		{`'/Users/me/.local/bin/burnout' hook claude || true`, true},
+		{`'C:\Users\me\burnout.exe' hook claude || true`, true},
+		{`'/opt/other/notburnout' hook claude`, false},
 	}
 	for _, tc := range tests {
 		if got := isOurs(tc.cmd); got != tc.want {
@@ -325,12 +329,12 @@ func TestInstallAfterBinaryMoved(t *testing.T) {
 }
 `)
 	old := installOpts(path, "")
-	old.Command = CommandFor("/old/place/burnout")
+	old.Command = CommandFor("/old/place/burntout")
 	if err := Install(old); err != nil {
 		t.Fatal(err)
 	}
 	moved := installOpts(path, "")
-	moved.Command = CommandFor("/new/place/burnout")
+	moved.Command = CommandFor("/new/place/burntout")
 	if err := Install(moved); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +342,7 @@ func TestInstallAfterBinaryMoved(t *testing.T) {
 	if strings.Contains(got, "/old/place") {
 		t.Fatalf("old entry left behind:\n%s", got)
 	}
-	if n := strings.Count(got, "/new/place/burnout"); n != len(Events("")) {
+	if n := strings.Count(got, "/new/place/burntout"); n != len(Events("")) {
 		t.Fatalf("%d entries for the new binary, want one per event (%d)", n, len(Events("")))
 	}
 	if !strings.Contains(got, "notify-send done") {
@@ -354,7 +358,7 @@ func TestInstallAfterBinaryMoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = readFile(t, path)
-	if strings.Contains(got, "burnout") {
+	if strings.Contains(got, "burntout") {
 		t.Fatalf("our entries left after uninstall:\n%s", got)
 	}
 	if !strings.Contains(got, "notify-send done") {

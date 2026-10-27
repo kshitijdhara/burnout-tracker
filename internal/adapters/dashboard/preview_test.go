@@ -12,13 +12,13 @@ import (
 )
 
 // TestPreview serves the dashboard with made-up data for working on the
-// page: BURNOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview -v
+// page: BURNTOUT_DASHBOARD_PREVIEW=60s go test -run TestPreview -v
 // ./internal/adapters/dashboard/ prints a one-time link and serves for that
 // long. It is skipped otherwise.
 func TestPreview(t *testing.T) {
-	d, err := time.ParseDuration(os.Getenv("BURNOUT_DASHBOARD_PREVIEW"))
+	d, err := time.ParseDuration(os.Getenv("BURNTOUT_DASHBOARD_PREVIEW"))
 	if err != nil {
-		t.Skip("set BURNOUT_DASHBOARD_PREVIEW to a duration to serve a preview")
+		t.Skip("set BURNTOUT_DASHBOARD_PREVIEW to a duration to serve a preview")
 	}
 	s, err := Listen(previewSource{}, &memControl{}, slog.Default())
 	if err != nil {
@@ -123,7 +123,7 @@ func (previewSource) Privacy(context.Context) (Privacy, error) {
 		Settings: []Setting{
 			{"Consent", "given"}, {"Profile", "developer, core hours 09:00-18:00"}, {"Collection", "running"},
 			{"Calendar", "from calendar.google.com, last synced Oct 26 09:12 (" + strconv.Itoa(14) + " meetings)"},
-			{"Data folder", "/Users/someone/Library/Application Support/burnout (owner-only; disk encryption enabled)"},
+			{"Data folder", "/Users/someone/Library/Application Support/burntout (owner-only; disk encryption enabled)"},
 		},
 	}, nil
 }

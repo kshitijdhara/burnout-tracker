@@ -8,7 +8,7 @@
 //   - every request must carry Host 127.0.0.1:<port> or localhost:<port>,
 //     which defeats DNS rebinding;
 //   - access starts from a one-time launch token (single use, 60 s).
-//     `burnout dashboard` and the tray never put it on a command line,
+//     `burntout dashboard` and the tray never put it on a command line,
 //     which other local users can read: they write it into an owner-only
 //     launch file and open that (see LaunchPage). The server swaps the
 //     token for an HttpOnly, SameSite=Strict session cookie and sends the
@@ -166,7 +166,7 @@ func randomToken() string {
 	return hex.EncodeToString(b)
 }
 
-func (s *Server) cookieName() string { return "burnout_session_" + strconv.Itoa(s.port) }
+func (s *Server) cookieName() string { return "burntout_session_" + strconv.Itoa(s.port) }
 
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
@@ -256,7 +256,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		if r.URL.Path != "/launch" && !ok {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = fmt.Fprintln(w, "Open the dashboard with `burnout dashboard`: it opens a one-time link.")
+			_, _ = fmt.Fprintln(w, "Open the dashboard with `burntout dashboard`: it opens a one-time link.")
 			return
 		}
 		if write {
@@ -362,7 +362,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = fmt.Fprintln(w, "This link has expired or was already used. Run `burnout dashboard` again for a new one.")
+		_, _ = fmt.Fprintln(w, "This link has expired or was already used. Run `burntout dashboard` again for a new one.")
 		return
 	}
 	// Not Secure: the server is plain HTTP on loopback, which never leaves
@@ -388,7 +388,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 const bouncePage = `<!doctype html>
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="0;url=%s">
-<title>burnout</title>
+<title>BurntOut</title>
 <p><a href="%s">Open the dashboard</a></p>
 `
 
@@ -410,12 +410,12 @@ func (s *Server) api(fn func(*http.Request) (any, error)) http.HandlerFunc {
 			http.Error(w, "not found; reload the page", http.StatusNotFound)
 			return
 		case errors.Is(err, errWritesOff):
-			http.Error(w, "this dashboard can't change your data; use the burnout command", http.StatusServiceUnavailable)
+			http.Error(w, "this dashboard can't change your data; use the BurntOut command", http.StatusServiceUnavailable)
 			return
 		}
 		if err != nil {
 			s.log.Warn("dashboard query failed", "path", r.URL.Path, "err", err)
-			http.Error(w, "couldn't read your data; see the terminal running `burnout dashboard`", http.StatusInternalServerError)
+			http.Error(w, "couldn't read your data; see the terminal running `burntout dashboard`", http.StatusInternalServerError)
 			return
 		}
 		if v == nil {

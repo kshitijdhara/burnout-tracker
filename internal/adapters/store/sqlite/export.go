@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/export"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/adapters/export"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Export runs fn with a source over one read transaction, so everything

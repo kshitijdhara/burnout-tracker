@@ -1,6 +1,6 @@
 package classify
 
-import "github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+import "github.com/kshitijdhara/burntout/internal/domain/model"
 
 // bundledDomains maps sites to categories, for browser windows when title
 // classification is on. A domain also covers its subdomains; the most
