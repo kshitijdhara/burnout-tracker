@@ -709,7 +709,8 @@ CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER 
 - the main loop writes in batched transactions every 15 s; maintenance
   (retention in 5,000-row chunks, recovery copies) runs on its own goroutine,
   and SQLite serialises the two writers (`busy_timeout` covers the overlap);
-- `status`, `timeline` and `doctor` open the database read-only and never migrate;
+- `status`, `timeline` and `doctor` open the database read-only and never migrate
+  it, nor move folders from the app's old name (Privacy & Security §7.3);
 - `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, prepared
   statements;
 - `secure_delete=ON` and `auto_vacuum=INCREMENTAL`, with an incremental

@@ -86,6 +86,11 @@ nfpms:
     description: Local-first burnout self-monitoring. Nothing is recorded until you run `burntout setup`.
     license: Apache-2.0 AND GPL-2.0-or-later
     formats: [deb, rpm]
+    # The app was called burnout before; the package replaces it, so the
+    # old /usr/bin/burnout and its GNOME extension go with the upgrade.
+    replaces: [burnout]
+    conflicts: [burnout]
+    provides: [burnout]
     bindir: /usr/bin
     mtime: "{{ .CommitDate }}"
     contents:

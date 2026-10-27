@@ -79,7 +79,7 @@ func reportUpdate(w io.Writer, in update.Install, res update.Result, checkOnly b
 	v := res.Version
 	switch {
 	case res.UpToDate:
-		_, _ = fmt.Fprintf(w, "burntout %s is the newest release.\n", version)
+		_, _ = fmt.Fprintf(w, "BurntOut %s is the newest release.\n", version)
 	case checkOnly:
 		_, _ = fmt.Fprintf(w, "burntout %s is available (this is %s). Run `burntout update` to install it.\n", v, version)
 	case res.Swapped:

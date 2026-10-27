@@ -291,3 +291,44 @@ func TestPutGet(t *testing.T) {
 		})
 	}
 }
+
+// A key from before the rename is adopted on first use, never made anew,
+// and never replaced when a different one already exists.
+func TestOSKeyringAdoptsLegacy(t *testing.T) {
+	keyring.MockInit()
+	if err := keyring.Set(LegacyService, "hmac", "old-key"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := osKeyring{}.get("hmac")
+	if err != nil || v != "old-key" {
+		t.Fatalf("got %q %v, want the old key", v, err)
+	}
+	if got, _ := keyring.Get(Service, "hmac"); got != "old-key" {
+		t.Fatalf("not copied under the new service: %q", got)
+	}
+	if _, err := keyring.Get(LegacyService, "hmac"); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatal("the old entry is left after a successful copy")
+	}
+	// A new value wins and the old one is left alone.
+	if err := keyring.Set(LegacyService, "ics-url", "old-url"); err != nil {
+		t.Fatal(err)
+	}
+	if err := keyring.Set(Service, "ics-url", "new-url"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := (osKeyring{}).get("ics-url"); v != "new-url" {
+		t.Fatalf("got %q, want the new value", v)
+	}
+	if got, _ := keyring.Get(LegacyService, "ics-url"); got != "old-url" {
+		t.Fatal("an old value was deleted although it was never copied")
+	}
+	if err := DeleteLegacy("ics-url", "hmac"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keyring.Get(LegacyService, "ics-url"); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatal("DeleteLegacy left the old entry")
+	}
+	if _, err := (osKeyring{}).get("missing"); !errors.Is(err, errNotFound) {
+		t.Fatalf("a missing key: %v", err)
+	}
+}

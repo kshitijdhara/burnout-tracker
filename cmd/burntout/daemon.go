@@ -44,7 +44,7 @@ const hmacKeyName = "hmac"
 const envKeystore = "BURNTOUT_KEYSTORE"
 
 func keystoreOptions() []keystore.Option {
-	if os.Getenv(envKeystore) == keystore.BackendFile {
+	if paths.Getenv(envKeystore) == keystore.BackendFile {
 		return []keystore.Option{keystore.WithFileOnly()}
 	}
 	return nil

@@ -1,7 +1,7 @@
 {
   "uuid": "burntout-bridge@kshitijdhara.github.io",
-  "name": "burntout bridge",
-  "description": "Lets the local BurntOut agent see window geometry, stacking, focus, monitors and the pointer on Wayland, over a private owner-only socket. No session-bus service, no network. Window titles are sent only when you turn on title classification in burntout.",
+  "name": "BurntOut bridge",
+  "description": "Lets the local BurntOut agent see window geometry, stacking, focus, monitors and the pointer on Wayland, over a private owner-only socket. No session-bus service, no network. Window titles are sent only when you turn on title classification in BurntOut.",
   "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/kshitijdhara/burntout",
   "version": 1

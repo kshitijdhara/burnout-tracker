@@ -10,16 +10,18 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/kshitijdhara/burntout/internal/adapters/collector/wayland"
 	"github.com/kshitijdhara/burntout/internal/adapters/export"
 	"github.com/kshitijdhara/burntout/internal/adapters/keystore"
+	"github.com/kshitijdhara/burntout/internal/adapters/lock"
 	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 	"github.com/kshitijdhara/burntout/internal/adapters/service"
 )
 
-// runUninstall removes burntout's hooks and background service, and with
+// runUninstall removes BurntOut's hooks and background service, and with
 // --purge everything it stored: data folder, config folder, keystore
 // entries and downloaded updates (privacy & security §7.2). It asks
 // first, and only in a terminal: there is no flag to skip the question.
@@ -54,6 +56,7 @@ func runUninstall(ctx context.Context, args []string) error {
 	}
 	return uninstall(ctx, os.Stdin, os.Stdout, *purge, uninstallDirs{
 		data: dataDir, config: cfgDir, cache: filepath.Join(cache, paths.AppName), exe: exe, goos: runtime.GOOS,
+		legacy: legacyLeftovers(filepath.Join(cache, paths.LegacyAppName)),
 	}, uninstallSteps{
 		service: func(ctx context.Context) error {
 			m, _, err := serviceManager()
@@ -66,22 +69,52 @@ func runUninstall(ctx context.Context, args []string) error {
 			return err
 		},
 		hooks:   func(ctx context.Context) error { return runUninstallHooks(ctx, nil) },
-		running: daemonAnswers,
+		running: func(ctx context.Context) bool { return daemonAnswers(ctx) || legacyDaemonRunning() },
 		keys: func() error {
 			keys, err := keystore.New(dataDir, keystoreOptions()...)
 			if err != nil {
 				return err
 			}
-			return errors.Join(keys.Delete(hmacKeyName), keys.Delete(icsKey))
+			return errors.Join(keys.Delete(hmacKeyName), keys.Delete(icsKey), keystore.DeleteLegacy(hmacKeyName, icsKey))
 		},
 	})
 }
 
 // uninstallDirs are where BurntOut keeps things. cache holds the updates
 // `burntout update` downloads; exe is the running binary, which may have
-// an update's leftover beside it.
+// an update's leftover beside it. legacy are the folders from before the
+// rename to BurntOut that are still there.
 type uninstallDirs struct {
 	data, config, cache, exe, goos string
+	legacy                         []string
+}
+
+// legacyLeftovers returns the pre-rename folders that still exist: data and
+// config folders that never moved, and the old update cache.
+func legacyLeftovers(oldCache string) []string {
+	var out []string
+	oldData, oldConfig, _ := paths.LegacyDirs()
+	for _, d := range []string{oldData, oldConfig, oldCache} {
+		if d != "" && fileExists(d) && !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// legacyDaemonRunning reports whether an old burnout daemon holds the old
+// data folder.
+func legacyDaemonRunning() bool {
+	oldData, _, _ := paths.LegacyDirs()
+	if oldData == "" || !fileExists(oldData) {
+		return false
+	}
+	release, err := lock.Acquire(oldData)
+	if err != nil {
+		return errors.Is(err, lock.ErrLocked)
+	}
+	_ = release()
+	return false
 }
 
 // uninstallSteps are the parts of an uninstall that touch the system, so
@@ -95,11 +128,14 @@ type uninstallSteps struct {
 
 func uninstall(ctx context.Context, in io.Reader, out io.Writer, purge bool, d uninstallDirs, s uninstallSteps) error {
 	word := "uninstall"
-	_, _ = fmt.Fprintln(out, "This removes burntout's shell and Claude Code hooks and its background service.")
+	_, _ = fmt.Fprintln(out, "This removes BurntOut's shell and Claude Code hooks and its background service.")
 	if purge {
 		word = "delete"
-		_, _ = fmt.Fprintf(out, "It also deletes, for good:\n  %s (everything recorded)\n  %s (settings and consent)\n  %s (downloaded updates)\n  burntout's keys in the OS keystore\n",
+		_, _ = fmt.Fprintf(out, "It also deletes, for good:\n  %s (everything recorded)\n  %s (settings and consent)\n  %s (downloaded updates)\n  BurntOut's keys in the OS keystore\n",
 			printable(d.data), printable(d.config), printable(d.cache))
+		for _, l := range d.legacy {
+			_, _ = fmt.Fprintf(out, "  %s (from burnout, this app's old name)\n", printable(l))
+		}
 		// The record of exports goes with the data folder, so this is
 		// the last chance to see where they are (privacy & security §7.2).
 		if left, err := export.Existing(d.data); err == nil && len(left) > 0 {
@@ -129,16 +165,20 @@ func uninstall(ctx context.Context, in io.Reader, out io.Writer, purge bool, d u
 		return nil
 	}
 	if s.running(ctx) {
-		return errors.New("a burntout daemon is still running, probably in a terminal: stop it (Ctrl-C), then run `burntout uninstall --purge` again; nothing was deleted")
+		return errors.New("a BurntOut or old burnout daemon is still running, probably in a terminal: stop it (Ctrl-C), then run `burntout uninstall --purge` again; nothing was deleted")
 	}
 	// Keys first: the file keystore lives in the data folder.
 	if err := s.keys(); err != nil {
 		return fmt.Errorf("could not delete the stored keys; nothing else was deleted: %w", err)
 	}
-	if err := errors.Join(os.RemoveAll(d.data), os.RemoveAll(d.config), os.RemoveAll(d.cache)); err != nil {
+	errs := []error{os.RemoveAll(d.data), os.RemoveAll(d.config), os.RemoveAll(d.cache)}
+	for _, l := range d.legacy {
+		errs = append(errs, os.RemoveAll(l))
+	}
+	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(out, "Uninstalled, and all of burntout's data, settings and keys are deleted. Remove the BurntOut binary yourself.")
+	_, _ = fmt.Fprintln(out, "Uninstalled, and all of BurntOut's data, settings and keys are deleted. Remove the BurntOut binary yourself.")
 	leftovers(out, d)
 	return nil
 }
@@ -153,8 +193,13 @@ func leftovers(out io.Writer, d uninstallDirs) {
 		}
 	}
 	if d.goos == "linux" {
-		_, _ = fmt.Fprintf(out, "If you turned on the GNOME Shell extension, turn it off with `gnome-extensions disable %s`, then remove the BurntOut package.\n", wayland.UUID)
+		_, _ = fmt.Fprintf(out, "If you turned on the GNOME Shell extension, turn it off with `gnome-extensions disable %s` "+
+			"(and the old one, `gnome-extensions disable %s`), then remove the BurntOut package.\n", wayland.UUID, legacyExtensionUUID)
 	}
 }
 
 func fileExists(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+// legacyExtensionUUID is the GNOME Shell extension's id from before the
+// rename to BurntOut.
+const legacyExtensionUUID = "burnout-bridge@kshitijdhara.github.io"

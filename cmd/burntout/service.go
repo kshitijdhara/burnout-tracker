@@ -94,7 +94,7 @@ func serviceManager() (service.Manager, string, error) {
 func windowsServiceEnv() map[string]string {
 	env := map[string]string{}
 	for _, name := range []string{paths.EnvDataDir, paths.EnvConfigDir, paths.EnvRuntimeDir, envKeystore} {
-		if v := os.Getenv(name); v != "" {
+		if v := paths.Getenv(name); v != "" {
 			env[name] = v
 		}
 	}
@@ -117,13 +117,19 @@ func serviceEnv() (map[string]string, error) {
 			return nil, err
 		}
 	}
-	if v := os.Getenv(envKeystore); v != "" {
+	if v := paths.Getenv(envKeystore); v != "" {
 		env[envKeystore] = v
 	}
 	return env, nil
 }
 
 func installService(ctx context.Context, m service.Manager, dataDir string) error {
+	// The old app's service first: it holds the old data, which has to move
+	// before consent (kept with it) can be read.
+	removeLegacyService(m)
+	if err := migrateLegacy(os.Stdout); errors.Is(err, errLegacyBlocked) {
+		return errors.New("an old burnout daemon still has your data open, probably in a terminal: stop it (Ctrl-C), then run this again")
+	}
 	if err := consentError(); err != nil {
 		return err
 	}
@@ -133,7 +139,6 @@ func installService(ctx context.Context, m service.Manager, dataDir string) erro
 	if err := paths.CheckTrustedExecutable(m.Bin); err != nil {
 		return err
 	}
-	removeLegacyService(m)
 	st, err := m.Status()
 	if err != nil {
 		return err

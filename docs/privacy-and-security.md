@@ -463,6 +463,28 @@ Full rationale in [ADR-0007](adr/0007-data-protection-at-rest.md).
 
 Directories MUST be `0700` (owner-only ACL on Windows), files `0600`.
 
+**Moving from the old name.** The app was called burnout; its folders,
+keyring service and background service carried that name. BurntOut moves
+them once, on this device only:
+
+- Before a command that changes state, the old data and config folders
+  (`…/burnout`) move to the new ones, under the old folder's daemon lock,
+  so no old daemon writes while they move. While an old daemon still holds
+  the old data, those commands don't run (they would make new folders and
+  leave the old data behind) and say how to replace the old service;
+  read-only commands (`status`, `timeline`, `doctor`, `privacy`, `export`)
+  never move anything and only warn. If both folders hold a database,
+  neither is moved and the user is told.
+- Keyring secrets under the old service name `burnout` are adopted on first
+  use: copied to `burntout`, then deleted, never replaced by a new key. This
+  reads the OS keyring, which may prompt once.
+- `service install` and `uninstall` remove the old background service;
+  `install-hooks` and `uninstall-hooks` replace the old hooks.
+- `uninstall --purge` also deletes any old folders, the old update cache
+  and the old keyring entries.
+- Overrides under the old names (`BURNOUT_DATA_DIR` and friends) still
+  apply, with a warning to rename them.
+
 ---
 
 ## 8. Local attack surface

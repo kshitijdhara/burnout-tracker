@@ -93,6 +93,25 @@ func TestUninstall(t *testing.T) {
 			t.Errorf("the question doesn't name the updates cache:\n%s", out.String())
 		}
 	})
+	t.Run("purge deletes what the old name left behind", func(t *testing.T) {
+		d := dirs(t)
+		old := filepath.Join(t.TempDir(), "burnout")
+		if err := os.MkdirAll(old, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		d.legacy = []string{old}
+		f := &fakeUninstall{}
+		var out strings.Builder
+		if err := uninstall(ctx, strings.NewReader("delete\n"), &out, true, d, f.steps()); err != nil {
+			t.Fatal(err)
+		}
+		if exists(old) {
+			t.Fatal("the old folder is left after a purge")
+		}
+		if !strings.Contains(out.String(), old+" (from burnout, this app's old name)") {
+			t.Errorf("the question doesn't name the old folder:\n%s", out.String())
+		}
+	})
 	t.Run("purge lists exports first", func(t *testing.T) {
 		d := dirs(t)
 		saved := filepath.Join(t.TempDir(), "burntout-export.json")

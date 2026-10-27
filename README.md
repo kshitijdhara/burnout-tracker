@@ -75,7 +75,10 @@ and the `.dmg`, `.deb` and `.rpm` packages: [packaging/README.md](packaging/READ
 > BurntOut's folders. Then run `burntout install-hooks` and
 > `burntout service install`, which replace the old hooks and background
 > service, and delete the old `burnout` binary. On GNOME, also run
-> `gnome-extensions disable burnout-bridge@kshitijdhara.github.io`.
+> `gnome-extensions disable burnout-bridge@kshitijdhara.github.io`. On macOS,
+> grant Screen Recording again if you use title classification: macOS sees
+> BurntOut as a new app. If an old burnout daemon still runs, commands that
+> change state wait until `burntout service install` has replaced it.
 
 ### macOS (build from source)
 

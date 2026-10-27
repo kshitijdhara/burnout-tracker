@@ -76,9 +76,12 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	migrateLegacy(os.Stderr)
 	for _, c := range commands() {
 		if c.name == os.Args[1] {
+			if err := prepareLegacy(os.Stderr, c.name); err != nil {
+				fmt.Fprintln(os.Stderr, "burntout:", err)
+				os.Exit(1)
+			}
 			if err := c.run(ctx, os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, "burntout:", err)
 				os.Exit(1)
