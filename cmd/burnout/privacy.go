@@ -414,7 +414,7 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	}
 	add("Hooks", hookSummary())
 	add("Calendar", calendarLine(dataDir))
-	add("Network", "only the calendar feed, if you added one by URL. Update checks and model downloads aren't built; each will be opt-in")
+	add("Network", "calendar feed: "+calendarNetwork(dataDir)+"; update check: "+updateLine(dataDir, cfg)+"; model download: not built")
 	state, _, _ := fde.Status(ctx, filepath.Dir(dataDir))
 	add("Data folder", fmt.Sprintf("%s (owner-only; disk encryption %s)", dataDir, state))
 	exports := "none on disk"

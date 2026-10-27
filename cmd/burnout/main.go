@@ -41,6 +41,7 @@ func commands() []command {
 		{"export", "write your data out as JSON or CSV: export --out FILE [--format csv] [--since DATE]", runExport},
 		{"checkin", "answer the weekly check-in (or --daily for two quick questions)", runCheckin},
 		{"review", "the weekly review: this week against the last, and what to try", runReview},
+		{"update", "install the newest release, verified: update [--check] [--channel beta] [--to vX.Y.Z] [--allow-downgrade]", runUpdate},
 		{"doctor", "check permissions, paths, disk encryption and collectors", runDoctor},
 		{"install-hooks", "install shell (zsh) and Claude Code hooks", runInstallHooks},
 		{"uninstall-hooks", "remove shell and Claude Code hooks", runUninstallHooks},

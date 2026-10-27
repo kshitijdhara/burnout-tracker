@@ -252,16 +252,22 @@ func viewSource(dataDir string) (ics.Source, error) {
 }
 
 // networkSummary says which outbound calls are configured, for doctor.
-func networkSummary(dataDir string) string {
+func networkSummary(dataDir string, c config.Config) string {
+	return "Network:\n  calendar feed: " + calendarNetwork(dataDir) +
+		"\n  update check: " + updateLine(dataDir, c) +
+		"\n  model download: not built"
+}
+
+// calendarNetwork says whether the calendar uses the network.
+func calendarNetwork(dataDir string) string {
 	src, err := viewSource(dataDir)
 	switch {
 	case err != nil:
-		return "Network: no outbound calls are configured (calendar, update checks and model download are all off)."
+		return "none added"
 	case !src.Remote():
-		return "Network: none. The calendar comes from a local file: " + describeCalendar(dataDir, src)
+		return "none (a local file: " + describeCalendar(dataDir, src) + ")"
 	}
-	return "Network: one opt-in call, the calendar feed " + describeCalendar(dataDir, src) +
-		".\n  Update checks and model download are off."
+	return describeCalendar(dataDir, src)
 }
 
 // calendarSource reads the feed location from the keystore.

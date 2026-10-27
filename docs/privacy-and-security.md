@@ -356,11 +356,18 @@ code (§12).
 | Call | Enabled by | Sends | To | Disable |
 |------|-----------|-------|----|---------|
 | **ICS fetch** | Adding an ICS URL | An HTTPS GET of the user's own feed URL (no cookies, no identifying headers beyond a generic User-Agent) | The calendar provider host in the URL | `burnout config set calendar.ics.enabled false` or remove the URL |
-| **Update check** | `burnout update` (manual) or `update.check = "weekly"` | An HTTPS GET of the GitHub Releases API for this repository, plus asset downloads | `api.github.com`, `github.com` / `objects.githubusercontent.com` | `update.check = "off"` (the default) |
+| **Update check** | `burnout update` (manual) or `update.check = "weekly"` | An HTTPS GET of the GitHub Releases API for this repository (no token, no cookies, a generic User-Agent). `burnout update` also downloads `checksums.txt`, its signature and the one asset for this platform; the weekly check reads the release list only and never downloads or installs | `api.github.com`; downloads from `github.com`, which redirects to `release-assets.githubusercontent.com` (formerly `objects.githubusercontent.com`) | `update.check = "off"` (the default); `burnout update` runs only when you type it |
 | **Model pull** | `burnout model pull laya` | An HTTPS GET of a pinned asset from this repository's `models-*` release | `github.com` / `objects.githubusercontent.com` | Don't run it; delete the model with `burnout model rm` |
 
 HTTPS only, with certificate verification. Proxies come from the OS settings.
 No telemetry, crash reporting or analytics exist.
+
+The update client (`internal/adapters/egress/update`) refuses any request,
+redirects included, that isn't HTTPS to one of the four GitHub hosts in the
+table, and `burnout doctor` and `burnout privacy` list them while the weekly
+check is on. It trusts nothing it downloads until `checksums.txt` verifies
+against a pinned release key and the asset matches its SHA-256 there
+(ADR-0005).
 
 ---
 
