@@ -66,20 +66,7 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 
 	checkFix(w, "daemon is running", daemonAnswers(ctx), "start it with `burnout service install`, or `burnout daemon` in a terminal")
 	reportService(w)
-	cfg, cfgPath, cfgErr := loadConfig()
-	switch {
-	case cfgErr != nil && forBundle:
-		check(w, "config file is valid", false, "run `burnout config validate` to see why")
-		cfg = config.Default()
-	case cfgErr != nil && cfgPath == "":
-		check(w, "config file", false, cfgErr.Error())
-	case cfgErr != nil:
-		check(w, "config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
-			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
-		cfg = config.Default()
-	default:
-		check(w, "config file is valid", true, printable(cfgPath))
-	}
+	cfg := reportConfig(w, forBundle)
 
 	state, detail, _ := fde.Status(ctx, dataDir)
 	switch state {
@@ -132,6 +119,25 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 
 	_, _ = fmt.Fprintln(w, "\n"+networkSummary(dataDir))
 	return nil
+}
+
+// reportConfig checks the config file and returns it, or the defaults if
+// it is invalid. forBundle leaves out the error, which can quote the file.
+func reportConfig(w io.Writer, forBundle bool) config.Config {
+	cfg, cfgPath, cfgErr := loadConfig()
+	switch {
+	case cfgErr != nil && forBundle:
+		check(w, "config file is valid", false, "run `burnout config validate` to see why")
+	case cfgErr != nil && cfgPath == "":
+		check(w, "config file", false, cfgErr.Error())
+	case cfgErr != nil:
+		check(w, "config file is valid", false, printable(cfgPath)+": "+cfgErr.Error()+
+			"\n     A running daemon keeps its last good settings; a new one won't start until this is fixed.")
+	default:
+		check(w, "config file is valid", true, printable(cfgPath))
+		return cfg
+	}
+	return config.Default()
 }
 
 func check(w io.Writer, name string, ok bool, detail string) {

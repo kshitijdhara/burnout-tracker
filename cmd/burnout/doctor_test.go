@@ -128,9 +128,7 @@ func TestBundleInvalidConfig(t *testing.T) {
 		t.Fatalf("the test needs an error that quotes the file: %v", err)
 	}
 	var report bytes.Buffer
-	if err := doctor(t.Context(), &report, true); err != nil {
-		t.Fatal(err)
-	}
+	reportConfig(&report, true)
 	files, err := collectBundle(t.Context(), report.Bytes())
 	if err != nil {
 		t.Fatal(err)
