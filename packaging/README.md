@@ -32,6 +32,11 @@ checksums.txt.sigstore.json          cosign keyless bundle (optional check)
 
 GitHub build-provenance attestations cover every file in `checksums.txt`.
 
+Builds are reproducible: the same commit and Go toolchain give identical
+archives and packages (`-trimpath`, empty build ID, commit timestamps).
+The `.dmg` is the exception, because `hdiutil` writes a fresh volume UUID
+and timestamps; the binary inside it is the reproducible one.
+
 ### Signature format
 
 `checksums.txt.sig` is the output of
