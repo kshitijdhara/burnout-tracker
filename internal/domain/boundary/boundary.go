@@ -135,10 +135,19 @@ func (b Boundary) ActiveOn(day string) bool {
 // Active reports whether the rule hasn't been removed or replaced.
 func (b Boundary) Active() bool { return b.Until == "" }
 
-// ShutdownAt is a shutdown's time of day.
+// AfterMidnight is the time of day before which a shutdown means the
+// night after the workday, as the logical day runs to 04:00.
+const AfterMidnight = 4 * time.Hour
+
+// ShutdownAt is a shutdown's time from the start of the workday's
+// calendar date: "21:30" is 21h30m, "01:00" is 25h.
 func (b Boundary) ShutdownAt() time.Duration {
 	t, _ := time.Parse("15:04", b.Value)
-	return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute
+	d := time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute
+	if d < AfterMidnight {
+		d += 24 * time.Hour
+	}
+	return d
 }
 
 // Number is a meetings cap in hours or a focus block in minutes.

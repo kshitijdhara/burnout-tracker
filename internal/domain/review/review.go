@@ -33,6 +33,12 @@ type Week struct {
 	Annotations []annotation.Annotation // those overlapping the week
 
 	Suggestions []string
+
+	// Adherence and Offers are filled by AddBoundaries.
+	Adherence []Adherence
+	Offers    []Offer
+
+	suggested []string // the drivers and guardrails behind Suggestions
 }
 
 // Recurring is a driver or guardrail and the days it appeared on.
@@ -93,7 +99,7 @@ func Build(scores []strain.Score, records []checkin.Record, notes []annotation.A
 			w.Annotations = append(w.Annotations, a)
 		}
 	}
-	w.Suggestions = suggest(w.Drivers, w.Guardrails)
+	w.Suggestions, w.suggested = suggest(w.Drivers, w.Guardrails)
 	return w
 }
 
@@ -194,9 +200,9 @@ var tips = map[string]string{
 }
 
 // suggest picks up to two suggestions: guardrails first, then the most
-// frequent drivers. Two items with the same advice yield it once.
-func suggest(drivers, guards []Recurring) []string {
-	var out []string
+// frequent drivers. Two items with the same advice yield it once. names
+// are the items the suggestions came from.
+func suggest(drivers, guards []Recurring) (out, names []string) {
 	add := func(name string) {
 		tip, ok := tips[name]
 		if !ok || len(out) == 2 {
@@ -208,6 +214,7 @@ func suggest(drivers, guards []Recurring) []string {
 			}
 		}
 		out = append(out, tip)
+		names = append(names, name)
 	}
 	for _, g := range guards {
 		add(g.Name)
@@ -215,5 +222,5 @@ func suggest(drivers, guards []Recurring) []string {
 	for _, d := range drivers {
 		add(d.Name)
 	}
-	return out
+	return out, names
 }

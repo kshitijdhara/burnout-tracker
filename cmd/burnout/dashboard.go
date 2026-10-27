@@ -22,9 +22,9 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/review"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
 )
 
@@ -109,7 +109,7 @@ var collectedRest = []string{
 	"Shell commands: the command name and a known subcommand only, never arguments, plus exit code, duration and a keyed hash of the project.",
 	"Claude Code session timing: when it works, waits for you and stops. Never your prompts or its responses.",
 	"Calendar meetings, if you added a feed: start and end times only, never titles, attendees or places.",
-	"Check-in answers and annotations you enter.",
+	"Check-in answers, annotations and boundaries you enter.",
 	"Nothing leaves this device. There is no server and no telemetry.",
 }
 
@@ -283,29 +283,15 @@ func named[K ~string](m map[K]float64) []dashboard.Named {
 }
 
 func (d dashSource) Week(ctx context.Context) (dashboard.Week, error) {
-	now := time.Now()
 	cfg, _ := d.config()
-	opts := scoreOptions(cfg)
-	sc, err := app.ScoreDays(ctx, d.store, now, opts)
+	w, due, err := weekReview(ctx, d.store, cfg, time.Now())
 	if err != nil {
 		return dashboard.Week{}, err
 	}
-	records, err := d.store.Checkins(ctx, now.AddDate(0, -3, 0))
-	if err != nil {
-		return dashboard.Week{}, err
-	}
-	today := model.LogicalDay(now, opts.Rollover)
-	t, _ := time.Parse(time.DateOnly, today)
-	notes, err := d.store.Annotations(ctx, t.AddDate(0, 0, -7).Format(time.DateOnly), today)
-	if err != nil {
-		return dashboard.Week{}, err
-	}
-	w := review.Build(sc.Scores, records, notes, today)
-	due, _ := review.WeeklyDue(records, now)
 	out := dashboard.Week{
 		From: w.From, To: w.To, Calibrating: w.Calibrating, Scored: w.Scored, CheckinDue: due,
 		Drivers: []dashboard.Count{}, Limits: []dashboard.Count{}, Checkins: []dashboard.Check{},
-		Marked: []string{}, Suggestions: w.Suggestions,
+		Marked: []string{}, Suggestions: w.Suggestions, Adherence: []dashboard.Adherence{}, Offers: []dashboard.Offer{},
 	}
 	if out.Suggestions == nil {
 		out.Suggestions = []string{}
@@ -340,6 +326,20 @@ func (d dashSource) Week(ctx context.Context) (dashboard.Week, error) {
 	}
 	for _, a := range w.Annotations {
 		out.Marked = append(out.Marked, describeAnnotation(a))
+	}
+	for _, a := range w.Adherence {
+		missed := a.Missed
+		if missed == nil {
+			missed = []string{}
+		}
+		out.Adherence = append(out.Adherence, dashboard.Adherence{
+			Text: a.Boundary.Describe(), Summary: describeAdherence(a, w.To), Kept: a.Kept, Judged: a.Judged, Missed: missed,
+		})
+	}
+	for _, o := range w.Offers {
+		out.Offers = append(out.Offers, dashboard.Offer{
+			Kind: string(o.Boundary.Kind), Value: o.Boundary.Value, Text: o.Boundary.Describe(), For: o.For,
+		})
 	}
 	return out, nil
 }
@@ -427,6 +427,25 @@ func (d dashControl) RemoveAnnotation(ctx context.Context, id int64) (ok bool, e
 
 func (d dashControl) SaveCheckins(ctx context.Context, rs []checkin.Record) error {
 	return d.withStore(ctx, func(s *sqlite.Store) error { return s.SaveCheckins(ctx, rs) })
+}
+
+func (d dashControl) Boundaries(ctx context.Context) ([]dashboard.Boundary, error) {
+	bs, err := rwStore(d).Boundaries(ctx)
+	var out []dashboard.Boundary
+	for _, b := range boundary.Current(bs) {
+		out = append(out, dashboard.Boundary{ID: b.ID, Kind: string(b.Kind), Value: b.Value, Text: b.Describe(), Since: b.Since})
+	}
+	return out, err
+}
+
+func (d dashControl) SetBoundary(ctx context.Context, b boundary.Boundary) (int64, bool, error) {
+	now := time.Now()
+	return rwStore(d).SetBoundary(ctx, b, model.LogicalDay(now, app.DefaultConfig().Rollover), now)
+}
+
+func (d dashControl) RemoveBoundary(ctx context.Context, id int64) (bool, error) {
+	now := time.Now()
+	return rwStore(d).RemoveBoundary(ctx, id, model.LogicalDay(now, app.DefaultConfig().Rollover), now)
 }
 
 func (dashControl) Region() string { return regionFromEnv() }

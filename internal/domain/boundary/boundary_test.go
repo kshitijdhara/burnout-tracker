@@ -47,6 +47,9 @@ func TestActiveOnAndAccessors(t *testing.T) {
 	if got := (Boundary{Kind: MeetingsMax, Value: "1"}).Describe(); got != "at most 1 hour of meetings on workdays" {
 		t.Error(got)
 	}
+	if d := (Boundary{Kind: Shutdown, Value: "01:00"}).ShutdownAt(); d != 25*time.Hour {
+		t.Errorf("01:00 is %v into the workday", d)
+	}
 	if n := (Boundary{Kind: FocusBlock, Value: "90"}).Number(); n != 90 {
 		t.Error(n)
 	}
