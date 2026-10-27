@@ -894,10 +894,29 @@ v1 implementation choices (`internal/domain/strain`, `strain-v1`):
 4. Offer the optional integrations: shell hooks, Claude Code hooks, ICS.
 5. Explain the 14-day calibration and the data-quality badge.
 
-Built (CLI): `burnout setup` covers steps 1 and 2. After consent it asks
-for a role and core hours, and Enter keeps the defaults. It saves them to
-the config file, where `burnout config set profile.role|profile.core_hours`
-changes them later.
+Built (CLI): `burnout setup` covers all five steps, interactively only.
+- **Steps 1–2:** the data summary, the disk-encryption check and a typed
+  "yes"; then a role and core hours (Enter keeps the defaults), saved to the
+  config file, where `burnout config set profile.role|profile.core_hours`
+  changes them later.
+- **Step 3:** it says it starts in zero-permission mode, then offers title
+  classification with what it adds, defaulting to "not now". On macOS a yes
+  opens System Settings at Screen Recording. Input counts aren't offered.
+- **Step 4:** y/N questions for the shell and Claude Code hooks (the same
+  code as `install-hooks`), an ICS feed (read from the prompt, with
+  `calendar add`'s warning that the URL is a secret) and the background
+  service (as `service install`). Each no, and each failure, prints the
+  command to run later.
+- **Step 5:** the calibration days and what makes a day count, from the
+  strain model's parameters. There is no separate data-quality badge yet:
+  `burnout status` shows "calibrating, N of 14" and marks a day missing
+  with how much of it was observed.
+- **Consent versioning:** the consent file records the version of the data
+  summary consented to (`consentVersion` in `cmd/burnout/consent.go`). When
+  the summary changes, the version is bumped (a test fails otherwise), and
+  the daemon won't start until `setup` is run again; under the service it
+  logs why and exits 0, as with no consent. A consent file from before
+  versioning counts as out of date.
 
 The first run must be completed **interactively by the logged-in user**
 (anti-coercion; see Privacy & Security).

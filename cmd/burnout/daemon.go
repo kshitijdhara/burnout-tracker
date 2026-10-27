@@ -92,8 +92,8 @@ func runDaemon(ctx context.Context, args []string) error {
 		return runServiceDaemon(ctx)
 	}
 
-	if !hasConsent() {
-		return errors.New("no consent recorded: run `burnout setup` first")
+	if err := consentError(); err != nil {
+		return err
 	}
 	dataDir, err := paths.DataDir()
 	if err != nil {
@@ -117,8 +117,8 @@ func runDaemon(ctx context.Context, args []string) error {
 // runServiceDaemon is the daemon as launchd, systemd or Task Scheduler
 // runs it. A failure
 // a restart may fix returns an error, so the service manager retries in
-// 30 s. One it can't fix (no consent, a database from a newer version, an
-// unusable data folder) is logged and exits 0, which the service treats as
+// 30 s. One it can't fix (no consent, consent to an older data summary, a
+// database from a newer version, an unusable data folder) is logged and exits 0, which the service treats as
 // done until the next login, instead of failing every 30 s forever. What
 // it writes shows the home folder as ~ (privacy & security §10).
 func runServiceDaemon(ctx context.Context) (err error) {
@@ -147,8 +147,8 @@ func runServiceDaemon(ctx context.Context) (err error) {
 	}
 	defer func() { _ = w.Close() }()
 	log := slog.New(slog.NewTextHandler(homeRedactor{w: w, home: home}, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	if !hasConsent() {
-		log.Error("not starting: no consent recorded; run `burnout setup`, then `burnout service install`")
+	if err := consentError(); err != nil {
+		log.Error("not starting: " + err.Error() + ", then `burnout service install`")
 		return nil
 	}
 	release, err := waitForLock(ctx, log, dataDir)

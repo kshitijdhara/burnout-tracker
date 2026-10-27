@@ -60,19 +60,38 @@ mkdir -p ~/.local/bin && install -m 0755 bin/burnout ~/.local/bin/burnout
 **2. Set up and start.**
 
 ```sh
-~/.local/bin/burnout setup            # shows what is collected, asks for consent, your role and core hours
-~/.local/bin/burnout install-hooks    # shell hooks + Claude Code hooks (backs up files first)
+~/.local/bin/burnout setup            # what is collected, consent, then the questions below
 ~/.local/bin/burnout doctor           # first run: answer the keychain prompt (below)
-~/.local/bin/burnout service install  # runs the daemon in the background, from login
 ```
 
-`setup` must run in an interactive terminal. burnout keeps its key in your
-keychain through macOS's own `security` tool, so the first `doctor` run may
-show a keychain prompt that names `security` rather than burnout. Choose
-**Always Allow**, and answer within a few seconds: if the keychain doesn't
-respond in about 3 s, burnout keeps its key in an owner-only file in the
-data folder instead, and stays on that choice. Running `doctor` before
-`service install` makes the prompt appear while you're looking.
+`setup` must run in an interactive terminal, and has no flag to skip any
+question. After you type "yes" it asks, in order:
+- your role and core hours;
+- whether to turn on title classification, which splits browser time by
+  site. It is off unless you say yes; on macOS a yes opens System Settings
+  at Screen Recording, which it needs;
+- whether to install the shell and Claude Code hooks (as
+  `burnout install-hooks`, which backs up files first);
+- whether to add a calendar feed. Paste its ICS link at the prompt, not
+  on the command line: the link is a key to your calendar;
+- whether to run the daemon in the background from login (as
+  `burnout service install`).
+
+Every question defaults to no, and each no prints the command to do it
+later. Setup ends by explaining the first 14 days of calibration, and
+which days count. If a later version changes what burnout collects, the
+daemon stops until you run `burnout setup` again and agree to the new
+summary.
+
+burnout keeps its key in your keychain through macOS's own `security`
+tool, so the first thing that uses it (adding a calendar or starting the
+service during setup, or the first `doctor` run) may show a keychain
+prompt that names `security` rather than burnout. Choose **Always Allow**,
+and answer within a few seconds: if the keychain doesn't respond in about
+3 s, burnout keeps its key in an owner-only file in the data folder
+instead, and stays on that choice. If you said no to the service in setup,
+running `doctor` before `service install` makes the prompt appear while
+you're looking.
 
 The service starts the daemon at every login and restarts it if it
 crashes. Its log is `logs/daemon.log` in the data folder (three files of at

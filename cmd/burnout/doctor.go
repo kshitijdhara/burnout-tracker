@@ -55,7 +55,11 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 		return err
 	}
 
-	checkFix(w, "consent recorded", hasConsent(), "run `burnout setup`")
+	if consentStatus() == consentStale {
+		checkFix(w, "consent is for the current data summary", false, "what is collected changed: run `burnout setup` again")
+	} else {
+		checkFix(w, "consent recorded", hasConsent(), "run `burnout setup`")
+	}
 	switch err := paths.CheckPrivate(dataDir); {
 	case errors.Is(err, paths.ErrUnverified):
 		_, _ = fmt.Fprintln(w, "  ?  data dir is owner-only: not verified on this platform")

@@ -84,7 +84,21 @@ func TestEndToEnd(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, consentFile), []byte("test\n"), 0o600); err != nil {
+	// Consent to an older data summary stops it the same way.
+	stale := "consented " + time.Now().Format(time.RFC3339) + " version v0.1.0\n"
+	if err := os.WriteFile(filepath.Join(configDir, consentFile), []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run("", "daemon"); err == nil {
+		t.Fatal("daemon started on stale consent")
+	}
+	if _, _, err := run("", daemonServiceArgs...); err != nil {
+		t.Fatalf("service daemon on stale consent: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dataDir, "logs", "daemon.log")); !strings.Contains(string(b), "burnout setup` again") { //nolint:gosec // test file
+		t.Fatalf("service daemon didn't log that consent is out of date:\n%s", b)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, consentFile), []byte(consentStamp(time.Now())), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
