@@ -26,6 +26,7 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 )
 
@@ -43,6 +44,34 @@ type Config struct {
 	Retention Retention `toml:"retention"`
 	Calendar  Calendar  `toml:"calendar"`
 	Update    Update    `toml:"update"`
+	Nudges    Nudges    `toml:"nudges"`
+}
+
+// Nudges are the tray's nudges (system design §8.3): at most one a day,
+// never outside waking hours, in a call or a screen share.
+type Nudges struct {
+	Enabled bool `toml:"enabled"`
+	// WakingHours bound when a nudge may show, "HH:MM-HH:MM" in local time
+	// on every day; the end may be past midnight.
+	WakingHours  string `toml:"waking_hours"`
+	Shutdown     bool   `toml:"shutdown"`
+	DayOff       bool   `toml:"day_off"`
+	WeeklyHours  bool   `toml:"weekly_hours"`
+	OvernightGap bool   `toml:"overnight_gap"`
+	WeekendWork  bool   `toml:"weekend_work"`
+}
+
+// nudgeKinds are the per-kind switches, by the nudge kind they turn off.
+var nudgeKinds = []struct {
+	kind nudge.Kind
+	get  func(*Nudges) *bool
+	what string // for the file's comment
+}{
+	{nudge.Shutdown, func(n *Nudges) *bool { return &n.Shutdown }, "your shutdown time has passed on a workday"},
+	{nudge.DayOff, func(n *Nudges) *bool { return &n.DayOff }, "working on a day you keep free"},
+	{nudge.WeeklyHours, func(n *Nudges) *bool { return &n.WeeklyHours }, "a long week"},
+	{nudge.OvernightGap, func(n *Nudges) *bool { return &n.OvernightGap }, "a short night"},
+	{nudge.WeekendWork, func(n *Nudges) *bool { return &n.WeekendWork }, "a busy weekend"},
 }
 
 // Update is the opt-in update check (privacy & security §6). It only ever
@@ -133,6 +162,10 @@ func Default() Config {
 	}
 	c.Calendar.ICS.Enabled = true // fetched only once a feed is added
 	c.Update.Check = UpdateOff
+	c.Nudges = Nudges{Enabled: true, WakingHours: "07:00-23:00"}
+	for _, k := range nudgeKinds {
+		*k.get(&c.Nudges) = true
+	}
 	return c
 }
 
@@ -211,6 +244,9 @@ func (c Config) Validate() error {
 	}
 	if c.Update.Check != UpdateOff && c.Update.Check != UpdateWeekly {
 		errs = append(errs, fmt.Errorf("update.check: %q: want %q or %q", c.Update.Check, UpdateOff, UpdateWeekly))
+	}
+	if _, err := parseWakingHours(c.Nudges.WakingHours); err != nil {
+		errs = append(errs, fmt.Errorf("nudges.waking_hours: %w", err))
 	}
 	r := c.Retention
 	for _, b := range bounds {
@@ -305,6 +341,40 @@ func parseCoreHours(spec string) (schedule.Window, error) {
 		return w, fmt.Errorf("%q: core hours must span at least an hour", spec)
 	}
 	return w, nil
+}
+
+// minWaking is the shortest waking-hours span accepted.
+const minWaking = 4 * time.Hour
+
+// parseWakingHours reads "HH:MM-HH:MM": one span every day, which may run
+// past midnight.
+func parseWakingHours(spec string) (schedule.Window, error) {
+	w, err := schedule.Parse(spec)
+	span := w.End - w.Start
+	if w.End <= w.Start {
+		span += 24 * time.Hour
+	}
+	switch {
+	case err != nil || !strings.Contains(spec, ":"):
+		return w, fmt.Errorf("%q: want a time range like 07:00-23:00", spec)
+	case w.Days != [7]bool{true, true, true, true, true, true, true} || strings.ContainsAny(strings.TrimSpace(spec), " "):
+		return w, fmt.Errorf("%q: give times only; waking hours apply every day", spec)
+	case span < minWaking:
+		return w, fmt.Errorf("%q: waking hours must span at least %d hours", spec, int(minWaking.Hours()))
+	}
+	return w, nil
+}
+
+// NudgeSettings returns the nudge settings. Call it on a valid config.
+func (c Config) NudgeSettings() nudge.Settings {
+	w, _ := parseWakingHours(c.Nudges.WakingHours)
+	s := nudge.Settings{Enabled: c.Nudges.Enabled, Waking: w, Off: map[nudge.Kind]bool{}}
+	for _, k := range nudgeKinds {
+		if !*k.get(&c.Nudges) {
+			s.Off[k.kind] = true
+		}
+	}
+	return s
 }
 
 // Role returns the profile's role. Call it on a valid config.
@@ -408,6 +478,9 @@ func (c *Config) normalize() {
 	c.Update.Check = strings.ToLower(strings.TrimSpace(c.Update.Check))
 	if w, err := parseCoreHours(c.Profile.CoreHours); err == nil {
 		c.Profile.CoreHours = w.String()
+	}
+	if w, err := parseWakingHours(c.Nudges.WakingHours); err == nil {
+		c.Nudges.WakingHours = w.String()
 	}
 	c.Privacy.ExcludeApps = dedupe(c.Privacy.ExcludeApps, func(s string) string { return strings.ToLower(strings.TrimSpace(s)) })
 	domains := make([]string, len(c.Privacy.ExcludeDomains))
@@ -568,6 +641,20 @@ func Render(c Config) []byte {
 # ` + "`burnout update`" + `). "off" makes no update checks at all.
 `)
 	fmt.Fprintf(&b, "check = %s\n", quote(c.Update.Check))
+	b.WriteString(`
+[nudges]
+# At most one gentle nudge a day in the tray menu, never during a call,
+# video or private hours. Snooze or turn off each kind from the menu too.
+`)
+	fmt.Fprintf(&b, "enabled = %t\n", c.Nudges.Enabled)
+	b.WriteString(`# When a nudge may show, in your local time; the end may be after midnight.
+`)
+	fmt.Fprintf(&b, "waking_hours = %s\n", quote(c.Nudges.WakingHours))
+	b.WriteString("# Each kind of nudge, on or off:\n")
+	for _, k := range nudgeKinds {
+		setting := fmt.Sprintf("%s = %t", k.kind, *k.get(&c.Nudges))
+		fmt.Fprintf(&b, "%-22s # %s\n", setting, k.what)
+	}
 	return b.Bytes()
 }
 
@@ -642,10 +729,17 @@ var keys = func() []key {
 		get := b.get
 		k = append(k, key{name: b.key, num: func(c *Config) *int { return get(&c.Retention) }})
 	}
-	return append(k,
+	k = append(k,
 		key{name: "calendar.ics.enabled", flag: func(c *Config) *bool { return &c.Calendar.ICS.Enabled }},
 		key{name: "update.check", text: func(c *Config) *string { return &c.Update.Check }},
+		key{name: "nudges.enabled", flag: func(c *Config) *bool { return &c.Nudges.Enabled }},
+		key{name: "nudges.waking_hours", text: func(c *Config) *string { return &c.Nudges.WakingHours }},
 	)
+	for _, n := range nudgeKinds {
+		get := n.get
+		k = append(k, key{name: "nudges." + string(n.kind), flag: func(c *Config) *bool { return get(&c.Nudges) }})
+	}
+	return k
 }()
 
 func lookup(name string) (key, error) {

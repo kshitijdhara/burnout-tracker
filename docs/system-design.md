@@ -955,6 +955,35 @@ Phase 1 so far (`burnout review`, `internal/domain/review`):
   turned off.
 - The dashboard has a "blur numbers" option.
 
+Phase 1 so far (`internal/domain/nudge`, the tray):
+- **Built:**
+  - one nudge kind per logical day, recorded in the `nudges` control file
+    so a restart can't show a second one;
+  - kinds, in priority order: shutdown time passed on a workday, working
+    on a weekend under the no-weekend rule (boundaries as they apply on the
+    day, reread every 5 minutes), then the latest scored day's guardrails (a long
+    week, a short night, a busy weekend). Guardrails come from the last
+    maintenance, so they describe yesterday, and are ignored once they are
+    more than two days old;
+  - copy from a fixed table, with no numbers (a test enforces it);
+  - shown as a tray menu item. On macOS a short title sits beside the
+    icon; the AC-4 reminder takes that place first. The nudge never shows
+    in the first line or the tooltip;
+  - suppression, rechecked every refresh: paused, private hours, outside
+    `nudges.waking_hours`, no recent snapshot (safe mode included), a call
+    or video;
+  - "Snooze until tomorrow" and "Don't show this kind again" in the
+    item's submenu; `nudges.enabled` and one switch per kind in the
+    config. Every unknown state, such as an unreadable control file,
+    shows nothing.
+- **Not yet:**
+  - Focus/Do Not Disturb and screen-share detection. macOS exposes
+    neither without a new permission (Focus authorization, Full Disk
+    Access), so calls and video stand in. Windows and Linux can't see
+    calls either. Each collector lists the gap in `Limitations`, and
+    `burnout doctor` shows it;
+  - the dashboard's "blur numbers" option.
+
 ### 8.4 Safety
 
 When CBI is in the high band, or free text suggests distress, the app shows

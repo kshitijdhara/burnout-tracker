@@ -191,6 +191,7 @@ func capabilities(opts Options, inputCountsOn bool) ports.Capabilities {
 		Titles:      opts.Titles,
 		Limitations: []string{
 			"video and call detection not implemented (presence relies on input and idle time)",
+			"Focus Assist and screen sharing aren't detected, so nudges can show during a call, a share or a presentation",
 		},
 	}
 }
