@@ -21,9 +21,11 @@ check, model download. Window titles, command arguments and prompt text are
 never stored. [Privacy & Security](docs/privacy-and-security.md) lists
 every field that is collected.
 
-## Trying Phase 0
+## Trying the alpha
 
-Phase 0 is a developer preview: there is no installer yet.
+burnout is in alpha (Phase 1): everything is built, and it is being tried
+by a small group before a wider release. Expect rough edges, and please
+report them. Install a signed release, or build from source as below.
 Desktop collection works on macOS, Windows, Linux X11 sessions and GNOME
 on Wayland (through a GNOME Shell extension). On other Wayland desktops
 only shell and Claude Code hooks are recorded for now.
@@ -39,7 +41,35 @@ only shell and Claude Code hooks are recorded for now.
 >
 > Hook-only use on those machines isn't supported.
 
-### macOS
+### Install a release
+
+The install scripts verify the release's signature against keys pinned in
+the script, then the download's checksum, and install to `~/.local/bin`
+(Windows: `%LOCALAPPDATA%\Programs\burnout`). They record nothing and
+start nothing. Read them before you run them:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/kshitijdhara/burnout-tracker/main/packaging/install.sh
+less install.sh
+sh install.sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kshitijdhara/burnout-tracker/main/packaging/install.ps1 -OutFile install.ps1
+notepad install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+Then continue with step 2 below (`burnout setup`). Later versions:
+`burnout update` (verified the same way). Verifying a download by hand,
+and the `.dmg`, `.deb` and `.rpm` packages: [packaging/README.md](packaging/README.md).
+
+> **Upgrading from an earlier build?** Consent is now versioned: run
+> `burnout setup` once more before the daemon will start again.
+
+### macOS (build from source)
 
 You need Go 1.26.10 or newer and the Xcode command-line tools (the macOS
 collector uses cgo).
@@ -307,7 +337,7 @@ you were there.
 
 - **Measure a day.** Keep a rough log of what you do (meetings, reading,
   coding, breaks, with times), then compare it with `burnout timeline`.
-  Phase 0 aims to be within about 10%. Note where they disagree.
+  The aim is to be within about 10%. Note where they disagree.
 - **A meeting.** During a Google Meet, Zoom or Slack huddle, run
   `burnout doctor`: "right now" should say you're in a call, and the
   meeting should count even while you only listen. Run it again while
@@ -360,7 +390,7 @@ security delete-generic-password -s burnout -a hmac   # if the keychain was used
 - To check nothing is left running: `pgrep -lx burnout` should print
   nothing.
 
-**Preview limits.** There is no installer yet. Phase 0 needs no macOS privacy permissions,
+**Alpha limits.** burnout needs no macOS privacy permissions,
 because window titles (unless you turn on title classification) and
 input counts are off. Call and video detection
 is macOS-only for now.
@@ -442,7 +472,8 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
 
 ## Status
 
-Phase 0 (spike). Design docs:
+Phase 1 alpha: the Phase 1 scope in the [roadmap](docs/system-design.md#16-roadmap)
+is built, and the alpha is under way. Design docs:
 
 - [System design](docs/system-design.md)
 - [Privacy & Security](docs/privacy-and-security.md): the threat model and

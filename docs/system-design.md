@@ -1349,6 +1349,19 @@ burnout-tracker/
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
 | **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |
 
+**Status (2026-10-27).**
+- **Phase 0** is built. Its exit check, one developer's 2-monitor day
+  within 10% of a hand-annotated timeline, hasn't been recorded yet.
+- **Phase 1** scope is built and on `main`, and `v0.1.0-alpha.1` starts the
+  alpha. Its exit criteria are the alpha itself, so they are open.
+- **Known gaps** going into the alpha:
+  - the GNOME Shell extension has only been tested in a container, not in
+    a real GNOME Shell;
+  - the Windows logon task has been tested in CI, not at a real logon;
+  - call and video detection is macOS-only (ADR-0008);
+  - KDE and wlroots Wayland desktops are Phase 2, so on them only hooks
+    record.
+
 ---
 
 ## 17. Trade-offs and what to revisit
