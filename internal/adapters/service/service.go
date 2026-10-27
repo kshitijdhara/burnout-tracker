@@ -1,8 +1,9 @@
 // Package service installs the daemon as a per-user background service
 // that starts at login and restarts after a crash (ADR-0005, system design
-// §11.2): a launchd LaunchAgent on macOS, a systemd --user unit on Linux.
-// Rendering the definitions is pure; changing the system goes through a
-// Runner, so tests never touch launchctl or systemctl.
+// §11.2): a launchd LaunchAgent on macOS, a systemd --user unit on Linux,
+// a logon task in Task Scheduler on Windows. Rendering the definitions is
+// pure; changing the system goes through a Runner, so tests never touch
+// launchctl, systemctl or schtasks.
 package service
 
 import (
@@ -27,7 +28,7 @@ const (
 	UnitName = "burnout.service"                        // systemd
 )
 
-// ErrUnsupported is returned on platforms without a service yet (Windows).
+// ErrUnsupported is returned on platforms without a service (the BSDs).
 var ErrUnsupported = errors.New("service: not available on this platform yet")
 
 // Runner runs a system command and returns its combined output.
@@ -39,19 +40,32 @@ type Runner interface {
 // or user bus must not hang an install, an uninstall or doctor.
 const commandTimeout = 30 * time.Second
 
-// ExecRunner runs commands for real, with a timeout, and launchctl by its
-// absolute path (it lives in /bin on every macOS).
+// ExecRunner runs commands for real, with a timeout, and launchctl,
+// schtasks and powershell by their absolute paths, so a same-named program
+// earlier in PATH or in the current folder can't stand in for them.
 type ExecRunner struct{}
 
 // Run executes name with args (no shell) and returns its combined output.
 func (ExecRunner) Run(name string, args ...string) (string, error) {
-	if name == "launchctl" {
+	switch name {
+	case "launchctl":
 		name = "/bin/launchctl"
+	case "schtasks":
+		name = filepath.Join(systemRoot(), "System32", "schtasks.exe")
+	case "powershell":
+		name = filepath.Join(systemRoot(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput() //nolint:gosec // fixed launchctl/systemctl invocations
 	return string(out), err
+}
+
+func systemRoot() string {
+	if r := os.Getenv("SystemRoot"); r != "" {
+		return r
+	}
+	return `C:\Windows`
 }
 
 // Manager installs, removes and inspects the service for one user.
@@ -66,6 +80,7 @@ type Manager struct {
 	Config string // XDG config directory on Linux (os.UserConfigDir)
 	LogDir string // where launchd writes the daemon's crash output
 	UID    int
+	SID    string // the user's SID on Windows, which the logon task runs as
 	Run    Runner
 	// Sleep waits between retries; nil means time.Sleep. Tests stub it.
 	Sleep func(time.Duration)
@@ -96,6 +111,8 @@ func (m Manager) backend() (backend, error) {
 		return launchd{}, nil
 	case "linux":
 		return systemd{}, nil
+	case "windows":
+		return taskScheduler{}, nil
 	default:
 		return nil, ErrUnsupported
 	}
@@ -367,6 +384,86 @@ func (systemd) status(m Manager, st Status) (Status, error) {
 }
 
 func (systemd) logHint(Manager) string { return "journalctl --user -u " + UnitName }
+
+// taskScheduler is the Windows backend: a logon task for the current user,
+// which needs no admin rights. The XML it was imported from stays next to
+// the config, so a failed upgrade can import the previous one again.
+// schtasks' messages are translated, so only exit codes are relied on.
+type taskScheduler struct{}
+
+func (taskScheduler) path(m Manager) string {
+	return filepath.Join(m.Config, paths.AppName, "service-task.xml")
+}
+
+// render refuses folder overrides: a task's action has no environment, so
+// the daemon would use the default folders while the CLI uses others.
+func (taskScheduler) render(m Manager) ([]byte, error) {
+	if len(m.Env) > 0 {
+		return nil, fmt.Errorf("service: the logon task can't carry %s; unset it, or run `burnout daemon` in a terminal instead",
+			strings.Join(sortedKeys(m.Env), ", "))
+	}
+	return RenderTask(m.Bin, m.Args, m.SID)
+}
+
+// prepare creates the crash log the daemon sends Go's crash output to:
+// Task Scheduler keeps no output.
+func (taskScheduler) prepare(m Manager) error { return launchd{}.prepare(m) }
+
+func (taskScheduler) start(m Manager, path string) error {
+	name := TaskName(m.SID)
+	if err := m.run("schtasks", "/Create", "/XML", path, "/TN", name, "/F"); err != nil {
+		return err
+	}
+	// The task stops a running instance before starting the new one, so
+	// there's no /End here: Task Scheduler could still list the old one
+	// when /Run arrives.
+	return m.run("schtasks", "/Run", "/TN", name)
+}
+
+func (t taskScheduler) stop(m Manager) error {
+	name := TaskName(m.SID)
+	if !t.exists(m) {
+		return nil
+	}
+	_, _ = m.Run.Run("schtasks", "/End", "/TN", name)
+	return m.run("schtasks", "/Delete", "/TN", name, "/F")
+}
+
+func (taskScheduler) afterRemove(Manager) {}
+
+func (taskScheduler) exists(m Manager) bool {
+	_, err := m.Run.Run("schtasks", "/Query", "/TN", TaskName(m.SID))
+	return err == nil
+}
+
+// taskStateScript prints the task's state by its enum name (Ready,
+// Running, Disabled…), which unlike schtasks' status column isn't
+// translated.
+const taskStateScript = "(Get-ScheduledTask -TaskPath '\\' -TaskName '%s' -ErrorAction Stop).State"
+
+// taskStates are the answers Get-ScheduledTask gives.
+var taskStates = []string{"Unknown", "Disabled", "Queued", "Ready", "Running"}
+
+func (t taskScheduler) status(m Manager, st Status) (Status, error) {
+	// A task deleted in Task Scheduler's window is gone, whatever the
+	// XML file says.
+	if st.Installed = t.exists(m); !st.Installed {
+		return st, nil
+	}
+	args := []string{"-NoProfile", "-NonInteractive", "-Command", fmt.Sprintf(taskStateScript, TaskName(m.SID))}
+	out, err := m.Run.Run("powershell", args...)
+	state := strings.TrimSpace(out)
+	if err != nil || !slices.Contains(taskStates, state) {
+		if err == nil {
+			err = errors.New("unexpected answer")
+		}
+		return st, cmdError(out, err, "powershell", args...)
+	}
+	st.Detail, st.Running = "task "+strings.ToLower(state), state == "Running"
+	return st, nil
+}
+
+func (taskScheduler) logHint(m Manager) string { return launchd{}.logHint(m) }
 
 // checkValue rejects text a service definition can't hold safely: control
 // characters anywhere, and characters the definition's quoting gives

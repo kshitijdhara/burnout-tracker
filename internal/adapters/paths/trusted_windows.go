@@ -2,6 +2,6 @@
 
 package paths
 
-// CheckTrustedExecutable is not checked on Windows yet: ACLs apply, and
-// there is no background service there (see ErrUnverified).
+// CheckTrustedExecutable is not checked on Windows yet: ACLs apply, which
+// this package doesn't read yet (see ErrUnverified).
 func CheckTrustedExecutable(string) error { return nil }

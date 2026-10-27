@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -70,11 +71,33 @@ func serviceManager() (service.Manager, string, error) {
 		return service.Manager{}, "", err
 	}
 	dataDir := env[paths.EnvDataDir]
+	var sid string
+	if runtime.GOOS == "windows" {
+		u, err := user.Current()
+		if err != nil {
+			return service.Manager{}, "", err
+		}
+		sid = u.Uid // the SID on Windows
+		env = windowsServiceEnv()
+	}
 	return service.Manager{
 		GOOS: runtime.GOOS, Bin: bin, Args: daemonServiceArgs, Env: env,
 		Home: home, Config: cfg, LogDir: paths.LogDir(dataDir),
-		UID: os.Getuid(), Run: service.ExecRunner{},
+		UID: os.Getuid(), SID: sid, Run: service.ExecRunner{},
 	}, dataDir, nil
+}
+
+// windowsServiceEnv returns the overrides set in this shell. A logon task
+// can't carry them, so install refuses while any is set; the defaults
+// (%LOCALAPPDATA%, %APPDATA%) resolve the same way at logon.
+func windowsServiceEnv() map[string]string {
+	env := map[string]string{}
+	for _, name := range []string{paths.EnvDataDir, paths.EnvConfigDir, paths.EnvRuntimeDir, envKeystore} {
+		if v := os.Getenv(name); v != "" {
+			env[name] = v
+		}
+	}
+	return env
 }
 
 // serviceEnv pins the service to the folders this shell resolves, so the
@@ -150,7 +173,11 @@ func uninstallService(ctx context.Context, m service.Manager) error {
 	deadline := time.Now().Add(serviceStopWait)
 	for daemonAnswers(ctx) {
 		if time.Now().After(deadline) {
-			fmt.Println("A daemon is still running, probably one started in a terminal: stop it with Ctrl-C or `pkill -INT -x burnout`.")
+			stop := "`pkill -INT -x burnout`"
+			if runtime.GOOS == "windows" {
+				stop = "closing its terminal"
+			}
+			fmt.Printf("A daemon is still running, probably one started in a terminal: stop it with Ctrl-C or %s.\n", stop)
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
