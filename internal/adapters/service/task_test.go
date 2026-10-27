@@ -48,13 +48,13 @@ func decodeTask(t *testing.T, b []byte) string {
 }
 
 func TestTaskInstallUninstall(t *testing.T) {
-	r := &fakeRunner{fail: map[string]bool{stEnd: true}}
+	r := &fakeRunner{}
 	m := taskManager(t, r)
 	if err := m.Install(); err != nil {
 		t.Fatal(err)
 	}
 	path, _ := m.Path()
-	if want := []string{stCreate(path), stEnd, stRun}; !slices.Equal(r.calls, want) {
+	if want := []string{stCreate(path), stRun}; !slices.Equal(r.calls, want) {
 		t.Fatalf("calls = %q, want %q", r.calls, want)
 	}
 	def, err := os.ReadFile(path) //nolint:gosec // test file
@@ -201,8 +201,8 @@ func TestRenderTask(t *testing.T) {
 		{p.UserID, testSID},
 		{p.LogonType, "InteractiveToken"}, // only in the user's desktop session
 		{p.RunLevel, "LeastPrivilege"},
-		{set.MultipleInstancesPolicy, "IgnoreNew"},
-		{set.ExecutionTimeLimit, "PT0S"}, // the default stops it after 72 h
+		{set.MultipleInstancesPolicy, "StopExisting"}, // a reinstall replaces the daemon
+		{set.ExecutionTimeLimit, "PT0S"},              // the default stops it after 72 h
 		{set.RestartOnFailure.Interval, "PT1M"},
 		{task.Actions.Exec.Command, `C:\Program Files\R&D <tools>\burnout.exe`},
 		{task.Actions.Exec.Arguments, "daemon --service"},

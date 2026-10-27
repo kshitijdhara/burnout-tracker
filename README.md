@@ -329,8 +329,9 @@ Steps 2–5 are the same as on macOS, except as noted below. Building and removi
   The background service is a logon task in Task Scheduler for your
   account only, so it needs no admin rights: `burnout service install`
   registers it and starts the daemon. It runs only while you're signed in
-  to the desktop, and Task Scheduler restarts it a minute after it exits
-  with an error; a console window may flash briefly at sign-in. It
+  to the desktop, and Task Scheduler is documented to restart it a minute
+  after it exits with an error (not yet verified on a real machine); a
+  console window may flash briefly at sign-in. It
   can't carry `BURNOUT_DATA_DIR` or the other folder overrides, so
   install refuses while one is set. Its log is
   `%LOCALAPPDATA%\burnout\logs\daemon.log`, and Go's crash output goes

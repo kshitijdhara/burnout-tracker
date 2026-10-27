@@ -414,10 +414,9 @@ func (taskScheduler) start(m Manager, path string) error {
 	if err := m.run("schtasks", "/Create", "/XML", path, "/TN", name, "/F"); err != nil {
 		return err
 	}
-	// The task doesn't start a second instance, so end the old daemon
-	// for the new definition (and binary) to take over. Ending a task
-	// that isn't running fails, which is fine.
-	_, _ = m.Run.Run("schtasks", "/End", "/TN", name)
+	// The task stops a running instance before starting the new one, so
+	// there's no /End here: Task Scheduler could still list the old one
+	// when /Run arrives.
 	return m.run("schtasks", "/Run", "/TN", name)
 }
 
