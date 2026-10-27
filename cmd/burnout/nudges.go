@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
@@ -83,9 +86,53 @@ func publishGuardrails(scores []strain.Score) {
 	}
 }
 
-// nudgeBoundaries are the user's boundaries for nudges. Boundaries arrive
-// with C1; until then only the guardrail nudges can show.
-func nudgeBoundaries() nudge.Boundaries { return nudge.Boundaries{} }
+// boundariesEvery is how often the daemon rereads the boundaries for
+// nudges. A new rule applies from the next day, so this only needs to be
+// well within a day.
+const boundariesEvery = 5 * time.Minute
+
+// latestBoundaries are the stored boundaries, history included.
+var latestBoundaries atomic.Pointer[[]boundary.Boundary]
+
+// boundaryLoop keeps latestBoundaries current until ctx ends. A failed
+// read keeps the last boundaries.
+func boundaryLoop(ctx context.Context, log *slog.Logger, store *sqlite.Store) {
+	for {
+		if bs, err := store.Boundaries(ctx); err != nil {
+			if ctx.Err() == nil {
+				log.Warn("could not read boundaries for nudges", "err", err)
+			}
+		} else {
+			latestBoundaries.Store(&bs)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(boundariesEvery):
+		}
+	}
+}
+
+// nudgeBoundaries are the boundaries that apply on the logical day.
+func nudgeBoundaries(day string) nudge.Boundaries {
+	var nb nudge.Boundaries
+	bs := latestBoundaries.Load()
+	if bs == nil {
+		return nb
+	}
+	for _, b := range *bs {
+		if !b.ActiveOn(day) {
+			continue
+		}
+		switch b.Kind {
+		case boundary.Shutdown:
+			nb.Shutdown, nb.HasShutdown = b.ShutdownAt(), true
+		case boundary.NoWeekend:
+			nb.WeekendsOff = true
+		}
+	}
+	return nb
+}
 
 // trayNudge is the nudge the tray shows at now, if any (system design
 // §8.3), and records the day's first one. Everything unknown, from an
@@ -112,7 +159,7 @@ func trayNudge(dataDir string, c config.Config, now time.Time, paused, private b
 		}
 	}
 	today := nudge.Today{Day: n.Day, Kind: nudge.Kind(n.Kind), Snoozed: n.Snoozed}
-	d := nudge.Decide(s, nudgeBoundaries(), guardrails, today, at)
+	d := nudge.Decide(s, nudgeBoundaries(at.Day), guardrails, today, at)
 	if !d.Show {
 		return tray.Nudge{}
 	}

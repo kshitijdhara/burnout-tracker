@@ -372,8 +372,9 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 	var loopsDone sync.WaitGroup
 	defer loopsDone.Wait() // before the store closes
 	runLoops := func(ctx context.Context) {
-		loopsDone.Add(2)
+		loopsDone.Add(3)
 		go func() { defer loopsDone.Done(); calendarLoop(ctx, log, store, dataDir, keys, settings) }()
+		go func() { defer loopsDone.Done(); boundaryLoop(ctx, log, store) }()
 		go func() { defer loopsDone.Done(); updateLoop(ctx, log, dataDir, settings) }()
 	}
 

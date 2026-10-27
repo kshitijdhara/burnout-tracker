@@ -6,6 +6,8 @@ import (
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
 )
 
@@ -121,5 +123,30 @@ func TestTrayNudge(t *testing.T) {
 	c.Nudges.WeeklyHours = true // the file's switch can't turn the tray's off back on
 	if s := trayStatus(dir, c, later); s.Nudge.Kind != "" {
 		t.Errorf("turned off, config on: %+v", s.Nudge)
+	}
+}
+
+// TestNudgeBoundaries: only the rules that apply on the day count, so a
+// shutdown time set tonight starts tomorrow.
+func TestNudgeBoundaries(t *testing.T) {
+	t.Cleanup(func() { latestBoundaries.Store(nil) })
+	if b := nudgeBoundaries("2026-10-26"); b != (nudge.Boundaries{}) {
+		t.Errorf("none read yet: %+v", b)
+	}
+	bs := []boundary.Boundary{
+		{Kind: boundary.Shutdown, Value: "20:00", Since: "2026-10-01", Until: "2026-10-26"},
+		{Kind: boundary.Shutdown, Value: "21:30", Since: "2026-10-26"},
+		{Kind: boundary.NoWeekend, Since: "2026-10-27"},
+		{Kind: boundary.MeetingsMax, Value: "4", Since: "2026-10-01"},
+	}
+	latestBoundaries.Store(&bs)
+	if b := nudgeBoundaries("2026-10-25"); b.Shutdown != 20*time.Hour || !b.HasShutdown || b.WeekendsOff {
+		t.Errorf("the old rule: %+v", b)
+	}
+	if b := nudgeBoundaries("2026-10-26"); b.Shutdown != 21*time.Hour+30*time.Minute || b.WeekendsOff {
+		t.Errorf("the new rule: %+v", b)
+	}
+	if b := nudgeBoundaries("2026-10-27"); !b.WeekendsOff {
+		t.Errorf("no weekend from its first day: %+v", b)
 	}
 }

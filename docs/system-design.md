@@ -922,7 +922,8 @@ Phase 1 so far (`internal/domain/nudge`, the tray):
   - one nudge kind per logical day, recorded in the `nudges` control file
     so a restart can't show a second one;
   - kinds, in priority order: shutdown time passed on a workday, working
-    on a day kept free, then the latest scored day's guardrails (a long
+    on a weekend under the no-weekend rule (boundaries as they apply on the
+    day, reread every 5 minutes), then the latest scored day's guardrails (a long
     week, a short night, a busy weekend). Guardrails come from the last
     maintenance, so they describe yesterday, and are ignored once they are
     more than two days old;
@@ -943,8 +944,6 @@ Phase 1 so far (`internal/domain/nudge`, the tray):
     Access), so calls and video stand in. Windows and Linux can't see
     calls either. Each collector lists the gap in `Limitations`, and
     `burnout doctor` shows it;
-  - the boundary kinds (shutdown, days off) read the boundaries from C1,
-    which aren't wired yet;
   - the dashboard's "blur numbers" option.
 
 ### 8.4 Safety
