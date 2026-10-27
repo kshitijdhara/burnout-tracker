@@ -61,9 +61,11 @@ func runSetup(ctx context.Context, _ []string) error {
 
 // setupSteps are setup's side effects outside the config folder, so
 // tests can run the whole flow without touching the disk-encryption check,
-// dotfiles, the keystore, the service manager or System Settings.
+// dotfiles, the keystore, the service manager, a running daemon or System
+// Settings.
 type setupSteps struct {
 	checkDisk      func(context.Context, io.Writer)
+	daemonRunning  func(context.Context) bool
 	installHooks   func(context.Context) error
 	addCalendar    func(context.Context, ics.Source) error
 	installService func(context.Context) error
@@ -72,8 +74,9 @@ type setupSteps struct {
 
 func realSetupSteps() setupSteps {
 	s := setupSteps{
-		checkDisk:    warnIfUnencrypted,
-		installHooks: func(ctx context.Context) error { return runInstallHooks(ctx, nil) },
+		checkDisk:     warnIfUnencrypted,
+		daemonRunning: daemonAnswers,
+		installHooks:  func(ctx context.Context) error { return runInstallHooks(ctx, nil) },
 		addCalendar: func(ctx context.Context, src ics.Source) error {
 			dataDir, err := paths.DataDir()
 			if err != nil {
@@ -123,7 +126,7 @@ func setupFlow(ctx context.Context, in *bufio.Reader, out io.Writer, steps setup
 		return err
 	}
 	setupProfile(in, out)
-	offerTitles(in, out, steps.openTitlesPane)
+	titlesTurnedOn := offerTitles(in, out, steps.openTitlesPane)
 
 	_, _ = fmt.Fprintln(out, "\nOptional integrations. Each is off until you say yes.")
 	if askYesNo(in, out, "Install the shell and Claude Code hooks? They record command names and Claude Code session timing.") {
@@ -132,8 +135,10 @@ func setupFlow(ctx context.Context, in *bufio.Reader, out io.Writer, steps setup
 		laterHint(out, "burnout install-hooks")
 	}
 	offerCalendar(ctx, in, out, steps.addCalendar)
+	restarted := false
 	if askYesNo(in, out, "Run burnout in the background from login?") {
 		err := steps.installService(ctx)
+		restarted = err == nil
 		if errors.Is(err, service.ErrUnsupported) {
 			_, _ = fmt.Fprintln(out, "This system has no supported service manager: run `burnout daemon` in a terminal instead.")
 		} else {
@@ -141,6 +146,10 @@ func setupFlow(ctx context.Context, in *bufio.Reader, out io.Writer, steps setup
 		}
 	} else {
 		_, _ = fmt.Fprintln(out, "Not now. To do it later: `burnout service install`, or `burnout daemon` in a terminal.")
+	}
+	if titlesTurnedOn && !restarted && steps.daemonRunning(ctx) {
+		_, _ = fmt.Fprintln(out, "A daemon is running and reads title classification only when it starts: run `burnout service install`\n"+
+			"to restart it now, or if it runs in a terminal, stop it with Ctrl-C and start `burnout daemon` again.")
 	}
 	_, _ = fmt.Fprint(out, firstWeeks(strain.DefaultParams()))
 	return nil
@@ -170,19 +179,20 @@ func reportStep(out io.Writer, err error, cmd string) {
 
 // offerTitles is §8.1 step 3: burnout starts in zero-permission mode, and
 // title classification is offered with what it adds. openPane, if set,
-// opens the OS permission it needs, only after a yes.
-func offerTitles(in *bufio.Reader, out io.Writer, openPane func() error) {
+// opens the OS permission it needs, only after a yes. It reports whether
+// it turned title classification on.
+func offerTitles(in *bufio.Reader, out io.Writer, openPane func() error) bool {
 	_, _ = fmt.Fprintln(out, `
 burnout starts in zero-permission mode: the app in front, idle time, screen
 lock and calls, and what the hooks send. Keyboard and mouse counts stay off.`)
 	c, path, err := loadConfig()
 	if err != nil {
 		_, _ = fmt.Fprintln(out, "Skipping title classification: the config file is invalid (see `burnout config validate`).")
-		return
+		return false
 	}
 	if c.Privacy.TitleClassification {
 		_, _ = fmt.Fprintln(out, "Title classification is on. `burnout config set privacy.title_classification false` turns it off.")
-		return
+		return false
 	}
 	_, _ = fmt.Fprintln(out, `
 Optional: title classification.
@@ -195,12 +205,12 @@ Optional: title classification.
 	}
 	if !askYesNo(in, out, "Turn it on?") {
 		laterHint(out, "burnout config set privacy.title_classification true")
-		return
+		return false
 	}
 	c.Privacy.TitleClassification = true
 	if err := config.Save(path, c); err != nil {
 		_, _ = fmt.Fprintf(out, "Couldn't save it: %v\n", err)
-		return
+		return false
 	}
 	_, _ = fmt.Fprintln(out, "Title classification is on.")
 	if openPane != nil {
@@ -209,6 +219,7 @@ Optional: title classification.
 		}
 		_, _ = fmt.Fprintln(out, "Until you allow it, browser time counts as one app. `burnout doctor` shows whether it is granted.")
 	}
+	return true
 }
 
 // offerCalendar is §8.1 step 4's ICS feed. A remote feed's URL is a

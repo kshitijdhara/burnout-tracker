@@ -110,7 +110,7 @@ func runForget(ctx context.Context, args []string) error {
 	last := fs.Duration("last", 0, "forget the last DURATION, e.g. 1h")
 	today := fs.Bool("today", false, "forget everything recorded today")
 	since := fs.String("since", "", "forget everything since a date, YYYY-MM-DD")
-	all := fs.Bool("all", false, "forget everything recorded (annotations, consent and hooks stay)")
+	all := fs.Bool("all", false, "forget everything recorded (annotations, boundaries, consent and hooks stay)")
 	yes := fs.Bool("yes", false, "don't ask for confirmation")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

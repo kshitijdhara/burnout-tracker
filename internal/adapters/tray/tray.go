@@ -1,8 +1,8 @@
 // Package tray shows the menu-bar icon (macOS) or notification-area icon
 // (Windows, Linux) while the daemon runs, and its menu: whether anything
 // is being recorded, pause and resume, delete the last hour or today, open
-// the dashboard (privacy & security §5.1), and the monthly "what's
-// collected" reminder (§5.2 AC-4). The icon has no hide or
+// the dashboard (privacy & security §5.1), the monthly "what's
+// collected" reminder (§5.2 AC-4) and the day's nudge (system design §8.3). The icon has no hide or
 // quit item: while a collector runs it stays visible (§5.2 AC-1).
 package tray
 
@@ -20,6 +20,17 @@ type Status struct {
 	// Reminder is true while the monthly "what's collected" reminder is
 	// due: the menu shows Review, and on macOS the menu bar says so too.
 	Reminder bool
+	// Nudge is the day's nudge while it may show; the zero Nudge for none.
+	// It shows as a menu item, and on macOS beside the icon unless the
+	// reminder is due. It never shows in the first line or the tooltip.
+	Nudge Nudge
+}
+
+// Nudge is a nudge as the menu shows it.
+type Nudge struct {
+	Kind  string // what Snooze and TurnOff act on
+	Title string // beside the icon
+	Text  string // the menu item
 }
 
 // PauseFor is how long a pause from the menu lasts.
@@ -52,7 +63,11 @@ type Menu struct {
 	OpenDashboard func() error
 	// Review opens what's collected and marks the reminder seen.
 	Review func() error
-	Log    *slog.Logger
+	// SnoozeNudge hides a nudge of kind until tomorrow; TurnOffNudge hides
+	// that kind for good.
+	SnoozeNudge  func(kind string) error
+	TurnOffNudge func(kind string) error
+	Log          *slog.Logger
 }
 
 // Work is what runs while the icon shows. shown reports whether the icon is

@@ -146,10 +146,23 @@ score.
 13 questions of the Copenhagen Burnout Inventory (about a minute); `status`
 reminds you when it's due. `burnout checkin --daily` asks two quick
 questions about today. `burnout review` compares the last 7 days with the
-7 before: strain, what kept coming up, limits crossed, your check-ins, and
-one or two things to try. Check-in answers stay on this device. If a
+7 before: strain, what kept coming up, limits crossed, your check-ins, how
+your boundaries went, and one or two things to try. In a terminal it then
+asks a few skippable questions: set the boundary a suggestion offers, mark
+the week (vacation, on call, …), and pick a category for up to three apps
+it couldn't place. Check-in answers stay on this device. If a
 result is high, the check-in shows support resources for your region
 (from your locale) and a worldwide directory.
+
+**Boundaries.** Rules you set for your own work:
+`burnout boundary add shutdown 21:30` (no work after 21:30 on workdays),
+`add no-weekend`, `add meetings-max 4` (hours of meetings on a workday)
+and `add focus-block 90` (a focus block of at least 90 minutes on
+workdays). The review shows on how many days each was kept, counting only
+days with enough data and leaving out vacation and sick days; 15 minutes
+of work past the line doesn't count against you. A rule applies from the
+next day. `boundary list` shows them (`--history` for every change) and
+`boundary remove shutdown` ends one.
 
 **Privacy controls.**
 - `burnout privacy` shows what's collected, your current settings and
@@ -159,7 +172,7 @@ result is high, the check-in shows support resources for your region
   discarded.
 - `burnout forget --last 1h`, `--today`, `--since 2026-10-20` or `--all`
   deletes recorded data for good, including recovery copies made since
-  then. Your annotations, consent and hooks stay.
+  then. Your annotations, boundaries, consent and hooks stay.
 - `burnout export --out burnout.json` writes your data out as one JSON
   file; `--format csv --out DIR` writes a new folder with one CSV per kind
   of data; `--since` and `--until` take dates. The format is described in
@@ -185,8 +198,8 @@ recompute the days whose detail is still kept (180 days by default).
   crossed;
 - today, minute by minute: categories, apps, meetings, terminal and AI
   agents;
-- the weekly review, the days you marked (add or remove them) and the
-  weekly check-in;
+- the weekly review, your boundaries and the days you marked (add or
+  remove them), and the weekly check-in;
 - a privacy page with pause, resume and "delete the last hour or today"
   buttons, what is collected and your settings.
 
@@ -194,7 +207,7 @@ recompute the days whose detail is still kept (180 days by default).
 
 It runs only while the command does (Ctrl-C stops it), on 127.0.0.1. Its
 buttons do what the matching commands do (`burnout pause`, `forget`,
-`annotate`, `checkin`), and deleting asks first. The link it opens works
+`annotate`, `boundary`, `checkin`), and deleting asks first. The link it opens works
 once, within a minute; after that the tab uses a cookie that only this
 browser holds. A website you visit can't read it or press its buttons: the
 page refuses other sites and host names, every change needs a token only
@@ -208,6 +221,19 @@ hour or today, and opens the dashboard. It has no hide option: while the
 daemon records anything, the icon shows. If it can't show (over ssh, or a
 Linux desktop without a tray), the daemon records nothing and exits. On
 Linux the desktop needs a tray; GNOME needs the AppIndicator extension.
+
+**Nudges.** At most once a day the tray menu offers a gentle nudge, for
+example after a long week or past the shutdown time you set. On macOS
+a short title also shows beside the icon, unless the monthly
+"Review what's collected" reminder is due. A nudge never names a number. It
+waits out calls, video, pauses and private hours, and only shows between
+`nudges.waking_hours` (07:00–23:00 by default). Click it to snooze it until
+tomorrow or turn that kind off for good. `burnout config set nudges.enabled
+false` turns them all off, and `nudges.shutdown`, `nudges.weekly_hours` and
+the other kinds turn off one at a time. macOS can't tell burnout about
+Focus or a screen share without a new permission, so it waits for calls
+instead. Windows and Linux can't see calls yet; `burnout doctor` lists
+these gaps.
 
 **Your calendar (optional).** Meetings away from the screen count too if
 you add your calendar's ICS feed:

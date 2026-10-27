@@ -286,6 +286,20 @@ func TestEndToEnd(t *testing.T) {
 	if out, _, err := run("", "annotate", "list"); err != nil || !strings.Contains(out, "vacation, 2026-11-02 to 2026-11-06 (5 days): away") {
 		t.Fatalf("annotate list: %v %s", err, out)
 	}
+	// Boundaries, against the real database. Without a terminal the
+	// review asks nothing.
+	if out, _, err := run("", "boundary", "add", "shutdown", "21:30"); err != nil || !strings.Contains(out, "Set: stop work by 21:30") {
+		t.Fatalf("boundary add: %v %s", err, out)
+	}
+	if out, _, err := run("", "boundary", "list"); err != nil || !strings.Contains(out, "stop work by 21:30 on workdays") {
+		t.Fatalf("boundary list: %v %s", err, out)
+	}
+	if out, _, err := run("y\n", "review"); err != nil || !strings.Contains(out, "Your boundaries:") || strings.Contains(out, "questions") {
+		t.Fatalf("review with a boundary: %v\n%s", err, out)
+	}
+	if out, _, err := run("", "boundary", "remove", "shutdown"); err != nil || !strings.Contains(out, "Removed") {
+		t.Fatalf("boundary remove: %v %s", err, out)
+	}
 	if out, _, err := run("", "privacy"); err != nil || !strings.Contains(out, "Collection:") || !strings.Contains(out, "burnout forget") {
 		t.Fatalf("privacy: %v %s", err, out)
 	}

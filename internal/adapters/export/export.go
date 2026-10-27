@@ -97,6 +97,17 @@ type Annotation struct {
 	Note string `json:"note,omitempty"`
 }
 
+// Boundary is a rule the user set for their work, with the days it
+// applied to. Until is the first day it no longer applied, empty while it
+// is active.
+type Boundary struct {
+	Kind   string `json:"kind"`
+	Value  string `json:"value,omitempty"`
+	Since  string `json:"since"`
+	Until  string `json:"until,omitempty"`
+	Source string `json:"source"` // cli, dashboard or review
+}
+
 // Source reads the rows of r, oldest first, calling fn for each. The
 // store implements it over one read transaction, so an export is a
 // consistent snapshot.
@@ -106,6 +117,8 @@ type Source interface {
 	Days(ctx context.Context, r Range, fn func(Day) error) error
 	Checkins(ctx context.Context, r Range, fn func(Checkin) error) error
 	Annotations(ctx context.Context, r Range, fn func(Annotation) error) error
+	// Boundaries are those that applied on a day in r, in the order set.
+	Boundaries(ctx context.Context, r Range, fn func(Boundary) error) error
 }
 
 // Meta describes an export.
@@ -117,7 +130,7 @@ type Meta struct {
 
 // Counts are how many rows of each kind were written.
 type Counts struct {
-	Minutes, Intervals, Days, Checkins, Annotations int
+	Minutes, Intervals, Days, Checkins, Annotations, Boundaries int
 }
 
 // WriteJSON streams one JSON document to w: the metadata, then an array
@@ -158,6 +171,9 @@ func WriteJSON(ctx context.Context, w io.Writer, src Source, m Meta) (Counts, er
 		}},
 		{"annotations", &n.Annotations, func(f func(any) error) error {
 			return src.Annotations(ctx, m.Range, func(r Annotation) error { return f(r) })
+		}},
+		{"boundaries", &n.Boundaries, func(f func(any) error) error {
+			return src.Boundaries(ctx, m.Range, func(r Boundary) error { return f(r) })
 		}},
 	}
 	for _, s := range sections {
@@ -200,6 +216,7 @@ const (
 	DaysCSV        = "days.csv"
 	CheckinsCSV    = "checkins.csv"
 	AnnotationsCSV = "annotations.csv"
+	BoundariesCSV  = "boundaries.csv"
 )
 
 // WriteCSV writes one CSV file per kind of row into dir, which must not
@@ -282,6 +299,12 @@ func WriteCSV(ctx context.Context, dir string, src Source, m Meta, features []st
 					return write([]string{r.From, r.To, r.Kind, r.Note})
 				})
 			}, &n.Annotations},
+		{BoundariesCSV, []string{"kind", "value", "since", "until", "source"},
+			func(write func([]string) error) error {
+				return src.Boundaries(ctx, m.Range, func(r Boundary) error {
+					return write([]string{r.Kind, r.Value, r.Since, r.Until, r.Source})
+				})
+			}, &n.Boundaries},
 	}
 	for _, file := range files {
 		if err := writeCSVFile(filepath.Join(dir, file.name), file.header, file.rows, file.count); err != nil {

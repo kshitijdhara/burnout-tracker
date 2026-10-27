@@ -372,8 +372,9 @@ func collect(ctx context.Context, log *slog.Logger, dataDir string, safe bool, s
 	var loopsDone sync.WaitGroup
 	defer loopsDone.Wait() // before the store closes
 	runLoops := func(ctx context.Context) {
-		loopsDone.Add(2)
+		loopsDone.Add(3)
 		go func() { defer loopsDone.Done(); calendarLoop(ctx, log, store, dataDir, keys, settings) }()
+		go func() { defer loopsDone.Done(); boundaryLoop(ctx, log, store) }()
 		go func() { defer loopsDone.Done(); updateLoop(ctx, log, dataDir, settings) }()
 	}
 
@@ -427,7 +428,7 @@ func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 	}
 	caps := c.Capabilities()
 	log.Info("collector ready", "name", caps.Name, "titles", caps.Titles, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
-	return c
+	return presenceCollector{c}
 }
 
 // liveConfig is the config file as the daemon last read it. The loop
@@ -495,6 +496,7 @@ func saveScores(ctx context.Context, store *sqlite.Store, now time.Time, c confi
 	if err := store.SaveFeatureDays(ctx, sc.Computed, opts.Features.Key()); err != nil {
 		return err
 	}
+	publishGuardrails(sc.Scores)
 	return store.SaveScores(ctx, sc.Scores)
 }
 

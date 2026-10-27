@@ -115,6 +115,7 @@ user's account and protected at rest by OS full-disk encryption
 | Check-in answers (CBI items, daily sliders) | User | on (prompted; skippable) | Item answers and computed score | 2 y | Never |
 | Check-in free text | User | **opt-in**, requires the Laya classifier | **Never persisted.** Scored in memory against fixed questions; only the scores are stored | — | Never |
 | Annotations (on-call, exam week, vacation, sick, …) | User | on (user-created) | Tag + period; optional short note | 2 y | Never |
+| Boundaries (shutdown time, no weekend work, meetings cap, focus block) | User | on (user-created) | Kind, value, the days it applied, and whether it was set from the review | Until deleted with the data folder | Never |
 | Core hours, role, settings | User | on | Config file (no secrets) | Until changed | Never |
 | Daily features | Feature pipeline | on | JSON per logical day | 2 y (configurable) | Never (Phase 4 research export only on explicit request, §11) |
 | Scores, components, forecasts | Scorer | on | Numbers and driver labels | 2 y (configurable) | Never |
@@ -229,7 +230,7 @@ Phase 1 so far:
   2. It deletes rows from then on and the derived rows of those days,
      plus every recovery and pre-migration copy made since then.
   3. It overwrites freed pages and truncates the WAL.
-  - Annotations, consent and hooks are kept.
+  - Annotations, boundaries, consent and hooks are kept.
   - Logs aren't touched: they hold no activity data (§10).
 - **Privacy view** is built: `burnout privacy`.
 - **Sensitive-apps denylist** is built for desktop apps: password
@@ -283,6 +284,14 @@ Phase 1 so far:
   - An invalid file is never half-applied. A running daemon keeps its
     current settings, and a starting one refuses to run on defaults,
     which could silently drop private hours or exclusions.
+- **Screen-share safety** is partly built (system design §8.3). Nudges
+  are held back during calls and video, and while paused, in private
+  hours or outside waking hours. The tray keeps them out of its first line
+  and tooltip. Focus/Do Not Disturb and screen sharing aren't detected:
+  - macOS exposes neither without a new permission, so calls stand in;
+  - Windows and Linux can't see calls yet either.
+  Each collector lists the gap in its limitations (`burnout doctor`).
+  The "blur numbers" option isn't built.
 - **Export** is built: `burnout export --out FILE [--format csv]
   [--since DATE] [--until DATE]`.
   - It reads one consistent snapshot, read-only, so the daemon keeps
@@ -294,8 +303,9 @@ Phase 1 so far:
     prefixed with `'`.
   - The format is versioned (`schemas/v1/export.schema.json`).
   - Exports hold what the database holds: app ids, command names,
-    category minutes, features, scores, check-in answers and
-    annotations. Keyed hashes stay opaque.
+    category minutes, features, scores, check-in answers, annotations
+    and boundaries (those that applied in the range, with their
+    history). Keyed hashes stay opaque.
   - Exports live wherever the user saved them, so `forget` can't delete
     them. The data folder keeps a list of export paths (no contents), and
     `forget` and `privacy` show the ones still on disk.
@@ -516,7 +526,8 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   - no CORS headers.
 - **Write routes:** `POST /api/pause` (`1h`, `tomorrow` or
   `until-resumed`), `POST /api/resume`, `DELETE /api/data?range=hour|today`,
-  `POST /api/annotations`, `DELETE /api/annotations/{id}` and
+  `POST /api/annotations`, `DELETE /api/annotations/{id}`,
+  `POST /api/boundaries`, `DELETE /api/boundaries/{id}` and
   `POST /api/checkins` (the weekly CBI, every item). The page asks before
   deleting.
 - **Data access:** both dashboards (the CLI's and the tray's) can change
@@ -525,8 +536,9 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burnout dashboard`):
   - pause, resume and delete go through the control files the daemon's
     loop reads. While the daemon runs it does the deleting, as for
     `burnout forget`;
-  - annotations and check-ins open a short-lived read-write connection, as
-    `burnout annotate` and `burnout checkin` do while the daemon runs.
+  - annotations, boundaries and check-ins open a short-lived read-write
+    connection, as `burnout annotate`, `burnout boundary` and
+    `burnout checkin` do while the daemon runs.
   Errors are logged, never shown; the page sees only validation messages
   about its own request. A high check-in score shows the same support
   message and lines as the CLI (system design §8.4).

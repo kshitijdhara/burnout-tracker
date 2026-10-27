@@ -188,6 +188,7 @@ func capabilities(opts Options, idle bool) ports.Capabilities {
 		Titles:  opts.Titles,
 		Limitations: []string{
 			"video and call detection not implemented (presence relies on idle time)",
+			"Do Not Disturb and screen sharing aren't detected, so nudges can show during a call, a share or a presentation",
 			"input counts not implemented on Linux (idle-time deltas stand in)",
 		},
 	}

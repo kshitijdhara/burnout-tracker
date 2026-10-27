@@ -2,7 +2,7 @@ package dashboard
 
 // The routes that change data (privacy & security §5.1, §8.2; system
 // design §9): pause and resume, forget the last hour or today,
-// annotations, and the weekly check-in. guard lets a POST or DELETE
+// annotations, boundaries, and the weekly check-in. guard lets a POST or DELETE
 // through only if it matches a route here, comes from the page itself and
 // carries the session's CSRF token.
 
@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 )
 
@@ -56,6 +57,12 @@ type Control interface {
 	// RemoveAnnotation reports whether there was such an annotation.
 	RemoveAnnotation(ctx context.Context, id int64) (bool, error)
 	SaveCheckins(ctx context.Context, rs []checkin.Record) error
+	Boundaries(ctx context.Context) ([]Boundary, error) // the active ones
+	// SetBoundary makes b, already parsed, the rule of its kind from
+	// tomorrow; changed is false when it was already the rule.
+	SetBoundary(ctx context.Context, b boundary.Boundary) (id int64, changed bool, err error)
+	// RemoveBoundary reports whether there was such an active boundary.
+	RemoveBoundary(ctx context.Context, id int64) (bool, error)
 	// Region is the user's ISO 3166 region for support lines, or "".
 	Region() string
 }
@@ -64,6 +71,15 @@ type Control interface {
 type Annotation struct {
 	ID   int64  `json:"id"`
 	Text string `json:"text"` // "vacation, 2026-11-02 to 2026-11-06 (5 days): note"
+}
+
+// Boundary is an active rule, as the page lists it.
+type Boundary struct {
+	ID    int64  `json:"id"`
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+	Text  string `json:"text"` // "stop work by 21:30 on workdays"
+	Since string `json:"since"`
 }
 
 // Session is what the page needs before it changes anything.
@@ -182,6 +198,42 @@ func (s *Server) writeRoutes() *http.ServeMux {
 		}
 		return nil, err
 	}))
+	mux.HandleFunc("POST /api/boundaries", s.write(func(r *http.Request) (any, error) {
+		var body struct {
+			Kind  string `json:"kind"`
+			Value string `json:"value"`
+			// FromReview marks a boundary set from the week's
+			// suggestions (system design §8.6).
+			FromReview bool `json:"from_review"`
+		}
+		if err := decode(r, &body); err != nil {
+			return nil, err
+		}
+		b, err := boundary.Parse(body.Kind, body.Value)
+		if err != nil {
+			return nil, badRequest(err.Error()) // the domain's own words, about the request only
+		}
+		b.Source = boundary.SourceDashboard
+		if body.FromReview {
+			b.Source = boundary.SourceReview
+		}
+		id, changed, err := s.ctl.SetBoundary(r.Context(), b)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": id, "changed": changed}, nil
+	}))
+	mux.HandleFunc("DELETE /api/boundaries/{id}", s.write(func(r *http.Request) (any, error) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil || id <= 0 {
+			return nil, badRequest("no such boundary")
+		}
+		ok, err := s.ctl.RemoveBoundary(r.Context(), id)
+		if err == nil && !ok {
+			err = errNotFound
+		}
+		return nil, err
+	}))
 	mux.HandleFunc("POST /api/checkins", s.write(s.checkin))
 	return mux
 }
@@ -223,6 +275,17 @@ func decode(r *http.Request, v any) error {
 func (s *Server) session(r *http.Request) (any, error) {
 	tok, _ := s.sessionToken(r) // guard checked there is one
 	return Session{CSRF: tok, Writable: s.ctl != nil}, nil
+}
+
+func (s *Server) boundaries(r *http.Request) (any, error) {
+	if s.ctl == nil {
+		return []Boundary{}, nil
+	}
+	bs, err := s.ctl.Boundaries(r.Context())
+	if bs == nil {
+		bs = []Boundary{}
+	}
+	return bs, err
 }
 
 func (s *Server) annotations(r *http.Request) (any, error) {

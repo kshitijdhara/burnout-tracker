@@ -163,3 +163,19 @@ func (e exportSource) Annotations(ctx context.Context, r export.Range, fn func(e
 			return fn(a)
 		})
 }
+
+// Boundaries overlap the range as annotations do: a rule that applied on
+// any day of it. A rule set and removed the same day never applied
+// (until_day <= since_day) and is left out.
+func (e exportSource) Boundaries(ctx context.Context, r export.Range, fn func(export.Boundary) error) error {
+	return e.each(ctx, `
+		SELECT kind, value, since_day, COALESCE(until_day, ''), source FROM boundaries
+		WHERE since_day <= ? AND (until_day IS NULL OR (until_day > ? AND until_day > since_day)) ORDER BY id`,
+		[]any{r.To, r.From}, func(rows *sql.Rows) error {
+			var b export.Boundary
+			if err := rows.Scan(&b.Kind, &b.Value, &b.Since, &b.Until, &b.Source); err != nil {
+				return err
+			}
+			return fn(b)
+		})
+}
