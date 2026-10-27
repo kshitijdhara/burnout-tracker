@@ -61,6 +61,17 @@ type Day struct {
 	// user was present. A barely observed day is missing, not rest.
 	Coverage float64
 	Present  time.Duration
+
+	// Prior are earlier usable days (observed enough to be scored), in
+	// any order. Only days before Date are read; days since a light day
+	// needs them.
+	Prior []PriorDay
+}
+
+// PriorDay is what one earlier day contributes to features that look back.
+type PriorDay struct {
+	Date      string  // logical day, YYYY-MM-DD
+	AttendedH float64 // attended_hours
 }
 
 // Params are the definitions features depend on. Defaults follow the

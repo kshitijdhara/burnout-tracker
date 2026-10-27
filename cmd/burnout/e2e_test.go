@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 )
 
 // TestEndToEnd builds the real binary and runs the Phase 0 loop: daemon,
@@ -299,6 +301,37 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(exportDir, "csv", "intervals.csv")); err != nil || !strings.HasPrefix(string(b), "start,end,day,kind") { //nolint:gosec // test file
 		t.Fatalf("intervals.csv: %v\n%s", err, b)
+	}
+
+	// A diagnostics bundle needs a "yes" typed in a terminal, so it isn't
+	// written here; the same bundle, built in this process from the same
+	// folders, carries none of the canaries the daemon was fed.
+	bundlePath := filepath.Join(exportDir, "bundle.zip")
+	if _, errOut, err := run("yes\n", "doctor", "--bundle", bundlePath); err == nil || !strings.Contains(errOut, "run it in a terminal") {
+		t.Fatalf("doctor --bundle without a terminal: %v %s", err, errOut)
+	}
+	if _, err := os.Stat(bundlePath); !os.IsNotExist(err) {
+		t.Fatalf("doctor --bundle wrote a file without asking: %v", err)
+	}
+	report, _, _ := run("", "doctor")
+	for k, v := range map[string]string{"HOME": home, paths.EnvDataDir: dataDir, paths.EnvConfigDir: configDir, envKeystore: "file"} {
+		t.Setenv(k, v)
+	}
+	files, err := collectBundle(t.Context(), []byte(report))
+	if err == nil {
+		err = writeBundle(bundlePath, files)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := readBundle(t, bundlePath)
+	if !strings.Contains(bundle[paths.DaemonLogFile], "level=") {
+		t.Fatalf("bundle has no daemon log: %v", bundle)
+	}
+	for name, data := range bundle {
+		if strings.Contains(data, canary) || strings.Contains(data, home) {
+			t.Errorf("canary or home folder in bundle's %s", name)
+		}
 	}
 	if out, _, err := run("", "config", "set", "profile.core_hours", "7:30-16:30"); err != nil || !strings.Contains(out, "07:30-16:30") {
 		t.Fatalf("set core hours: %v %s", err, out)

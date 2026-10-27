@@ -698,7 +698,7 @@ device wasn't used, is **missing, not rest**. Work on another machine is
 indistinguishable from rest, so we say so in the UI and rely on import
 (F17) for multi-device users.
 
-v1 implementation notes (`internal/domain/features`, registry version 2):
+v1 implementation notes (`internal/domain/features`, registry version 3):
 - Built: attended hours, after-hours share (weekdays), meeting hours,
   app switches per hour, longest focus block (code, terminal, docs; gaps
   up to 2 min), comms share, breaks and longest break, overnight gap,
@@ -715,9 +715,30 @@ v1 implementation notes (`internal/domain/features`, registry version 2):
     one ending;
   - after-hours meetings: a weekday's meeting hours outside core hours;
   - the last two apply only on days a calendar sync covered.
-- Not yet: comms interrupt
-  rate, days since a light day, human switches while agents work, and
-  approval latency.
+- Registry version 3 adds the last four features:
+  - comms interrupt rate (fragmentation, weight 0.5, PM 0.25): moves of
+    attention into chat or email from another category, per attended
+    hour. Same stretch rule as app switches; Slack → Mail is not an
+    interrupt.
+  - app switches while agents worked (fragmentation, weight 0.5): app
+    switches between minutes inside the union of working agent segments,
+    per hour attended in that time; needs 30 min of it. The human
+    timeline has no window labels, so it is counted from the minutes.
+  - days since a light day (recovery, higher is worse, weight 0.5,
+    student 0.25): observed days after the last light one in the trailing
+    28 days, plus this day. A light day has attended hours below the
+    user's own 25th percentile over those days, or below 4 h until 7 are
+    observed. Only usable days (coverage and presence, §7.2) count, and
+    this day is never tested, since today's partial hours would always
+    look light. Days with no data are missing, not rest, so they neither
+    count nor reset it: a vacation off the device doesn't reset it, and
+    vacation annotations aren't read, because stored days aren't
+    recomputed when one is added.
+  - approval latency (friction, exploratory, weight 0): median length of
+    the day's waits on the human, with pieces of one wait (split at
+    rollover or a restart) joined. A wait ends when the agent moves on,
+    which takes the human's answer. Unanswered waits time out at zero
+    length and drop out.
 - Coverage is the share of present time attributed to a window, from the
   day's health record. A day with under 30 min of presence is "not used".
 

@@ -291,3 +291,166 @@ func TestCalendarFeatures(t *testing.T) {
 		t.Errorf("screen-only meeting_hours = %v", v)
 	}
 }
+
+func TestCommsInterruptRate(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		minutes []Minute
+		want    float64
+		ok      bool
+	}{
+		{name: "empty day"},
+		{name: "too little attention", minutes: minutes(at(9, 0), 10, "slack", model.CategoryComms)},
+		{
+			name: "into comms twice", ok: true, want: 2,
+			minutes: concat(
+				minutes(at(9, 0), 20, "editor", model.CategoryCode),
+				minutes(at(9, 20), 5, "slack", model.CategoryComms),
+				minutes(at(9, 25), 5, "mail", model.CategoryComms), // within comms: not another interrupt
+				minutes(at(9, 30), 20, "editor", model.CategoryCode),
+				minutes(at(9, 50), 10, "slack", model.CategoryComms),
+			),
+		},
+		{
+			name: "after a gap is not a switch", ok: true, want: 0,
+			minutes: concat(
+				minutes(at(9, 0), 40, "editor", model.CategoryCode),
+				minutes(at(11, 0), 20, "slack", model.CategoryComms),
+			),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, ok := value(t, "comms_interrupt_rate", Day{Minutes: tc.minutes})
+			if ok != tc.ok || !near(v, tc.want) {
+				t.Errorf("= %v, %v; want %v, %v", v, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestAgentSwitchesPerHour(t *testing.T) {
+	work := func(h1, m1, h2, m2 int, session string) Span {
+		return Span{Start: at(h1, m1), End: at(h2, m2), State: "working", Session: session}
+	}
+	// editor→browser→editor→slack, one switch every 15 minutes, 09:00–10:00.
+	day := concat(
+		minutes(at(9, 0), 15, "editor", model.CategoryCode),
+		minutes(at(9, 15), 15, "browser", model.CategoryBrowser),
+		minutes(at(9, 30), 15, "editor", model.CategoryCode),
+		minutes(at(9, 45), 15, "slack", model.CategoryComms),
+	)
+	for _, tc := range []struct {
+		name  string
+		agent []Span
+		want  float64
+		ok    bool
+	}{
+		{name: "no agents"},
+		{name: "agents only idle", agent: []Span{{Start: at(9, 0), End: at(10, 0), State: "idle"}}},
+		{name: "too little working time", agent: []Span{work(9, 0, 9, 20, "a")}},
+		{name: "working all hour", agent: []Span{work(9, 0, 10, 0, "a")}, ok: true, want: 3},
+		{
+			// Overlapping sessions count once; the switch at 09:45 is
+			// outside the union.
+			name: "parallel sessions", ok: true, want: 2 / (40.0 / 60),
+			agent: []Span{work(9, 5, 9, 40, "a"), work(9, 10, 9, 45, "b")},
+		},
+		{
+			// A switch across a gap in agent work doesn't count.
+			// Touching pieces join; an inverted span is ignored.
+			name: "two stretches", ok: true, want: 2 / (40.0 / 60),
+			agent: []Span{work(9, 10, 9, 20, "a"), work(9, 20, 9, 40, "a"), work(9, 50, 10, 0, "b"), work(9, 45, 9, 42, "c")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, ok := value(t, "agent_switches_per_hour", Day{Minutes: day, Agent: tc.agent})
+			if ok != tc.ok || !near(v, tc.want) {
+				t.Errorf("= %v, %v; want %v, %v", v, ok, tc.want, tc.ok)
+			}
+		})
+	}
+	if _, ok := value(t, "agent_switches_per_hour", Day{Agent: []Span{work(9, 0, 10, 0, "a")}}); ok {
+		t.Error("computed on an empty day")
+	}
+}
+
+func TestDaysSinceLightDay(t *testing.T) {
+	// hours returns earlier days ending the day before 2026-10-21, oldest
+	// first.
+	hours := func(h ...float64) []PriorDay {
+		out := make([]PriorDay, len(h))
+		end := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
+		for i, v := range h {
+			out[i] = PriorDay{Date: end.AddDate(0, 0, i-len(h)).Format(time.DateOnly), AttendedH: v}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name  string
+		date  string
+		prior []PriorDay
+		want  float64
+		ok    bool
+	}{
+		{name: "empty day", date: "2026-10-21"},
+		{name: "no date", prior: hours(8)},
+		{name: "nothing within 28 days", date: "2026-10-21", prior: []PriorDay{{Date: "2026-09-01", AttendedH: 1}}},
+		{name: "later days aren't seen", date: "2026-10-21", prior: []PriorDay{{Date: "2026-10-22", AttendedH: 1}, {Date: "2026-10-21", AttendedH: 1}}},
+		{name: "fallback: yesterday light", date: "2026-10-21", prior: hours(8, 3), ok: true, want: 1},
+		{name: "fallback: no light day", date: "2026-10-21", prior: hours(8, 9, 7), ok: true, want: 4},
+		{
+			// p25 of these 8 days is 9 h: only the 6 h day is light.
+			name: "own percentile", date: "2026-10-21", ok: true, want: 6,
+			prior: hours(9, 10, 6, 9, 10, 9, 9, 9),
+		},
+		{
+			// A heavy worker's 7 h day is light for them, though not under
+			// the fallback.
+			name: "percentile above fallback", date: "2026-10-21", ok: true, want: 2,
+			prior: hours(11, 12, 11, 12, 11, 12, 7, 12),
+		},
+		{
+			name: "unordered and with a gap", date: "2026-10-21", ok: true, want: 3,
+			prior: []PriorDay{{Date: "2026-10-20", AttendedH: 9}, {Date: "2026-10-12", AttendedH: 2}, {Date: "2026-10-15", AttendedH: 9}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, ok := value(t, "days_since_light_day", Day{Date: tc.date, Prior: tc.prior})
+			if ok != tc.ok || !near(v, tc.want) {
+				t.Errorf("= %v, %v; want %v, %v", v, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestApprovalLatency(t *testing.T) {
+	blocked := func(h1, m1, h2, m2 int, session string) Span {
+		return Span{Start: at(h1, m1), End: at(h2, m2), State: "blocked_on_human", Session: session}
+	}
+	for _, tc := range []struct {
+		name  string
+		agent []Span
+		want  float64
+		ok    bool
+	}{
+		{name: "empty day"},
+		{name: "never waited", agent: []Span{{Start: at(9, 0), End: at(10, 0), State: "working", Session: "a"}}},
+		{name: "one wait", agent: []Span{blocked(9, 0, 9, 4, "a")}, ok: true, want: 4},
+		{
+			name: "median of three", ok: true, want: 2,
+			agent: []Span{blocked(9, 0, 9, 1, "a"), blocked(9, 0, 9, 2, "b"), blocked(10, 0, 10, 30, "a")},
+		},
+		{
+			// A wait split at a restart is one wait; an empty one is none.
+			name: "split wait", ok: true, want: 10,
+			agent: []Span{blocked(9, 0, 9, 6, "a"), blocked(9, 6, 9, 10, "a"), blocked(11, 0, 11, 0, "a")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, ok := value(t, "approval_latency", Day{Agent: tc.agent})
+			if ok != tc.ok || !near(v, tc.want) {
+				t.Errorf("= %v, %v; want %v, %v", v, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
