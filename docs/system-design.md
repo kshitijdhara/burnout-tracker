@@ -306,6 +306,8 @@ day minute by minute for checking against a hand-written log.
   |-------------|-------------|
   | macOS Spaces / full-screen | Only the current Space |
   | Windows virtual desktops | Cloaked windows excluded |
+  | Linux X11 workspaces | Only the current workspace (`_NET_WM_DESKTOP` vs `_NET_CURRENT_DESKTOP`), sticky windows included; minimised (`_NET_WM_STATE_HIDDEN`), desktop and dock windows excluded |
+  | Linux Wayland | No desktop collector until the GNOME bridge; hooks only |
   | Clamshell mode | External monitors only |
   | RDP/Citrix/VM | One window, classified as `remote-desktop` |
 
@@ -318,10 +320,17 @@ day minute by minute for checking against a hand-written log.
 | | macOS | Windows | Linux X11 | Linux Wayland |
 |---|---|---|---|---|
 | Focus | `NSWorkspace` + AX | `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` | `_NET_ACTIVE_WINDOW` | bridge |
-| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` | GNOME extension / KWin script; Sway/Hyprland IPC |
-| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` | bridge; wlroots limited |
+| Windows + bounds | `CGWindowListCopyWindowInfo` (titles need Screen Recording) | `EnumWindows` + `DWMWA_CLOAKED` + `MonitorFromWindow` | `_NET_CLIENT_LIST_STACKING` (reversed to topmost first), client origin translated to root plus `_NET_FRAME_EXTENTS`; monitors from RandR 1.5 | GNOME extension / KWin script; Sway/Hyprland IPC |
+| App + pid | bundle id + pid | exe name + pid | `WM_CLASS` class (else `/proc/<pid>/comm`) + `_NET_WM_PID` | bridge |
+| Pointer | `NSEvent.mouseLocation` | `GetCursorPos` + `WindowFromPoint` | `XQueryPointer` root position, hit-tested against the stacking order | bridge; wlroots limited |
 | Idle | `CGEventSourceSecondsSinceLastEventType` | `GetLastInputInfo` | XScreenSaver | `ext-idle-notify-v1` / Mutter IdleMonitor |
-| Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw | not available → idle deltas |
+| Lock | `CGSessionCopyCurrentDictionary` | input desktop + `LockApp.exe` | logind `LockedHint`/`Active` (system bus), else `org.gnome.ScreenSaver.GetActive` | same as X11 |
+| Input counts | listen-only `CGEventTap` (Input Monitoring, optional) | Raw Input | XInput2 raw (not yet) | not available → idle deltas |
+
+The X11 collector is pure Go (`jezek/xgb`), so Linux builds stay
+`CGO_ENABLED=0`. It is chosen when `DISPLAY` is set and
+`XDG_SESSION_TYPE` isn't `wayland` (under Wayland, Xwayland would show
+only X clients).
 
 The Wayland bridges talk to the daemon over a **private peer-to-peer
 connection** with a token handshake, never as a public session-bus service

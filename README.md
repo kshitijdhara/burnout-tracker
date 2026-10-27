@@ -24,8 +24,8 @@ every field that is collected.
 ## Trying Phase 0
 
 Phase 0 is a developer preview: there is no installer yet.
-Desktop collection works on macOS and Windows; on Linux only shell and
-Claude Code hooks are recorded for now.
+Desktop collection works on macOS, Windows and Linux X11 sessions; on
+Linux Wayland only shell and Claude Code hooks are recorded for now.
 
 > **Where it doesn't run.** burnout records only while its tray icon is
 > visible, hooks included ([AC-1](docs/privacy-and-security.md)). Where no
@@ -305,9 +305,17 @@ is macOS-only for now.
 
 Steps 2–5 are the same as on macOS, except as noted below. Building and removing differ:
 
-- **Linux:** there is no desktop collector yet, so only shell and Claude
-  Code hooks are recorded, and only on a desktop with a tray (on GNOME,
-  install the AppIndicator extension first). Build as on macOS without
+- **Linux:** desktop collection works in X11 sessions, and only on a
+  desktop with a tray (on GNOME, install the AppIndicator extension
+  first). It reads the window list, pointer, idle time (XScreenSaver) and
+  lock state (logind, or GNOME's screensaver) and needs no permissions.
+  On Wayland there is no desktop collector yet (a GNOME bridge is coming),
+  so only shell and Claude Code hooks are recorded; to collect, choose an
+  X11 session at the login screen. The service reads `DISPLAY` from the
+  systemd user manager, which GNOME, KDE and most desktops fill in; if
+  `burnout doctor` says `DISPLAY is not set`, run
+  `systemctl --user import-environment DISPLAY XDG_SESSION_TYPE` from the
+  desktop and restart the service. Build as on macOS without
   `xcode-select`.
   The background service is a systemd user unit. Its log is
   `~/.local/share/burnout/logs/daemon.log`; `journalctl --user -u
