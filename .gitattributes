@@ -6,3 +6,5 @@
 *.fish text eol=lf
 *.sh   text eol=lf
 *.sql  text eol=lf
+# The GNOME Shell extension ships to Linux as is.
+extensions/** text eol=lf

@@ -23,7 +23,8 @@ func readRepo(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(b)
+	// Windows checkouts may turn LF into CRLF; the checks below read lines.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 type schemaNode struct {
