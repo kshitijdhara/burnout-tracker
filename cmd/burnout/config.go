@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -48,9 +49,11 @@ func loadConfig() (config.Config, string, error) {
 // settingsFrom is what the daemon's loop applies from the config file.
 func settingsFrom(c config.Config) app.Settings {
 	return app.Settings{
-		PrivateHours:  c.PrivateHours(),
-		Exclusions:    c.Privacy.ExcludeApps,
-		AggregateOnly: c.Privacy.AggregateOnly,
+		PrivateHours:        c.PrivateHours(),
+		Exclusions:          c.Exclusions(),
+		Overrides:           c.Overrides(),
+		TitleClassification: c.Privacy.TitleClassification,
+		AggregateOnly:       c.Privacy.AggregateOnly,
 	}
 }
 
@@ -186,9 +189,16 @@ func changeConfig(path, cmd, key string, values []string) error {
 	} else {
 		fmt.Printf("%s = %s\n", key, strings.Join(vals, ""))
 	}
-	if strings.HasPrefix(key, "retention.") {
+	switch {
+	case strings.HasPrefix(key, "retention."):
 		fmt.Println("Shorter retention applies at the daemon's next nightly clean-up.")
-	} else if daemonAnswers(context.Background()) {
+	case key == "privacy.title_classification":
+		fmt.Println("The daemon reads this when it starts: run `burnout service install` to restart it now.")
+		if c.Privacy.TitleClassification && runtime.GOOS == "darwin" {
+			fmt.Println("On macOS titles also need the Screen Recording permission: add burnout in System Settings >\n" +
+				"Privacy & Security > Screen & System Audio Recording. `burnout doctor` shows whether it is granted.")
+		}
+	case daemonAnswers(context.Background()):
 		fmt.Println("The daemon picks this up within a few seconds.")
 	}
 	return nil

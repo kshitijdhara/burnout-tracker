@@ -91,7 +91,8 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 		check(w, "keystore", false, err.Error())
 	}
 
-	if c, err := newCollector(collectorOptions{Now: time.Now}); err != nil {
+	_, _ = fmt.Fprintf(w, "  -  title classification: %s\n", titlesLine(cfg))
+	if c, err := newCollector(collectorOptions{Titles: cfg.Privacy.TitleClassification, Now: time.Now}); err != nil {
 		check(w, "desktop collector", false, err.Error())
 	} else {
 		caps := c.Capabilities()
@@ -105,7 +106,7 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 			_, _ = fmt.Fprintf(w, "  -  limitation: %s\n", l)
 		}
 		if snapErr == nil {
-			_, _ = fmt.Fprintf(w, "  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Privacy.ExcludeApps, nil)))
+			_, _ = fmt.Fprintf(w, "  *  right now: %s\n", mediaNow(snap, classify.New(cfg.Exclusions(), cfg.Overrides())))
 		}
 	}
 

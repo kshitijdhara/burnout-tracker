@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -335,7 +336,7 @@ func describeAnnotation(a annotation.Annotation) string {
 // runPrivacy shows what is collected and the user's current settings
 // (privacy & security §5.1 "Privacy view").
 func runPrivacy(ctx context.Context, _ []string) error {
-	fmt.Print(summary)
+	fmt.Print(summary(titlesOn()))
 	fmt.Println("\nYour settings:")
 	dataDir, err := paths.DataDir()
 	if err != nil {
@@ -394,7 +395,7 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	add("Pause", "the tray menu, or `burnout pause 1h` / `burnout pause tomorrow`; `burnout resume` to start again")
 	add("Change settings", "`burnout config set KEY VALUE` (all keys: `burnout config get`), or edit the config file above")
 	add("Uninstall", "`burnout uninstall`; add `--purge` to delete all your data too")
-	add("Window titles", "off (not collected)")
+	add("Window titles", titlesLine(cfg))
 	add("Keystroke counts", "off (not collected)")
 	hours := "none"
 	if len(cfg.Privacy.PrivateHours) > 0 {
@@ -407,6 +408,17 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 	}
 	add("Always private", fmt.Sprintf("%d sensitive apps (password managers, finance, crypto wallets, health)%s; "+
 		"their time counts, their names aren't kept", len(classify.SensitiveApps()), excluded))
+	if cfg.Privacy.TitleClassification {
+		sites := ""
+		if n := len(cfg.Privacy.ExcludeDomains); n > 0 {
+			sites = fmt.Sprintf(" and %d you excluded", n)
+		}
+		add("Private sites", fmt.Sprintf("%d sensitive sites (banking, payments, health, dating, password vaults)%s; "+
+			"their time counts as private", len(classify.SensitiveDomains()), sites))
+	}
+	if n := len(cfg.Classify.Overrides); n > 0 {
+		add("Your categories", fmt.Sprintf("%d apps or sites (`burnout config get classify.overrides`)", n))
+	}
 	if cfg.Privacy.AggregateOnly {
 		add("Aggregate-only", "on: time per category only, no app names or per-window detail")
 	} else {
@@ -451,6 +463,28 @@ func hookSummary() string {
 	}
 	if len(off) > 0 {
 		s += " (not: " + strings.Join(off, ", ") + ")"
+	}
+	return s
+}
+
+// titlesOn reports whether title classification is on in a valid config.
+func titlesOn() bool {
+	c, _, err := loadConfig()
+	return err == nil && c.Privacy.TitleClassification
+}
+
+// titlesLine describes title classification, for privacy and doctor.
+func titlesLine(c config.Config) string {
+	if c.Privacy.TitleClassification {
+		s := "on: browser titles are redacted and classified in memory, never stored; only the category is kept"
+		if runtime.GOOS == "darwin" {
+			s += " (needs the Screen Recording permission)"
+		}
+		return s
+	}
+	s := "off (not collected); `burnout config set privacy.title_classification true` tells sites apart in the browser"
+	if runtime.GOOS == "darwin" {
+		s += " (it needs the Screen Recording permission)"
 	}
 	return s
 }

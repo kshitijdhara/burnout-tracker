@@ -28,6 +28,7 @@ const (
 	// bundleLogBytes bounds how far back from the end of the log it reads.
 	bundleLogBytes = 256 << 10
 	excludedApp    = "[excluded app]"
+	excludedSite   = "[excluded site]"
 )
 
 // bundleFile is one file in a diagnostics bundle, already redacted.
@@ -82,10 +83,10 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 	if cfgErr != nil {
 		files = append(files, bundleFile{"config.toml", []byte("# The config file is invalid, so it isn't included: run `burnout config validate`.\n")})
 	} else {
-		excluded := cfg.Privacy.ExcludeApps
-		cfg.Privacy.ExcludeApps = slices.Repeat([]string{excludedApp}, len(excluded))
-		files = append(files, bundleFile{"config.toml", config.Render(cfg)})
-		cfg.Privacy.ExcludeApps = excluded
+		shown := cfg
+		shown.Privacy.ExcludeApps = slices.Repeat([]string{excludedApp}, len(cfg.Privacy.ExcludeApps))
+		shown.Privacy.ExcludeDomains = slices.Repeat([]string{excludedSite}, len(cfg.Privacy.ExcludeDomains))
+		files = append(files, bundleFile{"config.toml", config.Render(shown)})
 	}
 
 	if store, err := sqlite.OpenReadOnly(ctx, dataDir); err == nil {
@@ -105,7 +106,7 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 		return nil, fmt.Errorf("read the daemon log: %w", err)
 	}
 
-	redact := bundleRedactor(cfg.Privacy.ExcludeApps)
+	redact := bundleRedactor(cfg.Privacy.ExcludeApps, cfg.Privacy.ExcludeDomains)
 	for i := range files {
 		files[i].Data = redact(files[i].Data)
 	}
@@ -113,10 +114,10 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 }
 
 // bundleRedactor returns a function that shows the home folder as ~ and
-// replaces the apps the user excluded, in any case, as their names are
-// what they wanted kept private. It runs over whole files, so a name split
-// across writes is still caught.
-func bundleRedactor(excluded []string) func([]byte) []byte {
+// replaces the apps and sites the user excluded, in any case, as their
+// names are what they wanted kept private. It runs over whole files, so a
+// name split across writes is still caught.
+func bundleRedactor(excluded, sites []string) func([]byte) []byte {
 	var homes []string
 	if home, err := os.UserHomeDir(); err == nil {
 		homes = append(homes, home)
@@ -124,23 +125,16 @@ func bundleRedactor(excluded []string) func([]byte) []byte {
 			homes = append(homes, resolved) // macOS: /var is /private/var
 		}
 	}
-	var apps []string
-	for _, a := range excluded {
-		if a = strings.TrimSpace(a); a != "" {
-			apps = append(apps, regexp.QuoteMeta(a))
-		}
-	}
 	// Longest first, so one name that contains another is replaced whole.
 	byLength := func(a, b string) int { return len(b) - len(a) }
 	slices.SortFunc(homes, byLength)
-	slices.SortFunc(apps, byLength)
-	var appRE *regexp.Regexp
-	if len(apps) > 0 {
-		appRE = regexp.MustCompile("(?i)" + strings.Join(apps, "|"))
-	}
+	appRE, siteRE := anyOf(excluded), anyOf(sites)
 	return func(p []byte) []byte {
 		if appRE != nil {
 			p = appRE.ReplaceAllLiteral(p, []byte(excludedApp))
+		}
+		if siteRE != nil {
+			p = siteRE.ReplaceAllLiteral(p, []byte(excludedSite))
 		}
 		for _, h := range homes {
 			var b bytes.Buffer
@@ -149,6 +143,22 @@ func bundleRedactor(excluded []string) func([]byte) []byte {
 		}
 		return p
 	}
+}
+
+// anyOf matches any of names, ignoring case, longest first so one name
+// that contains another is replaced whole. It is nil for no names.
+func anyOf(names []string) *regexp.Regexp {
+	var quoted []string
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			quoted = append(quoted, regexp.QuoteMeta(n))
+		}
+	}
+	if len(quoted) == 0 {
+		return nil
+	}
+	slices.SortFunc(quoted, func(a, b string) int { return len(b) - len(a) })
+	return regexp.MustCompile("(?i)" + strings.Join(quoted, "|"))
 }
 
 // tailLines returns the last n lines of the file at path, reading at most

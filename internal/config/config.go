@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,7 +23,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
 )
 
@@ -36,6 +39,7 @@ const maxFileSize = 64 << 10
 type Config struct {
 	Profile   Profile   `toml:"profile"`
 	Privacy   Privacy   `toml:"privacy"`
+	Classify  Classify  `toml:"classify"`
 	Retention Retention `toml:"retention"`
 	Calendar  Calendar  `toml:"calendar"`
 	Update    Update    `toml:"update"`
@@ -81,9 +85,26 @@ type Privacy struct {
 	// ExcludeApps are app ids (macOS bundle ids, Windows exe names) whose
 	// time is recorded as private, without their names.
 	ExcludeApps []string `toml:"exclude_apps"`
+	// ExcludeDomains are sites ("example.com", which covers its
+	// subdomains) whose time is recorded as private. They apply to browser
+	// windows when title classification is on.
+	ExcludeDomains []string `toml:"exclude_domains"`
+	// TitleClassification reads browser window titles to tell sites apart
+	// (privacy & security §4.1). Titles stay in memory: they are redacted,
+	// classified and discarded, and only the category is kept. On macOS it
+	// needs the Screen Recording permission. The daemon reads it at start.
+	TitleClassification bool `toml:"title_classification"`
 	// AggregateOnly keeps only per-category minutes: no app names and no
 	// per-window rows.
 	AggregateOnly bool `toml:"aggregate_only"`
+}
+
+// Classify holds the user's own labels (system design §4.6).
+type Classify struct {
+	// Overrides map an app id, or a site as "domain:example.com", to a
+	// category. They win over the bundled rules but never over exclusions
+	// or the sensitive lists.
+	Overrides map[string]string `toml:"overrides"`
 }
 
 // Retention is how many days each kind of data is kept. Each can only be
@@ -99,8 +120,9 @@ type Retention struct {
 // Default returns the documented defaults.
 func Default() Config {
 	c := Config{
-		Profile: Profile{Role: string(features.RoleDeveloper), CoreHours: "09:00-18:00"},
-		Privacy: Privacy{PrivateHours: []string{}, ExcludeApps: []string{}},
+		Profile:  Profile{Role: string(features.RoleDeveloper), CoreHours: "09:00-18:00"},
+		Privacy:  Privacy{PrivateHours: []string{}, ExcludeApps: []string{}, ExcludeDomains: []string{}},
+		Classify: Classify{Overrides: map[string]string{}},
 		Retention: Retention{
 			RawEventsDays: 7,
 			MinutesDays:   180,
@@ -171,6 +193,22 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("privacy.exclude_apps: %w", err))
 		}
 	}
+	if len(c.Privacy.ExcludeDomains) > maxApps {
+		errs = append(errs, fmt.Errorf("privacy.exclude_domains: at most %d sites", maxApps))
+	}
+	for _, d := range c.Privacy.ExcludeDomains {
+		if !classify.IsHostname(d) {
+			errs = append(errs, fmt.Errorf("privacy.exclude_domains: %.40q is not a site like example.com", d))
+		}
+	}
+	if len(c.Classify.Overrides) > maxApps {
+		errs = append(errs, fmt.Errorf("classify.overrides: at most %d overrides", maxApps))
+	}
+	for _, k := range slices.Sorted(maps.Keys(c.Classify.Overrides)) {
+		if err := checkOverride(k, c.Classify.Overrides[k]); err != nil {
+			errs = append(errs, fmt.Errorf("classify.overrides: %w", err))
+		}
+	}
 	if c.Update.Check != UpdateOff && c.Update.Check != UpdateWeekly {
 		errs = append(errs, fmt.Errorf("update.check: %q: want %q or %q", c.Update.Check, UpdateOff, UpdateWeekly))
 	}
@@ -199,6 +237,55 @@ func checkAppID(app string) error {
 		return fmt.Errorf("%.40q is not an app id", app)
 	}
 	return nil
+}
+
+// checkOverride checks one classify.overrides entry.
+func checkOverride(key, cat string) error {
+	if d, ok := strings.CutPrefix(key, classify.DomainPrefix); ok {
+		if !classify.IsHostname(d) {
+			return fmt.Errorf("%.40q: want a site like domain:example.com", key)
+		}
+	} else if err := checkAppID(key); err != nil {
+		return err
+	}
+	switch c := model.Category(cat); {
+	case c == model.CategoryPrivate:
+		return fmt.Errorf("%.40q: to make it private, add it to privacy.exclude_apps or privacy.exclude_domains", key)
+	case !c.Valid():
+		return fmt.Errorf("%.40q: %.40q isn't a category (%s)", key, cat, strings.Join(overrideCategories(), ", "))
+	}
+	return nil
+}
+
+// overrideCategories are the categories an override can name.
+func overrideCategories() []string {
+	var names []string
+	for _, k := range model.Categories() {
+		if k != model.CategoryPrivate {
+			names = append(names, string(k))
+		}
+	}
+	return names
+}
+
+// Overrides returns classify.overrides as categories. Call it on a valid
+// config.
+func (c Config) Overrides() map[string]model.Category {
+	out := make(map[string]model.Category, len(c.Classify.Overrides))
+	for k, v := range c.Classify.Overrides {
+		out[k] = model.Category(v)
+	}
+	return out
+}
+
+// Exclusions returns the excluded apps and sites, the sites as
+// "domain:example.com".
+func (c Config) Exclusions() []string {
+	out := slices.Clone(c.Privacy.ExcludeApps)
+	for _, d := range c.Privacy.ExcludeDomains {
+		out = append(out, classify.DomainPrefix+d)
+	}
+	return out
 }
 
 // minCore is the shortest core-hours span accepted.
@@ -323,6 +410,33 @@ func (c *Config) normalize() {
 		c.Profile.CoreHours = w.String()
 	}
 	c.Privacy.ExcludeApps = dedupe(c.Privacy.ExcludeApps, func(s string) string { return strings.ToLower(strings.TrimSpace(s)) })
+	domains := make([]string, len(c.Privacy.ExcludeDomains))
+	for i, d := range c.Privacy.ExcludeDomains {
+		domains[i] = normalizeDomain(d)
+	}
+	c.Privacy.ExcludeDomains = dedupe(domains, strings.TrimSpace)
+	c.Classify.Overrides = normalizedOverrides(c.Classify.Overrides)
+}
+
+// normalizedOverrides lower-cases keys and categories and tidies domains.
+// Keys that become equal keep the value of the last in sorted order.
+func normalizedOverrides(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if d, ok := strings.CutPrefix(key, classify.DomainPrefix); ok {
+			key = classify.DomainPrefix + normalizeDomain(d)
+		}
+		out[key] = strings.ToLower(strings.TrimSpace(m[k]))
+	}
+	return out
+}
+
+// normalizeDomain accepts "Example.com", "www.example.com." and
+// "domain:example.com" for example.com.
+func normalizeDomain(d string) string {
+	d = strings.ToLower(strings.TrimSpace(d))
+	return classify.NormalizeDomain(strings.TrimPrefix(d, classify.DomainPrefix))
 }
 
 func dedupe(list []string, key func(string) string) []string {
@@ -404,10 +518,33 @@ func Render(c Config) []byte {
 `)
 	fmt.Fprintf(&b, "exclude_apps = %s\n", list(c.Privacy.ExcludeApps))
 	b.WriteString(`
+# Sites recorded as private, like excluded apps ("example.com" covers its
+# subdomains). They apply when title_classification is on. Banking,
+# payment, health, dating and password-manager sites are always private.
+`)
+	fmt.Fprintf(&b, "exclude_domains = %s\n", list(c.Privacy.ExcludeDomains))
+	b.WriteString(`
+# Read browser window titles to tell sites apart (GitHub is code, Gmail is
+# comms). Titles stay in memory: they are redacted, classified and
+# discarded; only the category is kept. On macOS it needs the Screen
+# Recording permission. Takes effect when the daemon restarts.
+`)
+	fmt.Fprintf(&b, "title_classification = %t\n", c.Privacy.TitleClassification)
+	b.WriteString(`
 # Keep only time per category (code, comms, browser, …): no app names and
 # no per-window detail. Days already recorded are reduced overnight.
 `)
 	fmt.Fprintf(&b, "aggregate_only = %t\n", c.Privacy.AggregateOnly)
+	b.WriteString(`
+[classify.overrides]
+# Your own categories for apps, or for sites as "domain:example.com":
+#   "com.spotify.client" = "other"
+#   "domain:example.com" = "docs"
+`)
+	fmt.Fprintf(&b, "# Categories: %s.\n", strings.Join(overrideCategories(), ", "))
+	for _, k := range slices.Sorted(maps.Keys(c.Classify.Overrides)) {
+		fmt.Fprintf(&b, "%s = %s\n", quote(k), quote(c.Classify.Overrides[k]))
+	}
 	b.WriteString(`
 [retention]
 # How many days each kind of data is kept. Each can only be lowered.
@@ -486,6 +623,7 @@ type key struct {
 	flag func(*Config) *bool
 	num  func(*Config) *int
 	text func(*Config) *string
+	dict func(*Config) *map[string]string // a list of "key=value" items to the CLI
 }
 
 var keys = func() []key {
@@ -494,7 +632,10 @@ var keys = func() []key {
 		{name: "profile.core_hours", text: func(c *Config) *string { return &c.Profile.CoreHours }},
 		{name: "privacy.private_hours", list: func(c *Config) *[]string { return &c.Privacy.PrivateHours }},
 		{name: "privacy.exclude_apps", list: func(c *Config) *[]string { return &c.Privacy.ExcludeApps }},
+		{name: "privacy.exclude_domains", list: func(c *Config) *[]string { return &c.Privacy.ExcludeDomains }},
+		{name: "privacy.title_classification", flag: func(c *Config) *bool { return &c.Privacy.TitleClassification }},
 		{name: "privacy.aggregate_only", flag: func(c *Config) *bool { return &c.Privacy.AggregateOnly }},
+		{name: "classify.overrides", dict: func(c *Config) *map[string]string { return &c.Classify.Overrides }},
 	}
 	for _, b := range bounds {
 		get := b.get
@@ -515,10 +656,24 @@ func lookup(name string) (key, error) {
 	return key{}, fmt.Errorf("config: unknown key %q (keys: %s)", name, strings.Join(Keys(), ", "))
 }
 
-// IsList reports whether name is a list setting.
+// IsList reports whether name is a list setting. classify.overrides is
+// one too: a list of "key=category" items.
 func IsList(name string) bool {
 	k, err := lookup(name)
-	return err == nil && k.list != nil
+	return err == nil && (k.list != nil || k.dict != nil)
+}
+
+// pairs reads "key=value" items.
+func pairs(name string, items []string) (map[string]string, error) {
+	out := make(map[string]string, len(items))
+	for _, it := range items {
+		k, v, ok := strings.Cut(it, "=")
+		if !ok || strings.TrimSpace(k) == "" {
+			return nil, fmt.Errorf("config: %s: want KEY=CATEGORY, like domain:example.com=docs, not %.40q", name, it)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out, nil
 }
 
 // Get returns a setting's value: one line per item for lists.
@@ -530,6 +685,13 @@ func (c Config) Get(name string) ([]string, error) {
 	switch {
 	case k.list != nil:
 		return slices.Clone(*k.list(&c)), nil
+	case k.dict != nil:
+		m := *k.dict(&c)
+		out := make([]string, 0, len(m))
+		for _, key := range slices.Sorted(maps.Keys(m)) {
+			out = append(out, key+"="+m[key])
+		}
+		return out, nil
 	case k.flag != nil:
 		return []string{fmt.Sprint(*k.flag(&c))}, nil
 	case k.text != nil:
@@ -549,6 +711,15 @@ func (c *Config) Set(name string, values []string) error {
 	}
 	if k.list != nil {
 		*k.list(c) = slices.Clone(values)
+		return nil
+	}
+	if k.dict != nil {
+		m, err := pairs(name, values)
+		if err != nil {
+			return err
+		}
+		*k.dict(c) = m
+		c.normalize()
 		return nil
 	}
 	if len(values) != 1 {
@@ -585,6 +756,14 @@ func (c *Config) Add(name string, values []string) error {
 	if err != nil {
 		return err
 	}
+	if k.dict != nil {
+		m, err := pairs(name, values)
+		if err != nil {
+			return err
+		}
+		maps.Copy(*k.dict(c), normalizedOverrides(m)) // a key already there gets the new category
+		return nil
+	}
 	if k.list == nil {
 		return fmt.Errorf("config: %s is not a list; use set", name)
 	}
@@ -600,6 +779,21 @@ func (c *Config) Remove(name string, values []string) (int, error) {
 	k, err := lookup(name)
 	if err != nil {
 		return 0, err
+	}
+	if k.dict != nil {
+		// Values are keys, or key=category items as get prints them.
+		m := *k.dict(c)
+		n := 0
+		for _, v := range values {
+			key, _, _ := strings.Cut(v, "=")
+			for norm := range normalizedOverrides(map[string]string{key: ""}) {
+				if _, ok := m[norm]; ok {
+					delete(m, norm)
+					n++
+				}
+			}
+		}
+		return n, nil
 	}
 	if k.list == nil {
 		return 0, fmt.Errorf("config: %s is not a list; use set or unset", name)
