@@ -34,7 +34,6 @@ type presence struct {
 	active bool
 	call   bool
 	video  bool
-	blind  bool // the collector can't see calls or video on this platform
 }
 
 // lastPresence is the latest snapshot's presence; nil until the desktop
@@ -56,15 +55,12 @@ const guardrailsFresh = 2
 
 // presenceCollector records each snapshot's presence on its way to the
 // daemon.
-type presenceCollector struct {
-	ports.Collector
-	blind bool // !Capabilities().Calls
-}
+type presenceCollector struct{ ports.Collector }
 
 func (c presenceCollector) Snapshot(ctx context.Context) (model.Snapshot, error) {
 	s, err := c.Collector.Snapshot(ctx)
 	if err == nil {
-		p := &presence{at: s.At, active: !s.Locked && s.IdleFor < activeIdle, call: s.CallActive, blind: c.blind}
+		p := &presence{at: s.At, active: !s.Locked && s.IdleFor < activeIdle, call: s.CallActive}
 		p.video = slices.ContainsFunc(s.Windows, func(w model.Window) bool { return w.HasVideo })
 		lastPresence.Store(p)
 	}
@@ -148,7 +144,7 @@ func trayNudge(dataDir string, c config.Config, now time.Time, paused, private b
 	}
 	at := nudge.Now{At: now, Day: model.LogicalDay(now, app.DefaultConfig().Rollover), Paused: paused, Private: private}
 	if p := lastPresence.Load(); p != nil && !safeMode.Load() && now.Sub(p.at) < presenceFresh && !p.at.After(now) {
-		at.Known, at.Active, at.InCall, at.Video, at.CallsUnseen = true, p.active, p.call, p.video, p.blind
+		at.Known, at.Active, at.InCall, at.Video = true, p.active, p.call, p.video
 	}
 	var guardrails []string
 	if g := latestGuardrails.Load(); g != nil {

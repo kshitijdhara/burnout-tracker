@@ -63,10 +63,6 @@ type Now struct {
 	// it calls and video can't be seen, so nothing shows.
 	Known  bool
 	Active bool // the user is at the device: recent input, screen unlocked
-	// CallsUnseen is true where the collector can't detect calls or video
-	// at all (Windows and Linux so far), so InCall and Video are always
-	// false there, whatever is happening.
-	CallsUnseen bool
 
 	InCall      bool
 	Video       bool
@@ -129,6 +125,10 @@ func Decide(s Settings, b Boundaries, guardrails []string, today Today, now Now)
 }
 
 // Suppressed returns why no nudge may show at now, or "" when one may.
+// Where calls can't be seen (Windows and Linux so far) InCall and Video
+// stay false and nudges still show: there the nudge lives only inside the
+// menu, which a screen share reveals only if the user opens it, and the
+// gap is listed in the collector's limitations.
 func Suppressed(s Settings, now Now) string {
 	switch {
 	case now.Paused:
@@ -139,8 +139,6 @@ func Suppressed(s Settings, now Now) string {
 		return "outside waking hours"
 	case !now.Known:
 		return "the desktop collector hasn't reported"
-	case blind(now):
-		return "calls and screen shares can't be seen here"
 	case now.InCall:
 		return "in a call"
 	case now.Video:
@@ -151,13 +149,6 @@ func Suppressed(s Settings, now Now) string {
 		return "Focus or Do Not Disturb is on"
 	}
 	return ""
-}
-
-// blind reports whether a nudge must wait because this platform can't see
-// whether the user is in a call or sharing their screen.
-func blind(now Now) bool {
-	// TODO(human)
-	return false
 }
 
 // Pick returns the kind that applies at now and isn't off, or "" for none.

@@ -428,7 +428,7 @@ func screenCollector(log *slog.Logger, safe, titles bool) ports.Collector {
 	}
 	caps := c.Capabilities()
 	log.Info("collector ready", "name", caps.Name, "titles", caps.Titles, "missing_permissions", caps.MissingPermits, "limitations", caps.Limitations)
-	return presenceCollector{Collector: c, blind: !caps.Calls}
+	return presenceCollector{c}
 }
 
 // liveConfig is the config file as the daemon last read it. The loop

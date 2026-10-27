@@ -30,7 +30,6 @@ type Capabilities struct {
 	Idle           bool
 	InputCounts    bool // opt-in keystroke/scroll counters available
 	Titles         bool // window titles available (opt-in, may need a permission)
-	Calls          bool // calls and video are detected (Snapshot.CallActive, Window.HasVideo)
 	MissingPermits []string
 	// Limitations lists known gaps on this platform, e.g. "video and call
 	// detection not implemented", so doctor can show them.
