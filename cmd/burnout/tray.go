@@ -60,6 +60,9 @@ func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 	if c.PrivateHours().Contains(now) {
 		return tray.Status{Paused: true, Text: "Private hours: nothing is recorded"}
 	}
+	if safeMode.Load() {
+		return tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
+	}
 	return tray.Status{Text: "Recording"}
 }
 

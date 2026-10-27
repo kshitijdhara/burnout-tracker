@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -518,6 +519,26 @@ func TestPausedDaemonCollectsNothing(t *testing.T) {
 	defer sink.mu.Unlock()
 	if len(sink.intervals) != 0 || len(sink.rollups) != 0 {
 		t.Errorf("recorded while paused: %d intervals, %d rollups", len(sink.intervals), len(sink.rollups))
+	}
+}
+
+// The watchdog heartbeat keeps coming while paused: a pause, or a night of
+// private hours, must not read as a hang.
+func TestHeartbeatWhilePaused(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	var beats atomic.Int32
+	d := newTestDaemon(t, clock, &fakeSink{}, nil, func(c *Config, deps *Deps) {
+		c.ControlInterval = time.Millisecond
+		deps.Controls = &fakeControls{paused: true}
+		deps.Forget = func(context.Context, time.Time) error { return nil }
+		deps.Heartbeat = func() { beats.Add(1) }
+	})
+	runFor(t, d, 100*time.Millisecond)
+	if !d.paused.Load() {
+		t.Fatal("not paused")
+	}
+	if n := beats.Load(); n < 3 {
+		t.Fatalf("%d heartbeats in 100 ms at a 5 ms flush interval", n)
 	}
 }
 
