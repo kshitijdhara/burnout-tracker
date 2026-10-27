@@ -109,7 +109,7 @@ func TestServiceUninstallIsNotACrash(t *testing.T) {
 func TestSafeModeDropsTheCollectorAndShowsInTheTray(t *testing.T) {
 	safeMode.Store(true)
 	t.Cleanup(func() { safeMode.Store(false) })
-	if c := screenCollector(slog.New(slog.NewTextHandler(io.Discard, nil)), true, true); c != nil {
+	if c := screenCollector(context.Background(), slog.New(slog.NewTextHandler(io.Discard, nil)), true, true); c != nil {
 		_ = c.Close()
 		t.Fatal("a desktop collector in safe mode")
 	}
@@ -124,5 +124,40 @@ func TestSafeModeDropsTheCollectorAndShowsInTheTray(t *testing.T) {
 	}
 	if s := statusNow(dir, config.Default(), now); !s.Paused {
 		t.Errorf("paused in safe mode: %+v", s)
+	}
+}
+
+// A shutdown cancels the tray's context while collect is still writing
+// out. The start must be forgotten then, before collect returns: the OS
+// may kill the process (a Windows logoff) before it does.
+func TestShutdownForgetsBeforeCollectReturns(t *testing.T) {
+	dir := t.TempDir()
+	ts := &trayState{dataDir: dir, settings: config.Default}
+	_, started, err := crashloop.Record(dir, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	left := make(chan int, 1)
+	work := trayWork(ts, cleanStop(dir, started), func(cctx context.Context) error {
+		<-cctx.Done() // the shutdown has begun
+		<-release     // still writing out when the OS might kill us
+		return nil
+	})
+	done := make(chan error, 1)
+	go func() { done <- work(ctx, true) }()
+	cancel()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(crashloop.Load(dir).Starts) != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	left <- len(crashloop.Load(dir).Starts)
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if n := <-left; n != 0 {
+		t.Fatalf("%d starts left while collect was still writing out after the shutdown began", n)
 	}
 }

@@ -47,16 +47,16 @@ func (s desktopSession) gnome() bool {
 
 // newCollector picks the X11 collector on an X session and the GNOME
 // Shell bridge on GNOME Wayland.
-func newCollector(o collectorOptions) (ports.Collector, error) {
+func newCollector(ctx context.Context, o collectorOptions) (ports.Collector, error) {
 	s := currentSession()
 	if s.wayland() && s.gnome() {
-		// The first dial is bounded by the hello timeout; the daemon's
-		// redials run under its own context, from Snapshot.
+		// ctx bounds the first dial (with the hello timeout); the daemon's
+		// redials run under the context it passes to Snapshot.
 		open := wayland.New
 		if o.Wait {
 			open = wayland.NewWaiting
 		}
-		c, err := open(context.Background(), wayland.Options{Titles: o.Titles, Now: o.Now})
+		c, err := open(ctx, wayland.Options{Titles: o.Titles, Now: o.Now})
 		if err != nil {
 			return nil, gnomeBridgeError(err)
 		}

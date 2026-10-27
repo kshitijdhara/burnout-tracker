@@ -97,7 +97,7 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 
 	_, _ = fmt.Fprintf(w, "  -  title classification: %s\n", titlesLine(cfg, daemonReadsTitles(running, dataDir)))
 	reportDesktopBridge(ctx, w, cfg.Privacy.TitleClassification)
-	if c, err := newCollector(collectorOptions{Titles: cfg.Privacy.TitleClassification, Now: time.Now}); err != nil {
+	if c, err := newCollector(ctx, collectorOptions{Titles: cfg.Privacy.TitleClassification, Now: time.Now}); err != nil {
 		check(w, "desktop collector", false, err.Error())
 	} else {
 		caps := c.Capabilities()

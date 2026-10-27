@@ -92,3 +92,24 @@ func TestParseAnnotation(t *testing.T) {
 		}
 	}
 }
+
+func TestPauseEndAndRecentStart(t *testing.T) {
+	now := time.Date(2026, 10, 27, 15, 30, 0, 0, time.Local)
+	if got := pauseEnd(true, false, now); !got.Equal(now.Add(time.Hour)) {
+		t.Errorf("an hour: %v", got)
+	}
+	if got := pauseEnd(false, false, now); !got.IsZero() {
+		t.Errorf("until resumed: %v", got)
+	}
+	want, _ := pauseUntil("tomorrow", now, rollover)
+	if got := pauseEnd(false, true, now); !got.Equal(want) || !got.After(now) {
+		t.Errorf("tomorrow: %v, want %v", got, want)
+	}
+	if got, err := recentStart(true, now); err != nil || !got.Equal(now.Add(-time.Hour)) {
+		t.Errorf("last hour: %v %v", got, err)
+	}
+	wantToday, _, _ := forgetFrom(0, true, "", false, now, rollover)
+	if got, err := recentStart(false, now); err != nil || !got.Equal(wantToday) {
+		t.Errorf("today: %v %v, want %v", got, err, wantToday)
+	}
+}

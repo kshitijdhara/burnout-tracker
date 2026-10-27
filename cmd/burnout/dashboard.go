@@ -383,27 +383,14 @@ func (d dashSource) Privacy(ctx context.Context) (dashboard.Privacy, error) {
 type dashControl struct{ dataDir string }
 
 func (d dashControl) Pause(_ context.Context, length string) error {
-	now := time.Now()
-	var until time.Time // zero: until resumed
-	switch length {
-	case dashboard.PauseHour:
-		until = now.Add(time.Hour)
-	case dashboard.PauseTomorrow:
-		until, _ = pauseUntil("tomorrow", now, rollover)
-	}
+	until := pauseEnd(length == dashboard.PauseHour, length == dashboard.PauseTomorrow, time.Now())
 	return control.SetPause(d.dataDir, until)
 }
 
 func (d dashControl) Resume(context.Context) error { return control.Resume(d.dataDir) }
 
 func (d dashControl) Forget(ctx context.Context, span string) error {
-	last, today := time.Duration(0), false
-	if span == dashboard.ForgetHour {
-		last = time.Hour
-	} else {
-		today = true
-	}
-	from, _, err := forgetFrom(last, today, "", false, time.Now(), rollover)
+	from, err := recentStart(span == dashboard.ForgetHour, time.Now())
 	if err != nil {
 		return err
 	}
