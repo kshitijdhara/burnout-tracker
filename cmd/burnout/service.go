@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/crashloop"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/ingest"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/service"
@@ -139,6 +140,7 @@ func installService(ctx context.Context, m service.Manager, dataDir string) erro
 	if !st.Running && daemonAnswers(ctx) {
 		return errors.New("a daemon is already running, probably in a terminal: stop it with Ctrl-C, then run `burnout service install` again")
 	}
+	forgetStarts(dataDir)
 	if err := m.Install(); err != nil {
 		return err
 	}
@@ -165,7 +167,18 @@ func installService(ctx context.Context, m service.Manager, dataDir string) erro
 	return nil
 }
 
+// forgetStarts clears the crash-loop history before install or uninstall
+// stops the service: Task Scheduler kills the daemon outright, and that
+// stop isn't a crash (system design §11.2). Safe mode ends with it, so a
+// new binary gets a fresh try.
+func forgetStarts(dataDir string) {
+	_ = crashloop.Clear(dataDir)
+}
+
 func uninstallService(ctx context.Context, m service.Manager) error {
+	if dataDir, err := paths.DataDir(); err == nil {
+		forgetStarts(dataDir)
+	}
 	if err := m.Uninstall(); err != nil {
 		return err
 	}

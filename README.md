@@ -258,7 +258,8 @@ a short title also shows beside the icon, unless the monthly
 "Review what's collected" reminder is due. A nudge never names a number. It
 waits out calls, video, pauses and private hours, and only shows between
 `nudges.waking_hours` (07:00–23:00 by default). Click it to snooze it until
-tomorrow or turn that kind off for good. `burnout config set nudges.enabled
+tomorrow or turn that kind off in the config file (`burnout config set
+nudges.KIND true` turns it back on). `burnout config set nudges.enabled
 false` turns them all off, and `nudges.shutdown`, `nudges.weekly_hours` and
 the other kinds turn off one at a time. macOS can't tell burnout about
 Focus or a screen share without a new permission, so it waits for calls

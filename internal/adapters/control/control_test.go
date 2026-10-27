@@ -120,10 +120,14 @@ func TestNudges(t *testing.T) {
 	if err := SnoozeNudge(dir, "2026-10-23", "shutdown"); err != nil {
 		t.Fatal(err)
 	}
-	if err := NudgeOff(dir, "2026-10-24", "day_off"); err != nil {
+	// Off as v0.1.0-alpha.1's tray left it.
+	if err := os.WriteFile(filepath.Join(dir, nudgesFile), []byte(`{"day":"2026-10-24","kind":"day_off","snoozed":true,"off":["day_off","shutdown"]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := NudgeOff(dir, "2026-10-24", "day_off"); err != nil {
+	if err := NudgeOn(dir, "shutdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NudgeOn(dir, "shutdown"); err != nil {
 		t.Fatal(err)
 	}
 	// A new day's nudge clears the snooze and keeps what is off.
@@ -142,7 +146,7 @@ func TestNudges(t *testing.T) {
 	}
 
 	// Unreadable: an error, so no nudge shows, and showing one doesn't
-	// overwrite it; the user's own snooze or off does.
+	// overwrite it, nor does turning a kind on; the user's own snooze does.
 	if err := os.WriteFile(filepath.Join(dir, nudgesFile), []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -152,10 +156,28 @@ func TestNudges(t *testing.T) {
 	if err := ShowNudge(dir, "2026-10-27", "shutdown"); err == nil {
 		t.Error("showing a nudge replaced a corrupt file")
 	}
-	if err := NudgeOff(dir, "2026-10-27", "shutdown"); err != nil {
+	if err := NudgeOn(dir, "shutdown"); err == nil {
+		t.Error("turning a kind on replaced a corrupt file")
+	}
+	if err := SnoozeNudge(dir, "2026-10-27", "shutdown"); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := ReadNudges(dir); err != nil || !n.Snoozed || n.Off[0] != "shutdown" {
-		t.Errorf("after off: %+v %v", n, err)
+	if n, err := ReadNudges(dir); err != nil || !n.Snoozed || n.Kind != "shutdown" {
+		t.Errorf("after snooze: %+v %v", n, err)
+	}
+}
+
+func TestDaemonTitles(t *testing.T) {
+	dir := t.TempDir()
+	if DaemonTitles(dir) {
+		t.Error("no file reads as on")
+	}
+	for _, on := range []bool{true, false} {
+		if err := SetDaemonTitles(dir, on); err != nil {
+			t.Fatal(err)
+		}
+		if DaemonTitles(dir) != on {
+			t.Errorf("DaemonTitles = %v, want %v", !on, on)
+		}
 	}
 }
