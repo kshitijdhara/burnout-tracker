@@ -10,7 +10,9 @@ import (
 )
 
 // RegistryVersion changes whenever a feature is added, removed or computed
-// differently. Stored features from another version are recomputed.
+// differently. Stored features from another version are recomputed while
+// the day's raw data is all kept; older days keep their stored values
+// (system design §4.6).
 const RegistryVersion = 3
 
 // Group is a family of correlated features; the strain score caps each
