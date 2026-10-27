@@ -56,7 +56,7 @@ func runDashboard(ctx context.Context, args []string) error {
 	defer func() { _ = store.Close() }()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	srv, err := dashboard.Listen(dashSource{store: store, dataDir: dataDir}, log)
+	srv, err := dashboard.Listen(dashSource{store: store, dataDir: dataDir}, dashControl{dataDir: dataDir}, log)
 	if err != nil {
 		return err
 	}
@@ -347,3 +347,86 @@ func (d dashSource) Week(ctx context.Context) (dashboard.Week, error) {
 func (d dashSource) Privacy(ctx context.Context) (dashboard.Privacy, error) {
 	return dashboard.Privacy{Collected: collected(titlesOn()), Settings: privacySettings(ctx, d.dataDir)}, nil
 }
+
+// dashControl makes the dashboard's changes the way the CLI does, so a
+// button and its command can't disagree: pause, resume and forget through
+// the control files (and forgetData), annotations and check-ins through a
+// short-lived read-write connection, as `burnout annotate` and `burnout
+// checkin` use while the daemon runs. Both the CLI's dashboard and the
+// tray's get one.
+type dashControl struct{ dataDir string }
+
+func (d dashControl) Pause(_ context.Context, length string) error {
+	now := time.Now()
+	var until time.Time // zero: until resumed
+	switch length {
+	case dashboard.PauseHour:
+		until = now.Add(time.Hour)
+	case dashboard.PauseTomorrow:
+		until, _ = pauseUntil("tomorrow", now, app.DefaultConfig().Rollover)
+	}
+	return control.SetPause(d.dataDir, until)
+}
+
+func (d dashControl) Resume(context.Context) error { return control.Resume(d.dataDir) }
+
+func (d dashControl) Forget(ctx context.Context, span string) error {
+	last, today := time.Duration(0), false
+	if span == dashboard.ForgetHour {
+		last = time.Hour
+	} else {
+		today = true
+	}
+	from, _, err := forgetFrom(last, today, "", false, time.Now(), app.DefaultConfig().Rollover)
+	if err != nil {
+		return err
+	}
+	if err := forgetData(ctx, d.dataDir, from); !errors.Is(err, sqlite.ErrNoDatabase) {
+		return err
+	}
+	return nil
+}
+
+// withStore runs fn on a read-write connection that is closed after.
+func (d dashControl) withStore(ctx context.Context, fn func(*sqlite.Store) error) error {
+	store, err := sqlite.OpenExisting(ctx, d.dataDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	return fn(store)
+}
+
+func (d dashControl) Annotations(ctx context.Context) ([]dashboard.Annotation, error) {
+	var out []dashboard.Annotation
+	err := d.withStore(ctx, func(s *sqlite.Store) error {
+		notes, err := s.Annotations(ctx, "0000-01-01", "9999-12-31")
+		for _, a := range notes {
+			out = append(out, dashboard.Annotation{ID: a.ID, Text: describeAnnotation(a)})
+		}
+		return err
+	})
+	return out, err
+}
+
+func (d dashControl) AddAnnotation(ctx context.Context, a annotation.Annotation) (id int64, err error) {
+	err = d.withStore(ctx, func(s *sqlite.Store) error {
+		id, err = s.AddAnnotation(ctx, a)
+		return err
+	})
+	return id, err
+}
+
+func (d dashControl) RemoveAnnotation(ctx context.Context, id int64) (ok bool, err error) {
+	err = d.withStore(ctx, func(s *sqlite.Store) error {
+		ok, err = s.RemoveAnnotation(ctx, id)
+		return err
+	})
+	return ok, err
+}
+
+func (d dashControl) SaveCheckins(ctx context.Context, rs []checkin.Record) error {
+	return d.withStore(ctx, func(s *sqlite.Store) error { return s.SaveCheckins(ctx, rs) })
+}
+
+func (dashControl) Region() string { return regionFromEnv() }

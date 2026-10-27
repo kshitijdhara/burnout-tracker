@@ -1,6 +1,7 @@
 // Package dashboard serves the local dashboard (system design §10,
-// privacy & security §8.2): a read-only web view of the user's own data on
-// 127.0.0.1. A browser tab on any website can reach localhost, so the
+// privacy & security §8.2): a web view of the user's own data on
+// 127.0.0.1, and the user's controls (pause, forget, annotations, the
+// weekly check-in). A browser tab on any website can reach localhost, so the
 // server trusts nothing a page can forge:
 //
 //   - it listens on 127.0.0.1 only, on a random port;
@@ -11,9 +12,10 @@
 //     an HttpOnly, SameSite=Strict session cookie and redirects to a
 //     token-free URL;
 //   - requests a browser marks as cross-site are refused;
-//   - only GET and HEAD are served: nothing here changes data yet, so there
-//     is nothing for a forged request to do (state-changing endpoints will
-//     carry CSRF tokens);
+//   - GET and HEAD are served everywhere; POST and DELETE only on the
+//     write routes (writes.go), and only from the page itself: marked
+//     same-origin (or unmarked with a matching Origin) and carrying the
+//     session's CSRF token in a header;
 //   - no CORS headers; a strict Content-Security-Policy with no inline
 //     script; framing denied; nothing cached.
 package dashboard
@@ -54,6 +56,7 @@ type Source interface {
 // Server is one dashboard run.
 type Server struct {
 	src  Source
+	ctl  Control // nil: the write routes are off
 	log  *slog.Logger
 	now  func() time.Time
 	port int
@@ -61,26 +64,28 @@ type Server struct {
 	mu       sync.Mutex
 	launch   string // the outstanding launch token; empty once used
 	expires  time.Time
-	sessions map[string]bool
+	sessions map[string]string // session cookie → its CSRF token
 
-	ln  net.Listener
-	srv *http.Server
+	ln     net.Listener
+	srv    *http.Server
+	writes *http.ServeMux
 }
 
-// Listen opens the server on 127.0.0.1 at a random port.
-func Listen(src Source, log *slog.Logger) (*Server, error) {
+// Listen opens the server on 127.0.0.1 at a random port. ctl may be nil,
+// which leaves the dashboard read-only.
+func Listen(src Source, ctl Control, log *slog.Logger) (*Server, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("dashboard: %w", err)
 	}
-	return newServer(src, log, ln, time.Now), nil
+	return newServer(src, ctl, log, ln, time.Now), nil
 }
 
-func newServer(src Source, log *slog.Logger, ln net.Listener, now func() time.Time) *Server {
+func newServer(src Source, ctl Control, log *slog.Logger, ln net.Listener, now func() time.Time) *Server {
 	s := &Server{
-		src: src, log: log, now: now, ln: ln,
+		src: src, ctl: ctl, log: log, now: now, ln: ln,
 		port:     ln.Addr().(*net.TCPAddr).Port,
-		sessions: map[string]bool{},
+		sessions: map[string]string{},
 	}
 	s.srv = &http.Server{
 		Handler:           s.handler(),
@@ -165,8 +170,12 @@ func (s *Server) handler() http.Handler {
 	}))
 	mux.HandleFunc("GET /api/week", s.api(func(r *http.Request) (any, error) { return s.src.Week(r.Context()) }))
 	mux.HandleFunc("GET /api/privacy", s.api(func(r *http.Request) (any, error) { return s.src.Privacy(r.Context()) }))
+	mux.HandleFunc("GET /api/session", s.api(s.session))
+	mux.HandleFunc("GET /api/annotations", s.api(s.annotations))
+	mux.HandleFunc("GET /api/checkin", s.api(func(*http.Request) (any, error) { return weeklyCheckin(), nil }))
 	static, _ := fs.Sub(assets, "assets")
 	mux.Handle("GET /", http.FileServerFS(static))
+	s.writes = s.writeRoutes()
 	return s.guard(mux)
 }
 
@@ -177,6 +186,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	allowed := map[string]bool{
 		"127.0.0.1:" + strconv.Itoa(s.port): true,
 		"localhost:" + strconv.Itoa(s.port): true,
+	}
+	origins := map[string]bool{}
+	for h := range allowed {
+		origins["http://"+h] = true
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -193,9 +206,21 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
+		// Anything but GET and HEAD must be one of the write routes, and
+		// come from the page itself: a fetch the browser marks
+		// same-origin, or (a browser without Fetch Metadata) an unmarked
+		// one whose Origin is this server.
+		write := r.Method != http.MethodGet && r.Method != http.MethodHead
+		if write {
+			if _, pattern := s.writes.Handler(r); pattern == "" {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			site := r.Header.Get("Sec-Fetch-Site")
+			if site != "same-origin" && (site != "" || !origins[r.Header.Get("Origin")]) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 		}
 		// Browsers label requests a page makes to another site; the
 		// dashboard only ever talks to itself. A launch link opened from
@@ -211,10 +236,22 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		if r.URL.Path != "/launch" && !s.hasSession(r) {
+		csrf, ok := s.sessionToken(r)
+		if r.URL.Path != "/launch" && !ok {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = fmt.Fprintln(w, "Open the dashboard with `burnout dashboard`: it opens a one-time link.")
+			return
+		}
+		if write {
+			// The cookie alone proves nothing: a forged form or fetch
+			// carries it too. Only the page can read the token.
+			got := r.Header.Get(csrfHeader)
+			if len(got) != len(csrf) || subtle.ConstantTimeCompare([]byte(got), []byte(csrf)) != 1 {
+				http.Error(w, "missing or wrong CSRF token", http.StatusForbidden)
+				return
+			}
+			s.writes.ServeHTTP(noStore{w}, r)
 			return
 		}
 		next.ServeHTTP(noStore{w}, r)
@@ -230,14 +267,25 @@ func (n noStore) WriteHeader(code int) {
 	n.ResponseWriter.WriteHeader(code)
 }
 
+// Unwrap lets http.ResponseController reach the connection.
+func (n noStore) Unwrap() http.ResponseWriter { return n.ResponseWriter }
+
 func (s *Server) hasSession(r *http.Request) bool {
+	_, ok := s.sessionToken(r)
+	return ok
+}
+
+// sessionToken returns the CSRF token of the request's session, if it has
+// one.
+func (s *Server) sessionToken(r *http.Request) (string, bool) {
 	c, err := r.Cookie(s.cookieName())
 	if err != nil || len(c.Value) != 64 {
-		return false
+		return "", false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sessions[c.Value]
+	tok, ok := s.sessions[c.Value]
+	return tok, ok
 }
 
 // redeem swaps a valid launch token for a session cookie, once.
@@ -252,7 +300,7 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	session := ""
 	if ok {
 		session = randomToken()
-		s.sessions[session] = true
+		s.sessions[session] = randomToken() // its CSRF token
 	}
 	s.mu.Unlock()
 	if !ok {
@@ -274,18 +322,34 @@ func (s *Server) redeem(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, landing(r), http.StatusSeeOther)
 }
 
-// api serves fn's result as JSON. Errors are logged, not shown: they can
-// name paths.
+// api serves fn's result as JSON, or 204 when there is none. Errors are
+// logged, not shown, since they can name paths; only a badRequest's text
+// reaches the page.
 func (s *Server) api(fn func(*http.Request) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		v, err := fn(r)
-		if errors.Is(err, errBadRequest) {
+		var bad badRequest
+		switch {
+		case errors.Is(err, errBadRequest):
 			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		case errors.As(err, &bad):
+			http.Error(w, bad.Error(), http.StatusBadRequest)
+			return
+		case errors.Is(err, errNotFound):
+			http.Error(w, "not found; reload the page", http.StatusNotFound)
+			return
+		case errors.Is(err, errWritesOff):
+			http.Error(w, "this dashboard can't change your data; use the burnout command", http.StatusServiceUnavailable)
 			return
 		}
 		if err != nil {
 			s.log.Warn("dashboard query failed", "path", r.URL.Path, "err", err)
 			http.Error(w, "couldn't read your data; see the terminal running `burnout dashboard`", http.StatusInternalServerError)
+			return
+		}
+		if v == nil {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

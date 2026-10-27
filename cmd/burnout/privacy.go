@@ -137,25 +137,11 @@ func runForget(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if daemonAnswers(ctx) {
-		// The daemon writes the database and holds unsaved data in memory,
-		// so it does the deleting.
-		if err := forgetThroughDaemon(dataDir, from); err != nil {
-			return err
-		}
-	} else {
-		store, err := sqlite.OpenExisting(ctx, dataDir)
-		if errors.Is(err, sqlite.ErrNoDatabase) {
-			fmt.Println("Nothing is recorded yet.")
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer func() { _ = store.Close() }()
-		if err := store.Forget(ctx, from, model.LogicalDay(from, app.DefaultConfig().Rollover)); err != nil {
-			return err
-		}
+	if err := forgetData(ctx, dataDir, from); errors.Is(err, sqlite.ErrNoDatabase) {
+		fmt.Println("Nothing is recorded yet.")
+		return nil
+	} else if err != nil {
+		return err
 	}
 	fmt.Printf("Deleted %s.\n", what)
 	if left, err := export.Existing(dataDir); err == nil && len(left) > 0 {
@@ -165,6 +151,22 @@ func runForget(ctx context.Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// forgetData deletes everything recorded from from on, for forget and the
+// dashboard. The daemon writes the database and holds unsaved data in
+// memory, so while it runs it does the deleting. sqlite.ErrNoDatabase
+// means nothing is recorded yet.
+func forgetData(ctx context.Context, dataDir string, from time.Time) error {
+	if daemonAnswers(ctx) {
+		return forgetThroughDaemon(dataDir, from)
+	}
+	store, err := sqlite.OpenExisting(ctx, dataDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = store.Close() }()
+	return store.Forget(ctx, from, model.LogicalDay(from, app.DefaultConfig().Rollover))
 }
 
 // forgetThroughDaemon asks the running daemon to forget everything from
@@ -392,7 +394,7 @@ func privacySettings(ctx context.Context, dataDir string) []dashboard.Setting {
 		collecting += ", private hours now (" + w + ")"
 	}
 	add("Collection", collecting)
-	add("Pause", "the tray menu, or `burnout pause 1h` / `burnout pause tomorrow`; `burnout resume` to start again")
+	add("Pause", "the tray menu, the dashboard's Privacy page, or `burnout pause 1h` / `burnout pause tomorrow`; `burnout resume` to start again")
 	add("Change settings", "`burnout config set KEY VALUE` (all keys: `burnout config get`), or edit the config file above")
 	add("Uninstall", "`burnout uninstall`; add `--purge` to delete all your data too")
 	add("Window titles", titlesLine(cfg))

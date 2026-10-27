@@ -81,8 +81,9 @@ func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 }
 
 // trayDashboard is the dashboard the tray opens. The daemon serves it,
-// read-only, from the first click until it stops; each click opens it with
-// a new one-time link.
+// reading through a read-only connection of its own, from the first click
+// until it stops; each click opens it with a new one-time link. Its
+// changes go through dashControl, like the CLI's dashboard.
 type trayDashboard struct {
 	dataDir string
 	log     *slog.Logger
@@ -112,7 +113,7 @@ func (t *trayDashboard) open(view string) error {
 			cancel()
 			return err
 		}
-		srv, err := dashboard.Listen(dashSource{store: store, dataDir: t.dataDir}, t.log)
+		srv, err := dashboard.Listen(dashSource{store: store, dataDir: t.dataDir}, dashControl{dataDir: t.dataDir}, t.log)
 		if err != nil {
 			cancel()
 			_ = store.Close()

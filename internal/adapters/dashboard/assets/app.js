@@ -42,6 +42,55 @@ async function get(path) {
   return r.json();
 }
 
+// session holds the CSRF token every write carries, and whether this
+// dashboard may change data at all. Only this page can read it.
+let session = null;
+async function getSession() {
+  if (!session) session = await get("/api/session");
+  return session;
+}
+
+// send makes a change. Afterwards every view reloads when next shown, so
+// notices, the week and the privacy rows reflect it.
+async function send(method, path, body) {
+  const s = await getSession();
+  const headers = { Accept: "application/json", "X-CSRF-Token": s.csrf };
+  const init = { method, credentials: "same-origin", headers };
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, init);
+  if (r.status === 401) throw new Error("This tab's session has ended. Run `burnout dashboard` again.");
+  if (!r.ok) throw new Error(await r.text());
+  for (const v of views) loaded[v] = false;
+  return r.status === 204 ? null : r.json();
+}
+
+// action runs a change from a button: every button in its group waits,
+// and the outcome is announced in status.
+async function action(group, status, done, fn) {
+  const buttons = group.querySelectorAll("button");
+  for (const b of buttons) b.disabled = true;
+  status.textContent = "Working…";
+  try {
+    await fn();
+    status.textContent = done;
+    return true;
+  } catch (err) {
+    status.textContent = String(err.message || err).trim();
+    return false;
+  } finally {
+    for (const b of buttons) b.disabled = false;
+  }
+}
+
+function button(text, onClick, attrs = {}) {
+  const b = el("button", { type: "button", ...attrs, text });
+  b.addEventListener("click", onClick);
+  return b;
+}
+
 function showError(err) {
   const box = document.getElementById("error");
   box.textContent = String(err.message || err);
@@ -269,22 +318,203 @@ function renderWeek(w) {
     if (c.previous != null) p.append(", before ", num(Math.round(c.previous)));
     body.append(p);
   }
-  if (w.checkin_due) body.append(el("p", { class: "notice", text: "This week's check-in is due: run `burnout checkin` (about a minute)." }));
+  if (w.checkin_due) body.append(el("p", { class: "notice", text: "This week's check-in is due: about a minute, below or with `burnout checkin`." }));
   if (w.suggestions.length) {
     body.append(el("h3", { text: "One or two things to try" }), el("ul", {}, ...w.suggestions.map((s) => el("li", { text: s }))));
   }
+  const notes = el("div"), form = el("div");
+  body.append(notes, form);
+  renderAnnotations(notes).catch(showError);
+  renderCheckinForm(form, w.checkin_due).catch(showError);
+}
+
+// ---- Annotations -------------------------------------------------------
+
+const kinds = [["vacation", "Vacation"], ["sick", "Sick"], ["on_call", "On call"], ["release", "Release"], ["exam", "Exam"], ["other", "Other"]];
+
+async function renderAnnotations(box, said = "") {
+  const [s, notes] = await Promise.all([getSession(), get("/api/annotations")]);
+  const status = el("p", { role: "status", class: "status", text: said });
+  const list = el("ul", { class: "plain annotations" });
+  for (const n of notes) {
+    const item = el("li", {}, el("span", { text: n.text }));
+    if (s.writable) {
+      item.append(button("Remove", () => action(item, status, "Removed.", async () => {
+        await send("DELETE", `/api/annotations/${encodeURIComponent(n.id)}`);
+        await renderAnnotations(box, "Removed.");
+      }), { "aria-label": `Remove ${n.text}`, class: "small" }));
+    }
+    list.append(item);
+  }
+  box.replaceChildren(el("h3", { text: "Marked days" }),
+    el("p", { class: "fine", text: "Vacation and sick days are left out of your baseline and get no score; the others are scored and tagged." }),
+    notes.length ? list : el("p", { text: "Nothing marked." }));
+  if (!s.writable) {
+    box.append(el("p", { class: "fine", text: "Mark days with `burnout annotate`." }));
+    return;
+  }
+  const now = new Date();
+  const today = new Date(now - now.getTimezoneOffset() * 60e3).toISOString().slice(0, 10); // local date
+  const kind = el("select", { id: "note-kind", name: "kind" }, ...kinds.map(([v, t]) => el("option", { value: v, text: t })));
+  const from = el("input", { id: "note-from", name: "from", type: "date", required: true, value: today });
+  const to = el("input", { id: "note-to", name: "to", type: "date" });
+  const note = el("input", { id: "note-text", name: "note", type: "text", maxlength: 200, autocomplete: "off" });
+  const add = el("form", { class: "inline-form", "aria-label": "Mark days" },
+    el("label", { for: "note-kind", text: "What" }), kind,
+    el("label", { for: "note-from", text: "From" }), from,
+    el("label", { for: "note-to", text: "To (optional)" }), to,
+    el("label", { for: "note-text", text: "Note (optional)" }), note,
+    el("button", { type: "submit", text: "Mark" }));
+  add.addEventListener("submit", (e) => {
+    e.preventDefault();
+    action(add, status, "Marked.", async () => {
+      await send("POST", "/api/annotations", { kind: kind.value, from: from.value, to: to.value || from.value, note: note.value });
+      await renderAnnotations(box, "Marked.");
+    });
+  });
+  box.append(add, status);
+}
+
+// ---- Check-in ----------------------------------------------------------
+
+async function renderCheckinForm(box, due) {
+  const s = await getSession();
+  box.replaceChildren(el("h3", { text: "Weekly check-in" }));
+  if (!s.writable) {
+    box.append(el("p", { class: "fine", text: "Answer it with `burnout checkin`." }));
+    return;
+  }
+  const open = button(due ? "Take this week's check-in" : "Take the check-in again", async () => {
+    open.disabled = true;
+    try {
+      box.append(checkinForm(box, await get("/api/checkin")));
+      open.remove();
+      box.querySelector("fieldset input").focus();
+    } catch (err) {
+      open.disabled = false;
+      showError(err);
+    }
+  });
+  box.append(el("p", { class: "fine", text: "13 questions from the Copenhagen Burnout Inventory, about a minute. Nothing is saved until you send it." }), open);
+}
+
+// supportMessage reflows the CLI's hard-wrapped message: its opening
+// paragraph, then one list item per "•".
+function supportMessage(text) {
+  let intro = "";
+  const points = [];
+  for (const line of text.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    if (line.startsWith("•")) points.push(line.slice(1).trim());
+    else if (points.length) points[points.length - 1] += " " + line;
+    else intro += (intro ? " " : "") + line;
+  }
+  return [el("p", { text: intro }), el("ul", {}, ...points.map((p) => el("li", { text: p })))];
+}
+
+function checkinForm(box, instruments) {
+  const form = el("form", { class: "checkin", "aria-label": "Weekly check-in" });
+  const total = instruments.reduce((n, i) => n + i.items.length, 0);
+  let n = 0;
+  for (const inst of instruments) {
+    form.append(el("p", { class: "intro", text: inst.intro }));
+    for (const item of inst.items) {
+      n++;
+      const name = `${inst.id}.${item.id}`;
+      const set = el("fieldset", {}, el("legend", { text: `${n}/${total}  ${item.text}` }));
+      for (const c of item.choices) {
+        const id = `${name}.${c.value}`;
+        set.append(el("div", { class: "choice" },
+          el("input", { type: "radio", id, name, value: String(c.value), required: true }),
+          el("label", { for: id, text: c.label })));
+      }
+      form.append(set);
+    }
+  }
+  const status = el("p", { role: "status", class: "status" });
+  form.append(el("button", { type: "submit", text: "Save check-in" }), status);
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const answers = {};
+    for (const inst of instruments) {
+      answers[inst.id] = {};
+      for (const item of inst.items) {
+        const picked = form.querySelector(`input[name="${CSS.escape(inst.id + "." + item.id)}"]:checked`);
+        if (picked) answers[inst.id][item.id] = Number(picked.value);
+      }
+    }
+    action(form, status, "Saved.", async () => {
+      const res = await send("POST", "/api/checkins", { answers });
+      const out = el("div", { class: "card", role: "status", tabindex: "-1" }, el("h4", { text: "Saved" }),
+        ...res.scores.map((c) => el("p", {}, `${c.name}: `, num(Math.round(c.score)), ` / 100 (${c.band})`)));
+      if (res.support) {
+        // The safety flow (system design §8.4): the same words the CLI shows.
+        out.classList.add("support");
+        out.append(...supportMessage(res.message),
+          el("ul", {}, ...res.resources.map((r) => el("li", { text: `${r.name}: ${r.contact}` }))));
+      }
+      box.replaceChildren(el("h3", { text: "Weekly check-in" }), out);
+      out.focus();
+    });
+  });
+  return form;
 }
 
 // ---- Privacy -----------------------------------------------------------
 
 function renderPrivacy(p) {
   const body = document.getElementById("privacy-body");
+  const controls = el("div");
+  renderControls(controls).catch(showError);
   body.replaceChildren(
+    controls,
     el("h3", { text: "What is collected" }),
     el("ul", {}, ...p.collected.map((c) => el("li", { text: c }))),
     el("h3", { text: "Your settings" }),
     el("dl", { class: "settings" }, ...p.settings.flatMap((s) => [el("dt", { text: s.name }), el("dd", { text: s.value })])),
-    el("p", { class: "fine", text: "Change these with `burnout config`, `burnout pause` and `burnout forget`; remove everything with `burnout uninstall --purge`. Details: docs/privacy-and-security.md" }));
+    el("p", { class: "fine", text: "Change settings with `burnout config`; remove everything with `burnout uninstall --purge`. Details: docs/privacy-and-security.md" }));
+}
+
+// renderControls is pause, resume and delete. Deleting asks first, in the
+// page: it can't be undone.
+async function renderControls(box) {
+  const s = await getSession();
+  box.replaceChildren(el("h3", { text: "Your controls" }));
+  if (!s.writable) {
+    box.append(el("p", { text: "Pause with `burnout pause 1h` or `burnout pause tomorrow`, resume with `burnout resume`, and delete with `burnout forget --last 1h` or `--today`." }));
+    return;
+  }
+  const status = el("p", { role: "status", class: "status" });
+  const reload = async () => {
+    const p = await get("/api/privacy");
+    const dl = document.querySelector("#privacy-body dl.settings");
+    if (dl) dl.replaceChildren(...p.settings.flatMap((r) => [el("dt", { text: r.name }), el("dd", { text: r.value })]));
+    loaded.privacy = true;
+  };
+  const pause = el("div", { class: "controls", role: "group", "aria-label": "Recording" },
+    button("Pause for an hour", () => action(pause, status, "Paused for an hour.", async () => { await send("POST", "/api/pause", { for: "1h" }); await reload(); })),
+    button("Pause until tomorrow", () => action(pause, status, "Paused until tomorrow.", async () => { await send("POST", "/api/pause", { for: "tomorrow" }); await reload(); })),
+    button("Pause until I resume", () => action(pause, status, "Paused until you resume.", async () => { await send("POST", "/api/pause", { for: "until-resumed" }); await reload(); })),
+    button("Resume", () => action(pause, status, "Recording again.", async () => { await send("POST", "/api/resume", {}); await reload(); })));
+
+  const confirmBox = el("div", { class: "confirm", hidden: true });
+  const ask = (range, what) => {
+    const yes = button(`Delete ${what}`, () => action(del, status, `Deleted ${what}.`, async () => {
+      confirmBox.hidden = true;
+      await send("DELETE", `/api/data?range=${range}`);
+      await reload();
+    }), { class: "danger" });
+    const no = button("Cancel", () => { confirmBox.hidden = true; status.textContent = "Nothing was deleted."; });
+    confirmBox.replaceChildren(
+      el("p", { text: `This deletes everything recorded ${what === "today" ? "today" : "in the last hour"}, including recovery copies made since then. It can't be undone.` }),
+      yes, no);
+    confirmBox.hidden = false;
+    no.focus();
+  };
+  const del = el("div", { class: "controls", role: "group", "aria-label": "Delete recent data" },
+    button("Delete the last hour…", () => ask("hour", "the last hour")),
+    button("Delete today…", () => ask("today", "today")),
+    confirmBox);
+  box.append(el("h4", { text: "Recording" }), pause, el("h4", { text: "Delete recent data" }), del, status);
 }
 
 // ---- Navigation --------------------------------------------------------

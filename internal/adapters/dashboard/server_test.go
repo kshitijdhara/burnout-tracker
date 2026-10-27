@@ -37,14 +37,16 @@ type clock struct {
 func (c *clock) get() time.Time      { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
 func (c *clock) add(d time.Duration) { c.mu.Lock(); c.now = c.now.Add(d); c.mu.Unlock() }
 
-func start(t *testing.T, src Source) (*Server, *clock, string) {
+func start(t *testing.T, src Source) (*Server, *clock, string) { return startWith(t, src, nil) }
+
+func startWith(t *testing.T, src Source, ctl Control) (*Server, *clock, string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := &clock{now: time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)}
-	s := newServer(src, slog.New(slog.NewTextHandler(io.Discard, nil)), ln, c.get)
+	s := newServer(src, ctl, slog.New(slog.NewTextHandler(io.Discard, nil)), ln, c.get)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- s.Serve(ctx) }()
