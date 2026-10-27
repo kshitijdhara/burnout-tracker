@@ -102,11 +102,18 @@ func (previewSource) Week(context.Context) (Week, error) {
 	avg, prev, p := 52.0, 41.0, 68.0
 	return Week{
 		From: "2026-10-19", To: "2026-10-25", Scored: 6, Average: &avg, PrevAverage: &prev, Peak: &Peak{"2026-10-23", 68, "elevated"},
-		Drivers:     []Count{{"hours of attended work", 4}, {"app switches per hour", 3}, {"back-to-back meetings", 2}},
-		Limits:      []Count{{"57 h of attended work in the last 7 days", 1}},
-		Checkins:    []Check{{"Work-related burnout", 54, "moderate", &p}, {"Personal burnout", 46, "low", nil}},
-		Marked:      []string{"on-call, 2026-10-20 to 2026-10-22 (3 days)"},
-		Suggestions: []string{"This week went past 55 hours of work. Is there one thing you can move, delegate or drop?"},
+		Drivers:  []Count{{"hours of attended work", 4}, {"app switches per hour", 3}, {"back-to-back meetings", 2}},
+		Limits:   []Count{{"57 h of attended work in the last 7 days", 1}},
+		Checkins: []Check{{"Work-related burnout", 54, "moderate", &p}, {"Personal burnout", 46, "low", nil}},
+		Marked:   []string{"on-call, 2026-10-20 to 2026-10-22 (3 days)"},
+		Suggestions: []string{
+			"This week went past 55 hours of work. Is there one thing you can move, delegate or drop?",
+			"Your attention switched between apps more than usual. Try blocking an hour or two for focused work with chat silenced.",
+		},
+		Adherence: []Adherence{{Text: "stop work by 21:30 on workdays", Summary: "kept on 3 of 5 days (not on Tue 20 Oct, Thu 22 Oct)",
+			Kept: 3, Judged: 5, Missed: []string{"2026-10-20", "2026-10-22"}}},
+		Offers: []Offer{{Kind: "focus_block", Value: "60", Text: "a focus block of at least 60 minutes on workdays",
+			For: "Your attention switched between apps more than usual. Try blocking an hour or two for focused work with chat silenced."}},
 	}, nil
 }
 

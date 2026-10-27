@@ -108,3 +108,54 @@ func TestReminderSeen(t *testing.T) {
 		t.Fatal("an unreadable file must read as never seen")
 	}
 }
+
+func TestNudges(t *testing.T) {
+	dir := t.TempDir()
+	if n, err := ReadNudges(dir); err != nil || n.Day != "" || len(n.Off) != 0 {
+		t.Fatalf("no file: %+v %v", n, err)
+	}
+	if err := ShowNudge(dir, "2026-10-23", "shutdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SnoozeNudge(dir, "2026-10-23", "shutdown"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NudgeOff(dir, "2026-10-24", "day_off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := NudgeOff(dir, "2026-10-24", "day_off"); err != nil {
+		t.Fatal(err)
+	}
+	// A new day's nudge clears the snooze and keeps what is off.
+	if err := ShowNudge(dir, "2026-10-26", "weekly_hours"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := ReadNudges(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Day != "2026-10-26" || n.Kind != "weekly_hours" || n.Snoozed || len(n.Off) != 1 || n.Off[0] != "day_off" {
+		t.Errorf("state %+v", n)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, nudgesFile)); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Errorf("nudges file mode %v", fi.Mode().Perm())
+	}
+
+	// Unreadable: an error, so no nudge shows, and showing one doesn't
+	// overwrite it; the user's own snooze or off does.
+	if err := os.WriteFile(filepath.Join(dir, nudgesFile), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadNudges(dir); err == nil {
+		t.Error("a corrupt file reads")
+	}
+	if err := ShowNudge(dir, "2026-10-27", "shutdown"); err == nil {
+		t.Error("showing a nudge replaced a corrupt file")
+	}
+	if err := NudgeOff(dir, "2026-10-27", "shutdown"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := ReadNudges(dir); err != nil || !n.Snoozed || n.Off[0] != "shutdown" {
+		t.Errorf("after off: %+v %v", n, err)
+	}
+}

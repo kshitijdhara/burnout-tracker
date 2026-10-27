@@ -172,6 +172,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /api/privacy", s.api(func(r *http.Request) (any, error) { return s.src.Privacy(r.Context()) }))
 	mux.HandleFunc("GET /api/session", s.api(s.session))
 	mux.HandleFunc("GET /api/annotations", s.api(s.annotations))
+	mux.HandleFunc("GET /api/boundaries", s.api(s.boundaries))
 	mux.HandleFunc("GET /api/checkin", s.api(func(*http.Request) (any, error) { return weeklyCheckin(), nil }))
 	static, _ := fs.Sub(assets, "assets")
 	mux.Handle("GET /", http.FileServerFS(static))

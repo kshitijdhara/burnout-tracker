@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 )
 
@@ -23,6 +24,7 @@ type memControl struct {
 	forgot   []string
 	notes    []annotation.Annotation
 	checkins []checkin.Record
+	bounds   []boundary.Boundary
 	fail     bool
 }
 
@@ -87,6 +89,44 @@ func (m *memControl) SaveCheckins(_ context.Context, rs []checkin.Record) error 
 	return nil
 }
 
+func (m *memControl) Boundaries(context.Context) ([]Boundary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Boundary
+	for _, b := range boundary.Current(m.bounds) {
+		out = append(out, Boundary{ID: b.ID, Kind: string(b.Kind), Value: b.Value, Text: b.Describe(), Since: b.Since})
+	}
+	return out, nil
+}
+
+func (m *memControl) SetBoundary(_ context.Context, b boundary.Boundary) (int64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, have := range m.bounds {
+		if have.Kind == b.Kind && have.Active() {
+			if have.Value == b.Value {
+				return have.ID, false, nil
+			}
+			m.bounds[i].Until = "2026-10-26"
+		}
+	}
+	b.ID, b.Since = int64(len(m.bounds)+1), "2026-10-27"
+	m.bounds = append(m.bounds, b)
+	return b.ID, true, nil
+}
+
+func (m *memControl) RemoveBoundary(_ context.Context, id int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, b := range m.bounds {
+		if b.ID == id && b.Active() {
+			m.bounds[i].Until = "2026-10-26"
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (*memControl) Region() string { return "GB" }
 
 // writer is a logged-in page: its cookie and CSRF token.
@@ -142,6 +182,8 @@ var writeCases = []struct{ method, path, body string }{
 	{"POST", "/api/annotations", `{"kind":"vacation","from":"2026-11-02","to":"2026-11-06"}`},
 	{"DELETE", "/api/annotations/1", ""},
 	{"POST", "/api/checkins", fullCheckin(100)},
+	{"POST", "/api/boundaries", `{"kind":"shutdown","value":"21:30"}`},
+	{"DELETE", "/api/boundaries/1", ""},
 }
 
 // fullCheckin answers every weekly item with v.
@@ -192,7 +234,7 @@ func TestWritesNeedTheirOwnPage(t *testing.T) {
 			}
 		}
 	}
-	if ctl.paused != "" || ctl.resumed != 0 || len(ctl.forgot) != 0 || len(ctl.notes) != 0 || len(ctl.checkins) != 0 {
+	if ctl.paused != "" || ctl.resumed != 0 || len(ctl.forgot) != 0 || len(ctl.notes) != 0 || len(ctl.checkins) != 0 || len(ctl.bounds) != 0 {
 		t.Errorf("a refused write changed something: %+v", ctl)
 	}
 	// Without fetch metadata, a matching Origin is the page.
@@ -226,7 +268,7 @@ func TestOnlyWriteRoutesTakeWrites(t *testing.T) {
 		}
 	}
 	// GETs still need no token.
-	for _, path := range []string{"/api/overview", "/api/session", "/api/annotations", "/api/checkin"} {
+	for _, path := range []string{"/api/overview", "/api/session", "/api/annotations", "/api/boundaries", "/api/checkin"} {
 		if code, _ := w.do("GET", path, "", func(r *http.Request) { r.Header.Del(csrfHeader) }); code != http.StatusOK {
 			t.Errorf("GET %s without a token: %d", path, code)
 		}
@@ -296,6 +338,31 @@ func TestWriteRoutes(t *testing.T) {
 	expect("DELETE", "/api/annotations/x", "", http.StatusBadRequest)
 	if len(ctl.notes) != 1 || ctl.notes[0].Kind != annotation.Sick {
 		t.Errorf("notes %+v", ctl.notes)
+	}
+
+	if out := expect("POST", "/api/boundaries", `{"kind":"shutdown","value":"21:30"}`, http.StatusOK); out != "{\"changed\":true,\"id\":1}\n" {
+		t.Errorf("set: %s", out)
+	}
+	if out := expect("POST", "/api/boundaries", `{"kind":"shutdown","value":"21:30"}`, http.StatusOK); !strings.Contains(out, `"changed":false`) {
+		t.Errorf("same again: %s", out)
+	}
+	expect("POST", "/api/boundaries", `{"kind":"no-weekend","value":"","from_review":true}`, http.StatusOK)
+	if b := ctl.bounds[1]; b.Kind != boundary.NoWeekend || b.Source != boundary.SourceReview || ctl.bounds[0].Source != boundary.SourceDashboard {
+		t.Errorf("sources: %+v", ctl.bounds)
+	}
+	if out := expect("POST", "/api/boundaries", `{"kind":"shutdown","value":"25:00"}`, http.StatusBadRequest); !strings.Contains(out, "21:30") {
+		t.Errorf("bad value says %q", out)
+	}
+	expect("POST", "/api/boundaries", `{"kind":"bedtime","value":"22:00"}`, http.StatusBadRequest)
+	expect("POST", "/api/boundaries", `{"kind":"shutdown","value":"21:30","source":"cli"}`, http.StatusBadRequest)
+	if list := expect("GET", "/api/boundaries", "", http.StatusOK); !strings.Contains(list, "stop work by 21:30 on workdays") {
+		t.Errorf("list: %s", list)
+	}
+	expect("DELETE", "/api/boundaries/1", "", http.StatusNoContent)
+	expect("DELETE", "/api/boundaries/1", "", http.StatusNotFound)
+	expect("DELETE", "/api/boundaries/0", "", http.StatusBadRequest)
+	if list := expect("GET", "/api/boundaries", "", http.StatusOK); strings.Contains(list, "21:30") {
+		t.Errorf("removed boundary listed: %s", list)
 	}
 
 	var questions []Instrument

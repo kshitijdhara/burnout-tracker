@@ -666,6 +666,10 @@ CREATE TABLE checkins (id INTEGER PRIMARY KEY, ts_ms INTEGER NOT NULL, instrumen
   answers BLOB NOT NULL, score REAL);                       -- default 2 years
 CREATE TABLE annotations (id INTEGER PRIMARY KEY, start_day TEXT NOT NULL, end_day TEXT NOT NULL,
   kind TEXT NOT NULL /* on_call|exam|release|vacation|sick|other */, note TEXT);
+-- user-set rules (§8.2); never updated in place, so the history stays
+CREATE TABLE boundaries (id INTEGER PRIMARY KEY, kind TEXT NOT NULL /* shutdown|no_weekend|meetings_max|focus_block */,
+  value TEXT NOT NULL, since_day TEXT NOT NULL, until_day TEXT /* NULL while active */,
+  source TEXT NOT NULL /* cli|dashboard|review */, created_ms INTEGER NOT NULL, ended_ms INTEGER);
 CREATE TABLE monitor_snapshots (ts_ms INTEGER PRIMARY KEY, topology TEXT NOT NULL); -- count, resolutions, arrangement; 180 days
 CREATE TABLE health_daily (logical_day TEXT PRIMARY KEY, slis TEXT NOT NULL);       -- coverage, drops, hook delivery; 180 days
 CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_ms INTEGER NOT NULL);
@@ -924,11 +928,45 @@ Phase 1 so far (`burnout review`, `internal/domain/review`):
   - limits crossed;
   - the latest weekly check-in against the previous one;
   - up to two suggestions, guardrails first, from a fixed table tied to
-    features.
-- **Not yet:**
-  - labelling uncategorized items (with classification);
-  - annotating the week (with annotations);
-  - boundaries and adherence.
+    features, each offering the matching boundary when none is set;
+  - boundaries and adherence (below);
+  - in a terminal, `burnout review` then asks (Enter skips, q stops):
+    the offered boundaries, any other boundary change, marks for the
+    week (the `burnout annotate` syntax), and a category for up to three
+    apps whose time this week was uncategorized, saved to
+    `classify.overrides`. Apps that already have an override aren't
+    asked again. Sites can't be listed, since titles and the domains read
+    from them are never stored: add `domain:` overrides by hand. Piped
+    (`burnout review | less`), it asks nothing.
+- **Boundaries** (`internal/domain/boundary`, `burnout boundary
+  add|list|remove`, the dashboard's week view). Workdays are Monday to
+  Friday:
+  - `shutdown HH:MM`: no work after that time on workdays. Times before
+    04:00 mean after midnight, and work after midnight belongs to the
+    workday before (the logical day).
+  - `no-weekend`: no work on Saturdays and Sundays.
+  - `meetings-max H`: at most H hours of meetings and calls on workdays
+    (the `meeting_hours` feature).
+  - `focus-block M`: a focus block of at least M minutes on workdays
+    (the `longest_focus_block` feature).
+  - One rule per kind. Adding a kind that is set changes it; changing or
+    removing a rule ends it rather than deleting it, so the history
+    stays (`boundary list --history`).
+  - A rule applies from the day after it is set, and the day of a
+    change is judged by neither rule.
+- **Adherence**, per active boundary over the reviewed week, each day
+  judged by the rule that applied that day:
+  - Work is everything but media, as for the features. Shutdown and
+    no-weekend allow 15 minutes of work past the line, so a glance at a
+    message doesn't count.
+  - Shutdown and no-weekend are about work that didn't happen, so any
+    day with recorded data is judged. A day with no data is missing,
+    never kept.
+  - The meetings cap and the focus block need a day observed well
+    enough to score (coverage and presence, §7.2); a barely used day
+    would otherwise keep the cap and break the block.
+  - Vacation and sick days are left out. The review shows "kept on N of
+    M days", naming up to three days missed, and the days left out.
 
 ### 8.3 Nudges
 
@@ -937,6 +975,35 @@ Phase 1 so far (`burnout review`, `internal/domain/review`):
 - Copy is supportive and never shaming, and every nudge can be snoozed or
   turned off.
 - The dashboard has a "blur numbers" option.
+
+Phase 1 so far (`internal/domain/nudge`, the tray):
+- **Built:**
+  - one nudge kind per logical day, recorded in the `nudges` control file
+    so a restart can't show a second one;
+  - kinds, in priority order: shutdown time passed on a workday, working
+    on a weekend under the no-weekend rule (boundaries as they apply on the
+    day, reread every 5 minutes), then the latest scored day's guardrails (a long
+    week, a short night, a busy weekend). Guardrails come from the last
+    maintenance, so they describe yesterday, and are ignored once they are
+    more than two days old;
+  - copy from a fixed table, with no numbers (a test enforces it);
+  - shown as a tray menu item. On macOS a short title sits beside the
+    icon; the AC-4 reminder takes that place first. The nudge never shows
+    in the first line or the tooltip;
+  - suppression, rechecked every refresh: paused, private hours, outside
+    `nudges.waking_hours`, no recent snapshot (safe mode included), a call
+    or video;
+  - "Snooze until tomorrow" and "Don't show this kind again" in the
+    item's submenu; `nudges.enabled` and one switch per kind in the
+    config. Every unknown state, such as an unreadable control file,
+    shows nothing.
+- **Not yet:**
+  - Focus/Do Not Disturb and screen-share detection. macOS exposes
+    neither without a new permission (Focus authorization, Full Disk
+    Access), so calls and video stand in. Windows and Linux can't see
+    calls either. Each collector lists the gap in `Limitations`, and
+    `burnout doctor` shows it;
+  - the dashboard's "blur numbers" option.
 
 ### 8.4 Safety
 
@@ -966,7 +1033,10 @@ Collected via opt-in in-app surveys and alpha interviews:
 - calibration completion;
 - weekly check-in completion;
 - 4- and 8-week retention;
-- % of users who set or changed a boundary after a review;
+- % of users who set or changed a boundary after a review (recorded
+  locally: a boundary set from the review's questions or the week
+  view's offer has source `review`; `boundary list --history` shows
+  it);
 - self-reported usefulness.
 
 These, plus §7.5, are the alpha exit criteria.
@@ -1012,7 +1082,8 @@ These, plus §7.5, are the alpha exit criteria.
   daemon, with a new launch token per click.
   - **Writes:** the dashboard has the routes above as `POST /api/pause`,
     `POST /api/resume`, `DELETE /api/data?range=hour|today`,
-    `POST /api/annotations`, `DELETE /api/annotations/{id}` and
+    `POST /api/annotations`, `DELETE /api/annotations/{id}`,
+    `POST /api/boundaries`, `DELETE /api/boundaries/{id}` and
     `POST /api/checkins`, each behind a per-session CSRF token and a
     same-origin check (Privacy & Security §8.2). They go through the CLI's
     control files and its short-lived read-write connection, so both
@@ -1020,8 +1091,10 @@ These, plus §7.5, are the alpha exit criteria.
   - **Overview:** 90-day strain with drivers, limits and calibration.
   - **Today:** categories, apps, a 10-minute timeline with calendar
     meetings, terminal and agents.
-  - **This week:** the weekly review, marked days (add and remove) and
-    the weekly check-in form, with the support flow (§8.4).
+  - **This week:** the weekly review with boundary adherence, a button
+    to set the boundary a suggestion offers, boundaries and marked days
+    (add and remove), and the weekly check-in form, with the support
+    flow (§8.4).
   - **Privacy:** pause, resume and delete the last hour or today (with a
     confirm step), then the same rows as `burnout privacy`.
   - **Accessibility:** WCAG work covers keyboard and screen-reader

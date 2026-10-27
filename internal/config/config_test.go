@@ -11,6 +11,7 @@ import (
 
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
 )
 
 func TestMissingFileIsDefaults(t *testing.T) {
@@ -33,6 +34,7 @@ func TestRenderRoundTrips(t *testing.T) {
 	// Dotted keys must be quoted, or TOML reads them as nested tables.
 	c.Classify.Overrides = map[string]string{"notion.id": "comms", "domain:github.com": "docs", `odd "app" \ id`: "other"}
 	c.Retention.MinutesDays = 30
+	c.Nudges.Enabled, c.Nudges.WakingHours, c.Nudges.OvernightGap = false, "10:00-02:00", false
 	back, err := Parse(Render(c))
 	if err != nil {
 		t.Fatalf("%v\n%s", err, Render(c))
@@ -43,6 +45,25 @@ func TestRenderRoundTrips(t *testing.T) {
 	for _, def := range []Config{Default()} {
 		if back, err := Parse(Render(def)); err != nil || !reflect.DeepEqual(back, def) {
 			t.Errorf("defaults round trip: %+v, %v", back, err)
+		}
+	}
+}
+
+func TestNudgeSettings(t *testing.T) {
+	s := Default().NudgeSettings()
+	if !s.Enabled || len(s.Off) != 0 || s.Waking.String() != "07:00-23:00" {
+		t.Errorf("defaults: %+v", s)
+	}
+	c := Default()
+	c.Nudges.DayOff = false
+	if s := c.NudgeSettings(); !s.Off[nudge.DayOff] || len(s.Off) != 1 {
+		t.Errorf("day_off off: %+v", s.Off)
+	}
+	for _, bad := range []string{"", "07:00", "Mon 07:00-23:00", "22:00-01:00", "nonsense"} {
+		c := Default()
+		c.Nudges.WakingHours = bad
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "nudges.waking_hours") {
+			t.Errorf("waking hours %q: %v", bad, err)
 		}
 	}
 }
@@ -107,6 +128,8 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	must(c.Set("privacy.aggregate_only", []string{"on"}))
 	must(c.Set("retention.minutes_days", []string{"30"}))
 	must(c.Set("privacy.private_hours", []string{"Mon-Fri 19:00-08:00"}))
+	must(c.Set("nudges.weekend_work", []string{"off"}))
+	must(c.Set("nudges.waking_hours", []string{"8:00-1:30"}))
 	must(c.Add("privacy.exclude_apps", []string{"com.a", "com.b", "COM.A"}))
 	if n, err := c.Remove("privacy.exclude_apps", []string{"com.B", "com.z"}); err != nil || n != 1 {
 		t.Fatalf("remove: %d, %v", n, err)
@@ -116,6 +139,8 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 		"retention.minutes_days": {"30"},
 		"privacy.private_hours":  {"Mon-Fri 19:00-08:00"},
 		"privacy.exclude_apps":   {"com.a"},
+		"nudges.weekend_work":    {"false"},
+		"nudges.waking_hours":    {"08:00-01:30"},
 	} {
 		if got, err := c.Get(k); err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%s = %q, %v", k, got, err)
@@ -145,7 +170,7 @@ func TestGetSetAddRemoveUnset(t *testing.T) {
 	if err := c.Add("retention.minutes_days", []string{"1"}); err == nil {
 		t.Error("add to a number accepted")
 	}
-	if len(Keys()) != 15 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
+	if len(Keys()) != 22 || !IsList("privacy.exclude_apps") || IsList("privacy.aggregate_only") {
 		t.Errorf("keys: %v", Keys())
 	}
 }
