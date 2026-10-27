@@ -179,6 +179,9 @@ func changeConfig(path, cmd, key string, values []string) error {
 	if saved, err := config.Load(path); err == nil {
 		c = saved // as written: duplicates dropped, private hours tidied
 	}
+	if err := nudgeTurnedOn(c, key); err != nil {
+		return err
+	}
 	vals, _ := c.Get(key)
 	if config.IsList(key) {
 		quoted := make([]string, len(vals))

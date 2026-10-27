@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/control"
+	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
 	"github.com/kshitijdhara/burnout-tracker/internal/app"
@@ -130,18 +133,47 @@ func nudgeBoundaries(day string) nudge.Boundaries {
 	return nb
 }
 
-// trayNudge is the nudge the tray shows at now, if any (system design
-// §8.3), and records the day's first one. Everything unknown, from an
-// unreadable state file to a quiet collector, shows nothing.
-func trayNudge(dataDir string, c config.Config, now time.Time, paused, private bool) tray.Nudge {
+// recordNudge decides the tray's nudge at now (system design §8.3) and
+// records the day's first one in the data folder. It returns the nudge
+// state as recorded, which shownNudge decides from until the next call;
+// false when the state file is unreadable, and no nudge shows.
+func recordNudge(dataDir string, c config.Config, now time.Time, paused, private bool) (control.Nudges, bool) {
 	n, err := control.ReadNudges(dataDir)
 	if err != nil {
+		return control.Nudges{}, false
+	}
+	d, day := decideNudge(n, c, now, paused, private)
+	if d.Show && n.Day != day {
+		if err := control.ShowNudge(dataDir, day, string(d.Kind)); err != nil {
+			return n, true // unrecorded, it could be followed by another today: shownNudge won't show it
+		}
+		n.Day, n.Kind, n.Snoozed = day, string(d.Kind), false
+	}
+	return n, true
+}
+
+// shownNudge is the nudge the tray shows at now, if any: the day's
+// recorded nudge, unless something holds it back at now. It writes
+// nothing, so the tray can ask every few seconds. Everything unknown, from
+// an unreadable state file to a quiet collector, shows nothing.
+func shownNudge(n control.Nudges, c config.Config, now time.Time, paused, private bool) tray.Nudge {
+	d, day := decideNudge(n, c, now, paused, private)
+	if !d.Show || n.Day != day {
 		return tray.Nudge{}
 	}
+	cp := nudge.CopyOf(d.Kind)
+	return tray.Nudge{Kind: string(d.Kind), Title: cp.Title, Text: cp.Text}
+}
+
+// decideNudge decides the nudge at now from the state n, and returns the
+// logical day.
+func decideNudge(n control.Nudges, c config.Config, now time.Time, paused, private bool) (nudge.Decision, string) {
 	s := c.NudgeSettings()
 	for _, k := range n.Off {
 		s.Off[nudge.Kind(k)] = true
 	}
+	// No collector reports screen sharing or Focus yet (each lists it in
+	// its limitations), so ScreenShare and Focus stay false.
 	at := nudge.Now{At: now, Day: model.LogicalDay(now, app.DefaultConfig().Rollover), Paused: paused, Private: private}
 	if p := lastPresence.Load(); p != nil && !safeMode.Load() && now.Sub(p.at) < presenceFresh && !p.at.After(now) {
 		at.Known, at.Active, at.InCall, at.Video = true, p.active, p.call, p.video
@@ -155,17 +187,7 @@ func trayNudge(dataDir string, c config.Config, now time.Time, paused, private b
 		}
 	}
 	today := nudge.Today{Day: n.Day, Kind: nudge.Kind(n.Kind), Snoozed: n.Snoozed}
-	d := nudge.Decide(s, nudgeBoundaries(at.Day), guardrails, today, at)
-	if !d.Show {
-		return tray.Nudge{}
-	}
-	if n.Day != at.Day {
-		if err := control.ShowNudge(dataDir, at.Day, string(d.Kind)); err != nil {
-			return tray.Nudge{} // unrecorded, it could be followed by another today
-		}
-	}
-	cp := nudge.CopyOf(d.Kind)
-	return tray.Nudge{Kind: string(d.Kind), Title: cp.Title, Text: cp.Text}
+	return nudge.Decide(s, nudgeBoundaries(at.Day), guardrails, today, at), at.Day
 }
 
 // snoozeNudge and turnOffNudge are the nudge's menu items.
@@ -176,9 +198,48 @@ func snoozeNudge(dataDir, kind string, now time.Time) error {
 	return control.SnoozeNudge(dataDir, model.LogicalDay(now, app.DefaultConfig().Rollover), kind)
 }
 
+// errConfigInvalid stands in for the config file's own error, which can
+// quote excluded sites and apps, where it would reach the daemon log.
+var errConfigInvalid = errors.New("the config file is invalid; run `burnout config validate`")
+
+// turnOffNudge turns kind off in the config file, where `burnout config
+// set nudges.KIND true` turns it back on, and hides it for the rest of the
+// day: the daemon picks the file up within seconds.
 func turnOffNudge(dataDir, kind string, now time.Time) error {
 	if kind == "" {
 		return nil
 	}
-	return control.NudgeOff(dataDir, model.LogicalDay(now, app.DefaultConfig().Rollover), kind)
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		return errConfigInvalid
+	}
+	if err := c.Set("nudges."+kind, []string{"false"}); err != nil {
+		return err
+	}
+	if err := config.Save(path, c); err != nil {
+		return err
+	}
+	return snoozeNudge(dataDir, kind, now)
+}
+
+// nudgeTurnedOn clears a kind the tray of v0.1.0-alpha.1 turned off from
+// the data folder, once `burnout config` turns it on in c: from then on
+// the file alone decides. key is the config key just changed.
+func nudgeTurnedOn(c config.Config, key string) error {
+	kind, ok := strings.CutPrefix(key, "nudges.")
+	if !ok {
+		return nil
+	}
+	if vals, err := c.Get(key); err != nil || len(vals) != 1 || vals[0] != "true" {
+		return nil
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		return err
+	}
+	return control.NudgeOn(dataDir, kind)
 }
