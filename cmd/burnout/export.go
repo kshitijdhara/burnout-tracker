@@ -97,8 +97,8 @@ func runExport(ctx context.Context, args []string) error {
 	if err := export.Remember(dataDir, export.Entry{At: now, Path: path, Format: *format}); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "burnout: couldn't note where the export went: %v\n", err)
 	}
-	fmt.Printf("Exported %d minutes, %d intervals, %d days, %d check-ins and %d annotations (%s to %s)\nto %s\n",
-		n.Minutes, n.Intervals, n.Days, n.Checkins, n.Annotations, r.From, r.To, printable(path))
+	fmt.Printf("Exported %d minutes, %d intervals, %d days, %d check-ins, %d annotations and %d boundaries (%s to %s)\nto %s\n",
+		n.Minutes, n.Intervals, n.Days, n.Checkins, n.Annotations, n.Boundaries, r.From, r.To, printable(path))
 	fmt.Println("`burnout forget` won't delete it: remove it yourself when you're done.")
 	return nil
 }

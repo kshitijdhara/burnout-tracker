@@ -35,6 +35,7 @@ func commands() []command {
 		{"resume", "start recording again after a pause", runResume},
 		{"forget", "delete recorded data: forget --last 1h | --today | --since DATE | --all", runForget},
 		{"annotate", "mark days: annotate vacation FROM [TO] [--note TEXT] | list | remove ID", runAnnotate},
+		{"boundary", "rules for your work: boundary add shutdown 21:30 | no-weekend | meetings-max 4 | focus-block 90; list; remove", runBoundary},
 		{"privacy", "what is collected, your current settings and your controls", runPrivacy},
 		{"config", "settings: config get|set|add|remove|unset|validate|path", runConfig},
 		{"calendar", "meetings from your calendar feed: calendar add URL|FILE | sync | status | remove", runCalendar},

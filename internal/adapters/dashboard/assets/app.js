@@ -319,13 +319,96 @@ function renderWeek(w) {
     body.append(p);
   }
   if (w.checkin_due) body.append(el("p", { class: "notice", text: "This week's check-in is due: about a minute, below or with `burnout checkin`." }));
+  const bounds = el("div");
   if (w.suggestions.length) {
-    body.append(el("h3", { text: "One or two things to try" }), el("ul", {}, ...w.suggestions.map((s) => el("li", { text: s }))));
+    const list = el("ul");
+    for (const s of w.suggestions) {
+      const item = el("li", {}, el("span", { text: s }));
+      for (const o of (w.offers || []).filter((o) => o.for === s)) offerButton(item, o, bounds, w).catch(showError);
+      list.append(item);
+    }
+    body.append(el("h3", { text: "One or two things to try" }), list);
   }
   const notes = el("div"), form = el("div");
-  body.append(notes, form);
+  body.append(bounds, notes, form);
+  renderBoundaries(bounds, w).catch(showError);
   renderAnnotations(notes).catch(showError);
   renderCheckinForm(form, w.checkin_due).catch(showError);
+}
+
+// ---- Boundaries --------------------------------------------------------
+
+// [kind, label, input type, starting value, step, min, max], as the
+// server parses them.
+const boundaryKinds = [
+  ["shutdown", "Stop work by", "time", "21:30", "60", "", ""],
+  ["no_weekend", "No work at the weekend", "", "", "", "", ""],
+  ["meetings_max", "At most this many hours of meetings", "number", "4", "0.5", "0.5", "12"],
+  ["focus_block", "A focus block of at least (minutes)", "number", "90", "1", "15", "240"],
+];
+
+// offerButton offers the boundary that goes with a suggestion. It is
+// marked as set from the review (system design §8.6).
+async function offerButton(item, o, bounds, w) {
+  const s = await getSession();
+  if (!s.writable) return;
+  const status = el("span", { role: "status", class: "status" });
+  item.append(" ", button(`Set a boundary: ${o.text}`, () => action(item, status, "Set, from tomorrow.", async () => {
+    await send("POST", "/api/boundaries", { kind: o.kind, value: o.value, from_review: true });
+    await renderBoundaries(bounds, w, "Set, from tomorrow.");
+  }), { class: "small" }), status);
+}
+
+async function renderBoundaries(box, w, said = "") {
+  const [s, bs] = await Promise.all([getSession(), get("/api/boundaries")]);
+  const status = el("p", { role: "status", class: "status", text: said });
+  const kept = new Map((w.adherence || []).map((a) => [a.text, a.summary]));
+  const list = el("ul", { class: "plain annotations" });
+  for (const b of bs) {
+    const summary = kept.get(b.text) || `applies from ${b.since}`;
+    const item = el("li", {}, el("span", { text: `${b.text[0].toUpperCase()}${b.text.slice(1)}: ${summary}` }));
+    if (s.writable) {
+      item.append(button("Remove", () => action(item, status, "Removed.", async () => {
+        await send("DELETE", `/api/boundaries/${encodeURIComponent(b.id)}`);
+        await renderBoundaries(box, w, "Removed.");
+      }), { "aria-label": `Remove ${b.text}`, class: "small" }));
+    }
+    list.append(item);
+  }
+  box.replaceChildren(el("h3", { text: "Your boundaries" }),
+    el("p", { class: "fine", text: "Kept days count only days with enough data; vacation and sick days are left out. A new or changed boundary applies from tomorrow." }),
+    bs.length ? list : el("p", { text: "None set." }));
+  if (!s.writable) {
+    box.append(el("p", { class: "fine", text: "Set boundaries with `burnout boundary add`." }));
+    return;
+  }
+  const kind = el("select", { id: "boundary-kind", name: "kind" }, ...boundaryKinds.map(([v, t]) => el("option", { value: v, text: t })));
+  const value = el("input", { id: "boundary-value", name: "value", type: "time", value: "21:30", autocomplete: "off" });
+  const valueLabel = el("label", { for: "boundary-value", text: "Value" });
+  const sync = () => {
+    const [, , type, start, step, min, max] = boundaryKinds.find(([v]) => v === kind.value);
+    value.hidden = valueLabel.hidden = type === "";
+    value.type = type || "text";
+    // Reset every time: a fractional step left on a time input makes it
+    // send seconds, which the server refuses.
+    value.step = step;
+    value.min = min;
+    value.max = max;
+    value.value = start;
+  };
+  kind.addEventListener("change", sync);
+  sync();
+  const add = el("form", { class: "inline-form", "aria-label": "Set a boundary" },
+    el("label", { for: "boundary-kind", text: "Boundary" }), kind, valueLabel, value,
+    el("button", { type: "submit", text: "Set" }));
+  add.addEventListener("submit", (e) => {
+    e.preventDefault();
+    action(add, status, "Set, from tomorrow.", async () => {
+      await send("POST", "/api/boundaries", { kind: kind.value, value: value.hidden ? "" : value.value });
+      await renderBoundaries(box, w, "Set, from tomorrow.");
+    });
+  });
+  box.append(add, status);
 }
 
 // ---- Annotations -------------------------------------------------------

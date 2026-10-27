@@ -89,6 +89,27 @@ type Week struct {
 	CheckinDue  bool     `json:"checkin_due"`
 	Marked      []string `json:"marked"`
 	Suggestions []string `json:"suggestions"`
+	// Adherence is each active boundary over the week; Offers are
+	// boundaries the page can offer with a suggestion.
+	Adherence []Adherence `json:"adherence"`
+	Offers    []Offer     `json:"offers"`
+}
+
+// Adherence is how one boundary was kept over the week.
+type Adherence struct {
+	Text    string   `json:"text"`    // the rule
+	Summary string   `json:"summary"` // "kept on 3 of 5 days (not on Tue 20 Oct)"
+	Kept    int      `json:"kept"`
+	Judged  int      `json:"judged"`
+	Missed  []string `json:"missed"`
+}
+
+// Offer is a boundary that goes with a suggestion.
+type Offer struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+	Text  string `json:"text"`
+	For   string `json:"for"` // the suggestion, word for word
 }
 
 // Peak is the week's highest-strain day.

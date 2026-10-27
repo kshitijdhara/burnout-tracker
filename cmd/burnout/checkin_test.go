@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/review"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
@@ -79,6 +80,13 @@ func TestFormatReview(t *testing.T) {
 		Guardrails:  []review.Recurring{{Name: "overnight_gap", Label: "only 6.0 h between …", Days: 1}},
 		Checkin:     map[string]checkin.Record{checkin.CBIWorkID: {Instrument: checkin.CBIWorkID, Score: 61}},
 		Suggestions: []string{"Try picking a shutdown time."},
+		Adherence: []review.Adherence{
+			{Boundary: boundary.Boundary{Kind: boundary.Shutdown, Value: "21:30", Since: "2026-10-01"},
+				Kept: 3, Judged: 4, Missed: []string{"2026-10-21"}, DaysOff: 1},
+			{Boundary: boundary.Boundary{Kind: boundary.NoWeekend, Since: "2026-10-01"}, NoData: 2},
+			{Boundary: boundary.Boundary{Kind: boundary.FocusBlock, Value: "90", Since: "2026-10-27"}},
+		},
+		Offers: []review.Offer{{Boundary: boundary.Boundary{Kind: boundary.MeetingsMax, Value: "4"}, For: "Try picking a shutdown time."}},
 	}
 	got := formatReview(w, true)
 	for _, want := range []string{
@@ -89,7 +97,10 @@ func TestFormatReview(t *testing.T) {
 		"! only 6.0 h between … (1 day)",
 		"work-related burnout 61 (moderate).",
 		"This week's is due",
-		"• Try picking a shutdown time.",
+		"• Try picking a shutdown time.\n    A boundary for it: `burnout boundary add meetings-max 4`",
+		"Your boundaries:\n  • Stop work by 21:30 on workdays: kept on 3 of 4 days (not on Wed 21 Oct); 1 day off left out",
+		"• No work at the weekend: no days to go by yet (2 days without enough data)",
+		"• A focus block of at least 90 minutes on workdays: new, it applies from 2026-10-27",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)

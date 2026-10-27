@@ -15,7 +15,8 @@
     "intervals": { "type": "array", "items": { "$ref": "#/$defs/interval" } },
     "days": { "type": "array", "items": { "$ref": "#/$defs/dayRecord" } },
     "checkins": { "type": "array", "items": { "$ref": "#/$defs/checkin" } },
-    "annotations": { "type": "array", "items": { "$ref": "#/$defs/annotation" } }
+    "annotations": { "type": "array", "items": { "$ref": "#/$defs/annotation" } },
+    "boundaries": { "type": "array", "description": "Added in a later build; older v1 exports have none.", "items": { "$ref": "#/$defs/boundary" } }
   },
   "$defs": {
     "day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -89,6 +90,18 @@
         "to": { "$ref": "#/$defs/day" },
         "kind": { "enum": ["vacation", "sick", "on_call", "release", "exam", "other"] },
         "note": { "type": "string" }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "description": "A rule the user set, and the logical days it applied to: since, up to but not including until (absent while active).",
+      "required": ["kind", "since", "source"],
+      "properties": {
+        "kind": { "enum": ["shutdown", "no_weekend", "meetings_max", "focus_block"] },
+        "value": { "type": "string", "description": "HH:MM for shutdown, hours for meetings_max, minutes for focus_block; absent for no_weekend." },
+        "since": { "$ref": "#/$defs/day" },
+        "until": { "$ref": "#/$defs/day" },
+        "source": { "enum": ["cli", "dashboard", "review"] }
       }
     }
   }
