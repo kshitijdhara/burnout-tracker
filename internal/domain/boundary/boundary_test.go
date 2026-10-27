@@ -9,7 +9,9 @@ import (
 func TestParse(t *testing.T) {
 	for _, c := range []struct{ kind, value, want string }{
 		{"shutdown", "21:30", "21:30"},
-		{"shutdown", "9:05", "09:05"},
+		{"shutdown", "1:05", "01:05"},
+		{"shutdown", "12:00", "12:00"},
+		{"shutdown", "03:59", "03:59"},
 		{"no-weekend", "", ""},
 		{"no_weekend", " ", ""},
 		{"meetings-max", "4h", "4"},
@@ -24,6 +26,12 @@ func TestParse(t *testing.T) {
 	for _, c := range [][2]string{
 		{"shutdown", "25:00"}, {"shutdown", ""}, {"no-weekend", "yes"}, {"meetings-max", "0"},
 		{"meetings-max", "13"}, {"focus-block", "10"}, {"focus-block", "1.5"}, {"bedtime", "22:00"},
+		// A morning shutdown would judge every workday missed.
+		{"shutdown", "04:00"}, {"shutdown", "9:30"}, {"shutdown", "11:59"},
+		// NaN passes a h <= 0 || h > 12 check; Inf is out of range. The
+		// dashboard's POST /api/boundaries parses with Parse too.
+		{"meetings-max", "nan"}, {"meetings-max", "NaN"}, {"meetings-max", "nanh"}, {"meetings-max", "inf"},
+		{"meetings-max", "-Inf"}, {"meetings-max", "+infinity"},
 	} {
 		if _, err := Parse(c[0], c[1]); !errors.Is(err, ErrInvalid) {
 			t.Errorf("Parse(%q, %q) accepted: %v", c[0], c[1], err)
