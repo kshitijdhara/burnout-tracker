@@ -13,10 +13,16 @@ import (
 	"os/signal"
 	"syscall"
 	_ "time/tzdata" // calendar feeds name time zones; Windows has no zone database
+
+	"github.com/kshitijdhara/burnout-tracker/internal/app"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
+
+// rollover is where one logical day ends and the next begins (04:00),
+// the daemon's default; every command uses it.
+var rollover = app.DefaultConfig().Rollover
 
 type command struct {
 	name, usage string

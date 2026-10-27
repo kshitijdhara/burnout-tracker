@@ -329,12 +329,10 @@ const minCore = time.Hour
 
 // parseCoreHours reads "HH:MM-HH:MM": one span within a day, every day.
 func parseCoreHours(spec string) (schedule.Window, error) {
-	w, err := schedule.Parse(spec)
+	w, err := parseTimes(spec, "09:00-18:00", "core hours apply on weekdays")
 	switch {
-	case err != nil || !strings.Contains(spec, ":"):
-		return w, fmt.Errorf("%q: want a time range like 09:00-18:00", spec)
-	case w.Days != [7]bool{true, true, true, true, true, true, true} || strings.ContainsAny(strings.TrimSpace(spec), " "):
-		return w, fmt.Errorf("%q: give times only; core hours apply on weekdays", spec)
+	case err != nil:
+		return w, err
 	case w.End <= w.Start:
 		return w, fmt.Errorf("%q: core hours can't run past midnight", spec)
 	case w.End-w.Start < minCore:
@@ -349,18 +347,30 @@ const minWaking = 4 * time.Hour
 // parseWakingHours reads "HH:MM-HH:MM": one span every day, which may run
 // past midnight.
 func parseWakingHours(spec string) (schedule.Window, error) {
-	w, err := schedule.Parse(spec)
+	w, err := parseTimes(spec, "07:00-23:00", "waking hours apply every day")
+	if err != nil {
+		return w, err
+	}
 	span := w.End - w.Start
 	if w.End <= w.Start {
 		span += 24 * time.Hour
 	}
+	if span < minWaking {
+		return w, fmt.Errorf("%q: waking hours must span at least %d hours", spec, int(minWaking.Hours()))
+	}
+	return w, nil
+}
+
+// parseTimes reads a bare "HH:MM-HH:MM" with no days, as core and waking
+// hours take. example is a valid value and days says when the range
+// applies, for the error messages.
+func parseTimes(spec, example, days string) (schedule.Window, error) {
+	w, err := schedule.Parse(spec)
 	switch {
 	case err != nil || !strings.Contains(spec, ":"):
-		return w, fmt.Errorf("%q: want a time range like 07:00-23:00", spec)
+		return w, fmt.Errorf("%q: want a time range like %s", spec, example)
 	case w.Days != [7]bool{true, true, true, true, true, true, true} || strings.ContainsAny(strings.TrimSpace(spec), " "):
-		return w, fmt.Errorf("%q: give times only; waking hours apply every day", spec)
-	case span < minWaking:
-		return w, fmt.Errorf("%q: waking hours must span at least %d hours", spec, int(minWaking.Hours()))
+		return w, fmt.Errorf("%q: give times only; %s", spec, days)
 	}
 	return w, nil
 }

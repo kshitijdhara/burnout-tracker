@@ -17,7 +17,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/keystore"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -118,7 +117,7 @@ func doctor(ctx context.Context, w io.Writer, forBundle bool) error {
 
 	if store, err := sqlite.OpenReadOnly(ctx, dataDir); err == nil {
 		defer func() { _ = store.Close() }()
-		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+		day := model.LogicalDay(time.Now(), rollover)
 		if h, err := store.Health(ctx, day); err == nil && h != "" {
 			_, _ = fmt.Fprintln(w, "  today's health:", h)
 		}

@@ -66,7 +66,7 @@ func runReview(ctx context.Context, _ []string) error {
 		store: rwStore{dataDir: dataDir},
 		label: func(app string, c model.Category) error { return labelApp(path, app, c) },
 		apps:  unlabelled(apps, cfg),
-		today: model.LogicalDay(now, app.DefaultConfig().Rollover),
+		today: model.LogicalDay(now, rollover),
 		now:   now,
 	}
 	return askReview(ctx, bufio.NewReader(os.Stdin), os.Stdout, w, acts)

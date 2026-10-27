@@ -13,7 +13,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -174,7 +173,7 @@ func decideNudge(n control.Nudges, c config.Config, now time.Time, paused, priva
 	}
 	// No collector reports screen sharing or Focus yet (each lists it in
 	// its limitations), so ScreenShare and Focus stay false.
-	at := nudge.Now{At: now, Day: model.LogicalDay(now, app.DefaultConfig().Rollover), Paused: paused, Private: private}
+	at := nudge.Now{At: now, Day: model.LogicalDay(now, rollover), Paused: paused, Private: private}
 	if p := lastPresence.Load(); p != nil && !safeMode.Load() && now.Sub(p.at) < presenceFresh && !p.at.After(now) {
 		at.Known, at.Active, at.InCall, at.Video = true, p.active, p.call, p.video
 	}
@@ -195,7 +194,7 @@ func snoozeNudge(dataDir, kind string, now time.Time) error {
 	if kind == "" {
 		return nil
 	}
-	return control.SnoozeNudge(dataDir, model.LogicalDay(now, app.DefaultConfig().Rollover), kind)
+	return control.SnoozeNudge(dataDir, model.LogicalDay(now, rollover), kind)
 }
 
 // errConfigInvalid stands in for the config file's own error, which can

@@ -13,7 +13,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/export"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
 )
 
@@ -51,7 +50,7 @@ func runExport(ctx context.Context, args []string) error {
 		}
 	}
 	now := time.Now()
-	r, err := exportRange(*since, *until, now, app.DefaultConfig().Rollover)
+	r, err := exportRange(*since, *until, now, rollover)
 	if err != nil {
 		return err
 	}

@@ -232,7 +232,7 @@ func dayScore(s strain.Score, notes []annotation.Annotation) dashboard.DayScore 
 
 func (d dashSource) Day(ctx context.Context, date string) (dashboard.Day, error) {
 	if date == "" {
-		date = model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+		date = model.LogicalDay(time.Now(), rollover)
 	}
 	sum, err := d.store.DaySummary(ctx, date)
 	if err != nil {
@@ -389,7 +389,7 @@ func (d dashControl) Pause(_ context.Context, length string) error {
 	case dashboard.PauseHour:
 		until = now.Add(time.Hour)
 	case dashboard.PauseTomorrow:
-		until, _ = pauseUntil("tomorrow", now, app.DefaultConfig().Rollover)
+		until, _ = pauseUntil("tomorrow", now, rollover)
 	}
 	return control.SetPause(d.dataDir, until)
 }
@@ -403,7 +403,7 @@ func (d dashControl) Forget(ctx context.Context, span string) error {
 	} else {
 		today = true
 	}
-	from, _, err := forgetFrom(last, today, "", false, time.Now(), app.DefaultConfig().Rollover)
+	from, _, err := forgetFrom(last, today, "", false, time.Now(), rollover)
 	if err != nil {
 		return err
 	}
@@ -456,12 +456,12 @@ func (d dashControl) Boundaries(ctx context.Context) ([]dashboard.Boundary, erro
 
 func (d dashControl) SetBoundary(ctx context.Context, b boundary.Boundary) (int64, bool, error) {
 	now := time.Now()
-	return rwStore(d).SetBoundary(ctx, b, model.LogicalDay(now, app.DefaultConfig().Rollover), now)
+	return rwStore(d).SetBoundary(ctx, b, model.LogicalDay(now, rollover), now)
 }
 
 func (d dashControl) RemoveBoundary(ctx context.Context, id int64) (bool, error) {
 	now := time.Now()
-	return rwStore(d).RemoveBoundary(ctx, id, model.LogicalDay(now, app.DefaultConfig().Rollover), now)
+	return rwStore(d).RemoveBoundary(ctx, id, model.LogicalDay(now, rollover), now)
 }
 
 func (dashControl) Region() string { return regionFromEnv() }

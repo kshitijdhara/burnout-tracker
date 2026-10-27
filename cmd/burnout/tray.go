@@ -11,7 +11,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/dashboard"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/tray"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 )
 
@@ -19,7 +18,6 @@ import (
 // and forgets the way the CLI does, through the control files the daemon's
 // loop reads, so the menu and `burnout pause` or `forget` can't disagree.
 func trayMenu(log *slog.Logger, dataDir string, ts *trayState, dash *trayDashboard) tray.Menu {
-	rollover := app.DefaultConfig().Rollover
 	// then refreshes the slower part of the status after the actions that
 	// change it, so the menu shows the outcome at once.
 	then := func(err error) error {

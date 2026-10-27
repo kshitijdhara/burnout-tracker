@@ -18,7 +18,6 @@ import (
 
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
@@ -95,7 +94,7 @@ func collectBundle(ctx context.Context, report []byte) ([]bundleFile, error) {
 	}
 
 	if store, err := sqlite.OpenReadOnly(ctx, dataDir); err == nil {
-		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+		day := model.LogicalDay(time.Now(), rollover)
 		h, err := store.Health(ctx, day)
 		_ = store.Close()
 		if err == nil && h != "" {

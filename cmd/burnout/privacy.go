@@ -21,7 +21,6 @@ import (
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/shell"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
 	"github.com/kshitijdhara/burnout-tracker/internal/adapters/store/sqlite"
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
 	"github.com/kshitijdhara/burnout-tracker/internal/config"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
 	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
@@ -44,7 +43,7 @@ func runPause(_ context.Context, args []string) error {
 	var until time.Time
 	if len(args) == 1 {
 		var err error
-		if until, err = pauseUntil(args[0], now, app.DefaultConfig().Rollover); err != nil {
+		if until, err = pauseUntil(args[0], now, rollover); err != nil {
 			return err
 		}
 	}
@@ -118,7 +117,7 @@ func runForget(ctx context.Context, args []string) error {
 		}
 		return err
 	}
-	from, what, err := forgetFrom(*last, *today, *since, *all, time.Now(), app.DefaultConfig().Rollover)
+	from, what, err := forgetFrom(*last, *today, *since, *all, time.Now(), rollover)
 	if err != nil {
 		return err
 	}
@@ -166,7 +165,7 @@ func forgetData(ctx context.Context, dataDir string, from time.Time) error {
 		return err
 	}
 	defer func() { _ = store.Close() }()
-	return store.Forget(ctx, from, model.LogicalDay(from, app.DefaultConfig().Rollover))
+	return store.Forget(ctx, from, model.LogicalDay(from, rollover))
 }
 
 // forgetThroughDaemon asks the running daemon to forget everything from
@@ -233,7 +232,7 @@ func runAnnotate(ctx context.Context, args []string) error {
 		return err
 	}
 	defer func() { _ = store.Close() }()
-	today := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
+	today := model.LogicalDay(time.Now(), rollover)
 
 	switch args[0] {
 	case "list":
