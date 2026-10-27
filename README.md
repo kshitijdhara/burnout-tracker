@@ -24,8 +24,15 @@ every field that is collected.
 ## Trying Phase 0
 
 Phase 0 is a developer preview: no installer, tray icon or dashboard yet.
-Desktop collection works on macOS and Windows; on Linux only shell and
-Claude Code hooks are recorded for now.
+
+> **Collection is off until the tray ships (Phase 1).** burnout records
+> only while its tray icon is visible ([AC-1](docs/privacy-and-security.md)),
+> and Phase 0 has no tray, so `burnout daemon` exits with an error instead of
+> starting. The steps below still build, set up and install the hooks; the
+> hooks do nothing while no daemon is running.
+
+Once the tray lands, desktop collection works on macOS and Windows; on Linux
+only shell and Claude Code hooks are recorded for now.
 
 ### macOS
 
@@ -110,7 +117,7 @@ rm ~/.local/bin/burnout
   nothing.
 
 **Preview limits.** The daemon stops when its tab closes and does not start
-at login. There is no tray icon, and logs go to the terminal. Phase 0 needs
+at login, and logs go to the terminal. Phase 0 needs
 no macOS privacy permissions, because window titles and input counts are
 off.
 

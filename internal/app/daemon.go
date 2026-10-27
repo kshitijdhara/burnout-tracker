@@ -113,6 +113,9 @@ type Deps struct {
 	Maintain    func(ctx context.Context, now time.Time) error // runs on its own goroutine
 	LoadHealth  func(ctx context.Context, logicalDay string) (string, error)
 	IngestStats func() map[string]uint64
+	// Indicator gates all recording on a visible tray icon. Required: Run
+	// refuses to start without one (AC-1).
+	Indicator ports.Indicator
 }
 
 // Daemon is the main loop. Create it with New, feed it with Submit, and
@@ -158,8 +161,15 @@ func New(cfg Config, deps Deps) *Daemon {
 	}
 }
 
+// ErrNoIndicator means there is no tray icon to show while collecting, so
+// the daemon must not run (privacy & security §5.2, AC-1).
+var ErrNoIndicator = errors.New("app: no collecting indicator (tray icon) available")
+
 // Run blocks until ctx is cancelled, then flushes everything it holds.
 func (d *Daemon) Run(ctx context.Context) error {
+	if d.deps.Indicator == nil {
+		return ErrNoIndicator
+	}
 	d.seedHealth(ctx)
 
 	var wg sync.WaitGroup
@@ -199,6 +209,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 func (d *Daemon) onTick(ctx context.Context) {
 	d.ticks++
 	if d.locked && d.ticks%d.cfg.IdleStride != 0 {
+		return
+	}
+	if !d.recording() {
+		d.health.noIndicatorTicks++
 		return
 	}
 	snap, err := d.deps.Collector.Snapshot(ctx)

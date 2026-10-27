@@ -53,6 +53,11 @@ func runDaemon(ctx context.Context, _ []string) error {
 	if !hasConsent() {
 		return errors.New("no consent recorded: run `burnout setup` first")
 	}
+	// Nothing is opened or listened on unless the tray icon can be shown.
+	indicator, err := newIndicator()
+	if err != nil {
+		return err
+	}
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(defaultMemoryLimit)
 	}
@@ -127,6 +132,7 @@ func runDaemon(ctx context.Context, _ []string) error {
 		},
 		LoadHealth:  store.Health,
 		IngestStats: func() map[string]uint64 { return ingestStatsMap(server.Stats()) },
+		Indicator:   indicator,
 	})
 
 	serveErr := make(chan error, 1)

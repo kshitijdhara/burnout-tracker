@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -129,6 +130,7 @@ func TestDaemonEndToEnd(t *testing.T) {
 		Rules:       classify.New(nil, nil),
 		AgentKind:   agentKind,
 		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Indicator:   shown(),
 	})
 
 	d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
@@ -220,7 +222,7 @@ func newTestDaemon(t *testing.T, clock *fakeClock, sink Sink, collector ports.Co
 		Clock: clock, Collector: collector, Sink: sink, Hasher: fakeHasher{},
 		ProjectRoot: func(dir string) string { return dir }, Procs: fakeProcs{},
 		Rules: classify.New(nil, nil), AgentKind: agentKind,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Indicator: shown(),
 	}
 	if mutate != nil {
 		mutate(&cfg, &deps)
@@ -343,5 +345,96 @@ func TestTopologyIsStable(t *testing.T) {
 	b := topology([]model.Rect{{X: 1, W: 2, H: 2}, {W: 1, H: 1}})
 	if a != b || !strings.Contains(a, `"count":2`) {
 		t.Fatalf("topology %q vs %q", a, b)
+	}
+}
+
+type fakeIndicator struct{ visible atomic.Bool }
+
+func (f *fakeIndicator) Visible() bool { return f.visible.Load() }
+
+func shown() *fakeIndicator {
+	f := &fakeIndicator{}
+	f.visible.Store(true)
+	return f
+}
+
+// Without a visible indicator nothing is recorded (AC-1): hook events are
+// dropped and counted, and the collector is not sampled.
+func TestNoIndicatorRecordsNothing(t *testing.T) {
+	clock := &fakeClock{now: t0}
+	sink := &fakeSink{}
+	col := &fakeCollector{clock: clock}
+	ind := &fakeIndicator{} // hidden
+	cfg := DefaultConfig()
+	cfg.TickInterval = time.Millisecond
+	cfg.FlushInterval = 5 * time.Millisecond
+	d := New(cfg, Deps{
+		Clock:       clock,
+		Collector:   col,
+		Sink:        sink,
+		Hasher:      fakeHasher{},
+		ProjectRoot: func(dir string) string { return dir },
+		Procs:       fakeProcs{},
+		Rules:       classify.New(nil, nil),
+		AgentKind:   agentKind,
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Indicator:   ind,
+	})
+
+	if !d.Submit(wire.Message{V: 1}) {
+		t.Fatal("a ping must still be answered without an indicator")
+	}
+	if d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+		Argv0: "git", StartMs: t0.UnixMilli(), EndMs: t0.UnixMilli() + 5,
+	}}) {
+		t.Fatal("shell event queued without an indicator")
+	}
+	if d.Submit(wire.Message{V: 1, Kind: wire.KindAgentHook, Agent: &wire.AgentHook{
+		Agent: "claude", Event: "UserPromptSubmit", SessionID: "s", AtMs: t0.UnixMilli(),
+	}}) {
+		t.Fatal("agent event queued without an indicator")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if col.n != 0 || len(sink.rollups) != 0 || len(sink.intervals) != 0 || len(sink.topology) != 0 {
+		t.Fatalf("recorded without an indicator: snapshots=%d rollups=%d intervals=%d topology=%d",
+			col.n, len(sink.rollups), len(sink.intervals), len(sink.topology))
+	}
+	var h struct {
+		NoIndicatorTicks int               `json:"no_indicator_ticks"`
+		Hooks            map[string]uint64 `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(sink.health), &h); err != nil {
+		t.Fatalf("health: %v", err)
+	}
+	if h.Hooks["no_indicator"] != 2 || h.NoIndicatorTicks == 0 {
+		t.Fatalf("drops not counted: %s", sink.health)
+	}
+}
+
+// Without an indicator the daemon records nothing and refuses to run (AC-1).
+func TestNilIndicatorRefusesToRun(t *testing.T) {
+	d := New(DefaultConfig(), Deps{
+		Clock:       &fakeClock{now: t0},
+		Hasher:      fakeHasher{},
+		ProjectRoot: func(dir string) string { return dir },
+	})
+	if d.Submit(wire.Message{V: 1, Kind: wire.KindShellCommand, Shell: &wire.ShellCommand{
+		Argv0: "git", StartMs: t0.UnixMilli(), EndMs: t0.UnixMilli() + 5,
+	}}) {
+		t.Fatal("shell event queued without an indicator")
+	}
+	if err := d.Run(context.Background()); !errors.Is(err, ErrNoIndicator) {
+		t.Fatalf("Run without an indicator: %v", err)
 	}
 }

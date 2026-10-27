@@ -93,20 +93,22 @@ type health struct {
 	presentS, attributedS                 float64
 	shellEvents, agentEvents              int
 	collectorErrors, flushErrors, dropped int
+	noIndicatorTicks                      int // collector ticks skipped: no visible indicator
 }
 
 // healthJSON is the stored shape of a day's SLIs.
 type healthJSON struct {
-	Coverage        float64           `json:"coverage"`
-	PresentS        float64           `json:"present_s"`
-	AttributedS     float64           `json:"attributed_s"`
-	ShellEvents     int               `json:"shell_events"`
-	AgentEvents     int               `json:"agent_events"`
-	CollectorErrors int               `json:"collector_errors"`
-	FlushErrors     int               `json:"flush_errors"`
-	Dropped         int               `json:"dropped"`
-	Hooks           map[string]uint64 `json:"hooks,omitempty"`  // this process: accepted, rejected, queue_full
-	Ingest          map[string]uint64 `json:"ingest,omitempty"` // this process: transport counters
+	Coverage         float64           `json:"coverage"`
+	PresentS         float64           `json:"present_s"`
+	AttributedS      float64           `json:"attributed_s"`
+	ShellEvents      int               `json:"shell_events"`
+	AgentEvents      int               `json:"agent_events"`
+	CollectorErrors  int               `json:"collector_errors"`
+	FlushErrors      int               `json:"flush_errors"`
+	Dropped          int               `json:"dropped"`
+	NoIndicatorTicks int               `json:"no_indicator_ticks,omitempty"`
+	Hooks            map[string]uint64 `json:"hooks,omitempty"`  // this process: accepted, rejected, queue_full, no_indicator
+	Ingest           map[string]uint64 `json:"ingest,omitempty"` // this process: transport counters
 }
 
 func newHealth() *health { return &health{} }
@@ -127,6 +129,7 @@ func (h *health) seed(day, stored string) {
 		day: day, presentS: j.PresentS, attributedS: j.AttributedS,
 		shellEvents: j.ShellEvents, agentEvents: j.AgentEvents,
 		collectorErrors: j.CollectorErrors, flushErrors: j.FlushErrors, dropped: j.Dropped,
+		noIndicatorTicks: j.NoIndicatorTicks,
 	}
 }
 
@@ -148,7 +151,8 @@ func (h *health) json(day string, hooks, ingest map[string]uint64) string {
 		Coverage: coverage, PresentS: h.presentS, AttributedS: h.attributedS,
 		ShellEvents: h.shellEvents, AgentEvents: h.agentEvents,
 		CollectorErrors: h.collectorErrors, FlushErrors: h.flushErrors, Dropped: h.dropped,
-		Hooks: hooks, Ingest: ingest,
+		NoIndicatorTicks: h.noIndicatorTicks,
+		Hooks:            hooks, Ingest: ingest,
 	})
 	return string(b)
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -62,6 +63,12 @@ func runDoctor(ctx context.Context, _ []string) error {
 		check("keystore", false, err.Error())
 	}
 
+	if _, err := newIndicator(); err != nil {
+		check("tray indicator", false, err.Error())
+	} else {
+		check("tray indicator", true, "")
+	}
+
 	if c, err := newCollector(collectorOptions{Now: time.Now}); err != nil {
 		check("desktop collector", false, err.Error())
 	} else {
@@ -81,6 +88,7 @@ func runDoctor(ctx context.Context, _ []string) error {
 		day := model.LogicalDay(time.Now(), app.DefaultConfig().Rollover)
 		if h, err := store.Health(ctx, day); err == nil && h != "" {
 			fmt.Println("  today's health:", h)
+			printNoIndicator(h)
 		}
 		check("database", store.QuickCheck(ctx) == nil, filepath.Join(dataDir, sqlite.FileName))
 	} else {
@@ -109,4 +117,19 @@ func checkFix(name string, ok bool, fix string) {
 		fix = ""
 	}
 	check(name, ok, fix)
+}
+
+// printNoIndicator explains drops made because no tray icon was visible
+// (privacy & security §5.2, AC-1), so "nothing recorded" has a reason.
+func printNoIndicator(health string) {
+	var h struct {
+		NoIndicatorTicks int               `json:"no_indicator_ticks"`
+		Hooks            map[string]uint64 `json:"hooks"`
+	}
+	if json.Unmarshal([]byte(health), &h) != nil {
+		return
+	}
+	if n := h.Hooks["no_indicator"]; n > 0 || h.NoIndicatorTicks > 0 {
+		fmt.Printf("  !  not recording while the tray icon is hidden: %d hook events dropped, %d collector ticks skipped\n", n, h.NoIndicatorTicks)
+	}
 }

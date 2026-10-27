@@ -29,7 +29,7 @@ func TestEndToEnd(t *testing.T) {
 	const canary = "CANARYe2eQ7"
 	tmp := t.TempDir()
 	bin := filepath.Join(tmp, "burnout")
-	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "build", "-tags", "e2e", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 
