@@ -49,10 +49,16 @@ type panel struct {
 	item string // the bus name of the registered icon
 }
 
-func (p *panel) RegisterStatusNotifierItem(sender dbus.Sender, _ string) *dbus.Error {
+func (p *panel) RegisterStatusNotifierItem(sender dbus.Sender, service string) *dbus.Error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.item = string(sender)
+	p.mu.Unlock()
+	// Like KDE's watcher and GNOME's AppIndicator host: announce the icon
+	// by bus name and path.
+	if strings.HasPrefix(service, "/") {
+		service = string(sender) + service
+	}
+	_ = p.conn.Emit("/StatusNotifierWatcher", watcher+".StatusNotifierItemRegistered", service)
 	return nil
 }
 
@@ -267,19 +273,20 @@ func TestTrayOnLinux(t *testing.T) {
 			return nil
 		}
 		eventually(t, "the icon to register", func() bool { return p.registered() != "" })
-		eventually(t, "the menu", func() bool { return len(p.menu(t)) > 0 })
-
-		want := []string{"Recording", "Pause for an hour", "Pause until tomorrow", "Pause until I resume",
-			"Delete the last hour", "Delete today", "Open dashboard"}
-		var got []string
-		for _, e := range p.menu(t) {
-			if e.visible {
-				got = append(got, e.label)
+		// The panel can read the menu while it is still being built, as a
+		// real panel can, so wait for it to settle.
+		want := strings.Join([]string{"Recording", "Pause for an hour", "Pause until tomorrow", "Pause until I resume",
+			"Delete the last hour", "Delete today", "Open dashboard"}, "|")
+		visibleLabels := func() string {
+			var got []string
+			for _, e := range p.menu(t) {
+				if e.visible {
+					got = append(got, e.label)
+				}
 			}
+			return strings.Join(got, "|")
 		}
-		if strings.Join(got, "|") != strings.Join(want, "|") {
-			t.Errorf("menu:\n got %q\nwant %q", got, want)
-		}
+		eventually(t, "the menu "+want, func() bool { return visibleLabels() == want })
 		if p.find(t, "Recording").enabled {
 			t.Error("the status line is clickable")
 		}

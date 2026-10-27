@@ -24,6 +24,7 @@ func run(ctx context.Context, m Menu, work Work) error {
 		m.Log.Warn("no tray icon: "+why+", so the screen isn't watched", "platform", runtime.GOOS)
 		return work(ctx, false)
 	}
+	registered := watchRegistered() // before systray starts, so the announcement can't be missed
 	ready, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -43,6 +44,9 @@ func run(ctx context.Context, m Menu, work Work) error {
 		return work(ctx, false)
 	case <-ctx.Done():
 		return work(ctx, false)
+	}
+	if !registered(ctx, readyWait) {
+		m.Log.Debug("the tray host didn't announce the icon; showing the menu anyway")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	go show(ctx, m, platformIcons())
