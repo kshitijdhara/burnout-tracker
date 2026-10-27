@@ -3,3 +3,4 @@
 *.test
 *.out
 /internal/wire/testdata/fuzz/
+/burnout
