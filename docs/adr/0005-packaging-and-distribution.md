@@ -38,9 +38,11 @@
 >   `*.app/Contents/MacOS/` is the macOS app; on Linux a path under `/usr`
 >   (not `/usr/local`), `/bin` or `/sbin` is a package; on Windows a path
 >   under Program Files is a package. Anything else is a user-prefix install
->   if this user can write its folder, and is treated as a package if not,
->   so `update` never needs elevation. A package download is the `.deb`,
->   unless the system has `rpm` and no `dpkg`.
+>   if this user can write its folder, and a read-only archive install if
+>   not (`/usr/local/bin`, `/opt`): `update` downloads the archive and says
+>   to replace the binary with the rights that folder needs, so it never
+>   needs elevation itself. A Linux package download is the `.deb`, unless
+>   the system has `rpm` and no `dpkg`; Program Files gets the `.zip`.
 > - **Windows** swaps immediately rather than staging a replace for the
 >   next start: the running `burnout.exe` is renamed to `burnout.exe.old`
 >   and the new one moved in (renamed back on failure), as `install.ps1`

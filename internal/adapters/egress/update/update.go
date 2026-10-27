@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,15 +36,19 @@ import (
 // Repo is the GitHub repository releases come from.
 const Repo = "kshitijdhara/burnout-tracker"
 
-// Hosts are the only hosts the updater connects to. github.com redirects
+// hosts are the only hosts the updater connects to. github.com redirects
 // asset downloads to a githubusercontent.com CDN host: objects… was used
 // until 2025, release-assets… since.
-var Hosts = []string{
+var hosts = []string{
 	"api.github.com",
 	"github.com",
 	"objects.githubusercontent.com",
 	"release-assets.githubusercontent.com",
 }
+
+// Hosts returns the hosts the updater may connect to, for doctor and
+// privacy.
+func Hosts() []string { return slices.Clone(hosts) }
 
 // Limits on one check or download.
 const (
@@ -83,7 +88,7 @@ func New() *Updater {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	return &Updater{
-		client: newClient(tr, Hosts),
+		client: newClient(tr, hosts),
 		api:    "https://api.github.com",
 		repo:   Repo,
 		verify: release.VerifyChecksums,
@@ -206,6 +211,10 @@ func (u *Updater) Tag(ctx context.Context, v Version) (Release, error) {
 
 func (u *Updater) getJSON(ctx context.Context, path string, into any) error {
 	body, err := u.get(ctx, u.api+"/repos/"+u.repo+path, "application/vnd.github+json", maxAPIBytes)
+	var st statusError
+	if errors.As(err, &st) && st.code == http.StatusNotFound {
+		return ErrNoRelease
+	}
 	if err != nil {
 		return err
 	}
@@ -311,18 +320,23 @@ func (u *Updater) get(ctx context.Context, rawURL, accept string, limit int64) (
 		return nil, fmt.Errorf("update: connecting to %s failed: %w", host, withoutURL(err))
 	}
 	switch {
-	case resp.StatusCode == http.StatusNotFound:
-		_ = resp.Body.Close()
-		return nil, ErrNoRelease
 	case resp.StatusCode != http.StatusOK:
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("update: %s answered %s", host, resp.Status)
+		return nil, statusError{host: host, code: resp.StatusCode, status: resp.Status}
 	case resp.ContentLength > limit:
 		_ = resp.Body.Close()
 		return nil, errTooLarge
 	}
 	return limitedBody{r: &io.LimitedReader{R: resp.Body, N: limit + 1}, body: resp.Body}, nil
 }
+
+// statusError is a response other than 200 OK.
+type statusError struct {
+	host, status string
+	code         int
+}
+
+func (e statusError) Error() string { return "update: " + e.host + " answered " + e.status }
 
 // limitedBody reads at most limit bytes and fails on one more.
 type limitedBody struct {

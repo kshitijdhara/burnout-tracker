@@ -34,7 +34,7 @@ func TestUpdateNotice(t *testing.T) {
 		t.Errorf("check off: %q", s.Text)
 	}
 	c.Update.Check = config.UpdateWeekly
-	if s := trayStatus(dir, c, now); s.Text != "Recording · burnout 1.2.0 is available: run `burnout update`" {
+	if s := trayStatus(dir, c, now); s.Text != "Recording · update 1.2.0 available" {
 		t.Errorf("update found: %q", s.Text)
 	}
 	withVersion(t, "1.2.0")
@@ -64,13 +64,29 @@ func TestUpdateLoop(t *testing.T) {
 	}
 	var logs bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&logs, nil))
-	run := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		defer cancel()
-		updateLoopWith(ctx, log, dir, live, check, time.Millisecond, 10*time.Millisecond)
+	// run runs the loop until done reports true (or for a short while when
+	// done is nil), then a few more wakes, so a second check would show.
+	run := func(done func() bool) {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			updateLoopWith(ctx, log, dir, live, check, time.Millisecond, 5*time.Millisecond)
+		}()
+		for deadline := time.Now().Add(10 * time.Second); done != nil && !done(); {
+			if time.Now().After(deadline) {
+				t.Error("the loop didn't check in time")
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+		<-stopped
 	}
 
-	run()
+	run(nil)
 	if len(calls) != 0 {
 		t.Fatalf("checked %d times while off", len(calls))
 	}
@@ -80,7 +96,7 @@ func TestUpdateLoop(t *testing.T) {
 	if _, _, err := live.check(); err != nil {
 		t.Fatal(err)
 	}
-	run()
+	run(func() bool { return update.LoadState(dir).Latest != "" })
 	if len(calls) != 1 {
 		t.Fatalf("checked %d times in one week, want 1", len(calls))
 	}
@@ -97,7 +113,7 @@ func TestUpdateLoop(t *testing.T) {
 		calls <- struct{}{}
 		return update.Version{}, errors.New("api.github.com answered 503")
 	}
-	run()
+	run(func() bool { return !update.LoadState(dir).Tried.IsZero() })
 	if len(calls) != 1 || !strings.Contains(logs.String(), "update check failed") {
 		t.Errorf("failed check: %d calls; log %s", len(calls), logs.String())
 	}

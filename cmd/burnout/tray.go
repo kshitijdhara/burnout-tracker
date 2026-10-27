@@ -70,8 +70,9 @@ func trayStatus(dataDir string, c config.Config, now time.Time) tray.Status {
 	} else if safeMode.Load() {
 		st = tray.Status{Text: "Safe mode: recording hooks only, after repeated crashes"}
 	}
-	if n := updateNotice(dataDir, c); n != "" {
-		st.Text += " · " + n
+	if v, ok := newerRelease(dataDir, c); ok {
+		// Short: it is also the tooltip, which Windows cuts at 128 characters.
+		st.Text += " · update " + v.String() + " available"
 	}
 	consented, _ := consentedAt()
 	seen, _ := control.ReminderSeen(dataDir)

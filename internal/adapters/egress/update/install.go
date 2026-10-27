@@ -31,6 +31,10 @@ const (
 	// user, so update downloads and verifies the .dmg and the user
 	// installs it.
 	App
+	// ReadOnly is an archive install in a folder this user can't write
+	// (/usr/local/bin, /opt, …). Update downloads and verifies the archive
+	// and the user replaces the binary, with the rights that folder needs.
+	ReadOnly
 )
 
 func (k Kind) String() string {
@@ -39,6 +43,8 @@ func (k Kind) String() string {
 		return "system package"
 	case App:
 		return "macOS app"
+	case ReadOnly:
+		return "copy in a folder you can't write"
 	}
 	return "user install"
 }
@@ -60,7 +66,7 @@ type Install struct {
 //     Package: that is where .deb and .rpm put it (/usr/bin).
 //     On Windows, a path under Program Files is Package (an installer).
 //  4. Anything else is UserPrefix if its folder is writable by this user,
-//     and Package if it isn't, so update never needs elevation.
+//     and ReadOnly if it isn't, so update never needs elevation.
 func Detect(exe, goos, arch string) (Install, error) {
 	path, err := filepath.EvalSymlinks(exe)
 	if err != nil {
@@ -69,7 +75,7 @@ func Detect(exe, goos, arch string) (Install, error) {
 	in := Install{Path: path, GOOS: goos, Arch: arch}
 	in.Kind = managedPath(path, goos)
 	if in.Kind == UserPrefix && !writable(filepath.Dir(path)) {
-		in.Kind = Package
+		in.Kind = ReadOnly
 	}
 	return in, nil
 }

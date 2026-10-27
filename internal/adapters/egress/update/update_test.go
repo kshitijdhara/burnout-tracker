@@ -346,6 +346,45 @@ func TestUpdateVersionRules(t *testing.T) {
 	}
 }
 
+// A validly signed older release relabelled as a newer one must not
+// install: asset names carry the version, so its checksums don't list
+// the asset the newer version needs.
+func TestUpdateRefusesRelabelledRelease(t *testing.T) {
+	key := newKey(t)
+	gh := newFakeGitHub(t)
+	old := signedFiles(t, key, "1.0.0", []byte("old vulnerable binary"))
+	in := installed(t)
+	oldName, _ := in.Asset(Version{Major: 1})
+	newName, _ := in.Asset(Version{Major: 9, Minor: 9, Patch: 9})
+	old[newName] = old[oldName]
+	gh.add("v9.9.9", false, old)
+
+	_, err := gh.updater(&key.PublicKey).Run(context.Background(), Options{Current: "1.1.0", Install: in})
+	if err == nil || !strings.Contains(err.Error(), "isn't listed") {
+		t.Fatalf("got %v, want a refusal", err)
+	}
+	if read(t, in.Path) != "old binary" {
+		t.Error("the binary changed")
+	}
+	dirHas(t, filepath.Dir(in.Path), filepath.Base(in.Path))
+}
+
+// A missing asset is a download failure, not "no such release".
+func TestMissingAssetIsNotNoRelease(t *testing.T) {
+	key := newKey(t)
+	gh := newFakeGitHub(t)
+	gh.add("v1.2.0", false, signedFiles(t, key, "1.2.0", []byte("new binary")))
+	for k := range gh.files {
+		if strings.HasSuffix(k, ".sig") {
+			delete(gh.files, k)
+		}
+	}
+	_, err := gh.updater(&key.PublicKey).Run(context.Background(), Options{Current: "1.1.0", Install: installed(t)})
+	if err == nil || errors.Is(err, ErrNoRelease) || !strings.Contains(err.Error(), "404") {
+		t.Errorf("got %v", err)
+	}
+}
+
 func TestBetaChannel(t *testing.T) {
 	key := newKey(t)
 	gh := newFakeGitHub(t)
@@ -560,6 +599,7 @@ func TestAssetNames(t *testing.T) {
 		{Install{Kind: UserPrefix, GOOS: "darwin", Arch: "arm64"}, "burnout_1.2.3_darwin_all.tar.gz"},
 		{Install{Kind: UserPrefix, GOOS: "windows", Arch: "amd64"}, "burnout_1.2.3_windows_amd64.zip"},
 		{Install{Kind: Package, GOOS: "windows", Arch: "amd64"}, "burnout_1.2.3_windows_amd64.zip"},
+		{Install{Kind: ReadOnly, GOOS: "linux", Arch: "amd64"}, "burnout_1.2.3_linux_amd64.tar.gz"},
 	} {
 		if got, _ := c.in.Asset(v); got != c.want {
 			t.Errorf("%+v: %s, want %s", c.in, got, c.want)

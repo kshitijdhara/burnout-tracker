@@ -205,10 +205,11 @@ calendars. A local `.ics` file works too.
 checks the release's signature against the keys built into burnout and the
 download's checksum before changing anything, refuses older versions
 unless you add `--allow-downgrade`, and keeps the previous binary as
-`burnout.old` (`--to v1.2.3 --allow-downgrade` rolls back). A copy
+`burnout.old` (`burnout.exe.old` on Windows; `--to v1.2.3
+--allow-downgrade` rolls back). A copy
 installed by the install script is replaced in place. A `.deb`, `.rpm` or
-`Burnout.app` is only downloaded and verified, and burnout tells you how to
-install it. `--check` only looks, and `--channel beta` includes
+`Burnout.app`, or a copy in a folder you can't write, is only downloaded
+and verified, and burnout tells you how to install it. `--check` only looks, and `--channel beta` includes
 pre-releases. burnout never checks on its own unless you run
 `burnout config set update.check weekly`; then it asks GitHub once a week
 and shows a newer release in the tray and `burnout doctor`, without

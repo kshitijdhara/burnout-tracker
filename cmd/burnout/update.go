@@ -102,9 +102,9 @@ func installHint(in update.Install, path string) string {
 	case strings.HasSuffix(path, ".rpm"):
 		return "sudo rpm -U " + path
 	case strings.HasSuffix(path, ".zip"):
-		return "unzip it and replace " + in.Path + " with its burnout.exe"
+		return "unzip it and replace " + in.Path + " with its burnout.exe (as an administrator if that folder needs it)"
 	}
-	return "unpack it and replace " + in.Path + " with its burnout binary"
+	return "unpack it and replace " + in.Path + " with its burnout binary (with sudo if that folder needs it)"
 }
 
 // The weekly check's timing in the daemon.
@@ -152,13 +152,18 @@ func updateLoopWith(ctx context.Context, log *slog.Logger, dataDir string, live 
 	}
 }
 
-// updateNotice is a newer release found by the weekly check, or "" when
-// there is none or the check is off.
-func updateNotice(dataDir string, c config.Config) string {
+// newerRelease is a newer release found by the weekly check, or false
+// when there is none or the check is off.
+func newerRelease(dataDir string, c config.Config) (update.Version, bool) {
 	if c.Update.Check != config.UpdateWeekly {
-		return ""
+		return update.Version{}, false
 	}
-	if v, ok := update.LoadState(dataDir).Newer(version); ok {
+	return update.LoadState(dataDir).Newer(version)
+}
+
+// updateNotice is doctor's line for a newer release, or "".
+func updateNotice(dataDir string, c config.Config) string {
+	if v, ok := newerRelease(dataDir, c); ok {
 		return "burnout " + v.String() + " is available: run `burnout update`"
 	}
 	return ""
@@ -171,7 +176,7 @@ func updateLine(dataDir string, c config.Config) string {
 		return "off (`burnout update` checks only when you run it; `burnout config set update.check weekly` checks weekly)"
 	}
 	st := update.LoadState(dataDir)
-	s := "weekly, to " + strings.Join(update.Hosts, ", ")
+	s := "weekly, to " + strings.Join(update.Hosts(), ", ")
 	if st.Checked.IsZero() {
 		return s + "; not checked yet"
 	}
