@@ -884,6 +884,8 @@ Built (CLI): `burnout setup` covers all five steps, interactively only.
 - **Step 3:** it says it starts in zero-permission mode, then offers title
   classification with what it adds, defaulting to "not now". On macOS a yes
   opens System Settings at Screen Recording. Input counts aren't offered.
+  A daemon reads the setting only when it starts, so if one is running and
+  the service step doesn't restart it, setup says how to.
 - **Step 4:** y/N questions for the shell and Claude Code hooks (the same
   code as `install-hooks`), an ICS feed (read from the prompt, with
   `calendar add`'s warning that the URL is a secret) and the background

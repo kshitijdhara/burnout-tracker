@@ -109,15 +109,17 @@ func TestConsentStatus(t *testing.T) {
 
 // fakeSteps records which of setup's side effects ran.
 type fakeSteps struct {
-	ran []string
-	src ics.Source
-	err error // returned by every step
+	ran     []string
+	src     ics.Source
+	err     error // returned by every step
+	running bool  // a daemon answers
 }
 
 func (f *fakeSteps) steps(pane bool) setupSteps {
 	s := setupSteps{
-		checkDisk:    func(context.Context, io.Writer) { f.ran = append(f.ran, "disk") },
-		installHooks: func(context.Context) error { f.ran = append(f.ran, "hooks"); return f.err },
+		checkDisk:     func(context.Context, io.Writer) { f.ran = append(f.ran, "disk") },
+		daemonRunning: func(context.Context) bool { return f.running },
+		installHooks:  func(context.Context) error { f.ran = append(f.ran, "hooks"); return f.err },
 		addCalendar: func(_ context.Context, src ics.Source) error {
 			f.ran, f.src = append(f.ran, "calendar"), src
 			return f.err
@@ -135,6 +137,7 @@ func TestSetupFlow(t *testing.T) {
 	for _, tc := range []struct {
 		name, input string
 		pane        bool
+		running     bool
 		err         error
 		ran         []string
 		titles      bool
@@ -186,11 +189,43 @@ func TestSetupFlow(t *testing.T) {
 			ran:   []string{"disk", "hooks", "service"},
 			says:  []string{"That didn't work: boom\nTry again later with `burnout install-hooks`", "later with `burnout service install`"},
 		},
+		{
+			name:    "titles on with a daemon running says to restart it",
+			input:   "yes\n\n\ny\n\n\n\n",
+			running: true,
+			ran:     []string{"disk"},
+			titles:  true,
+			says:    []string{"reads title classification only when it starts", "Ctrl-C"},
+		},
+		{
+			name:    "installing the service restarts the daemon",
+			input:   "yes\n\n\ny\n\n\ny\n",
+			running: true,
+			ran:     []string{"disk", "service"},
+			titles:  true,
+			never:   []string{"only when it starts"},
+		},
+		{
+			name:    "no restart hint when titles stay off",
+			input:   "yes\n\n\n\n\n\n\n",
+			running: true,
+			ran:     []string{"disk"},
+			never:   []string{"only when it starts"},
+		},
+		{
+			name:    "a failed service install still says to restart",
+			input:   "yes\n\n\ny\n\n\ny\n",
+			running: true,
+			err:     errors.New("boom"),
+			ran:     []string{"disk", "service"},
+			titles:  true,
+			says:    []string{"only when it starts"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv(paths.EnvConfigDir, dir)
-			f := &fakeSteps{err: tc.err}
+			f := &fakeSteps{err: tc.err, running: tc.running}
 			var out bytes.Buffer
 			if err := setupFlow(context.Background(), bufio.NewReader(strings.NewReader(tc.input)), &out, f.steps(tc.pane)); err != nil {
 				t.Fatal(err)
