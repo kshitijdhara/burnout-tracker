@@ -784,6 +784,6 @@ The privacy guarantees above are only as good as their tests. CI MUST run:
 ### Vulnerability disclosure
 
 Security issues are reported privately through **GitHub private
-vulnerability reporting** on this repository. Action item: add `SECURITY.md`
-with the policy, supported versions and expected response times before the
-first public release.
+vulnerability reporting** on this repository. [`SECURITY.md`](../SECURITY.md)
+gives the policy, the supported versions (the latest release only, during
+the alpha), the expected response times and what is in scope.

@@ -1,0 +1,26 @@
+name: Feature request
+description: An idea for BurntOut.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to understand or change about your work patterns?
+      description: The problem first; a proposed solution is welcome below.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+  - type: dropdown
+    id: data
+    attributes:
+      label: Would it need BurntOut to collect anything new?
+      description: New data needs a privacy case first (see docs/privacy-and-security.md).
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+    validations:
+      required: true
