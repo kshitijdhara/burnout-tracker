@@ -18,6 +18,7 @@ import (
 	"github.com/kshitijdhara/burntout/internal/adapters/dashboard"
 	"github.com/kshitijdhara/burntout/internal/adapters/fde"
 	"github.com/kshitijdhara/burntout/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/portal"
 	"github.com/kshitijdhara/burntout/internal/adapters/store/sqlite"
 	"github.com/kshitijdhara/burntout/internal/app"
 	"github.com/kshitijdhara/burntout/internal/config"
@@ -94,7 +95,20 @@ func openLaunch(dataDir, link string) error {
 }
 
 // openFile opens a launch file; tests replace it.
-var openFile = openBrowser
+var openFile = openLaunchFile
+
+// openLaunchFile opens a launch file in the browser. On Linux it asks the
+// desktop portal first: a snap or flatpak browser (Ubuntu's Firefox is a
+// snap) can't read files under ~/.local/share, but can read one the portal
+// hands it. Without a portal, or if it refuses, xdg-open opens the path.
+func openLaunchFile(path string) error {
+	if runtime.GOOS == "linux" {
+		if err := portal.OpenFile(context.Background(), path); err == nil {
+			return nil
+		}
+	}
+	return openBrowser(path)
+}
 
 // openBrowser opens target, a URL or a file, in the default browser or
 // app. It is ours: a launch file's path, or a fixed URL, no user input.

@@ -524,7 +524,10 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burntout dashboard`):
   valid for 60 s. It never goes on a command line, which other local users
   can read (T1): `burntout dashboard` and the tray write the launch URL into
   an owner-only `dashboard-launch-*.html` file in the data folder, a
-  script-free meta refresh, and open that file. The file is removed once
+  script-free meta refresh, and open that file. On Linux they hand it to
+  the desktop portal (`OpenURI.OpenFile`) as an open file, so snap and
+  flatpak browsers, which can't read `~/.local/share`, can open it; without
+  a portal they fall back to `xdg-open`. The file is removed once
   the token has expired, or by the next launch if BurntOut stopped first.
   `--no-open` prints the URL in the terminal instead.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
