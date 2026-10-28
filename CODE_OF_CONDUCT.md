@@ -17,9 +17,12 @@ Nobody owes the project a fast reply.
 
 If someone's behaviour makes you uncomfortable, report it privately to the
 maintainer, [@kshitijdhara](https://github.com/kshitijdhara), through the
-email address on their GitHub profile. Reports are handled confidentially,
-and the maintainer will respond as the Contributor Covenant's enforcement
-guidelines describe.
+repository's
+[private reporting form](https://github.com/kshitijdhara/burntout/security/advisories/new):
+start the title with "Conduct report". Only the maintainer sees it. You can
+also [report abuse to GitHub](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
+Reports are handled confidentially, and the maintainer will respond as the
+Contributor Covenant's enforcement guidelines describe.
 
 ## Attribution
 

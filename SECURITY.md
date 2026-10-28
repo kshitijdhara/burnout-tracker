@@ -35,8 +35,9 @@ agree a date with you.
 ## Supported versions
 
 BurntOut is in alpha. Only the **latest release**, including pre-releases,
-gets security fixes. Update with `burntout update`, or reinstall with the
-install script.
+gets security fixes. Update with `burntout update` (from `v0.1.0-alpha.4`
+on); installs from before the rename to BurntOut, up to `v0.1.0-alpha.3`,
+reinstall with the install script.
 
 ## Scope
 

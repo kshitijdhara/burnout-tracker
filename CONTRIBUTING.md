@@ -33,17 +33,28 @@ Build into `bin/` (it's ignored), not the repository root.
 
 ## Checks your change must pass
 
-CI runs these on Linux, macOS and Windows, and `main` only takes changes
-that pass them:
+`main` only takes changes that pass CI's **lint**, **lint-macos**, **test**
+(Linux, macOS, Windows) and **fuzz** jobs. To run the same checks locally:
 
 ```sh
+# test: race on Linux and macOS (Windows runs it without -race)
 go test -race ./...
-go vet ./...
-golangci-lint run ./...                      # v2, config in .golangci.yml
+
+# lint: golangci-lint v2 (config in .golangci.yml) and go vet, for every OS
+golangci-lint run ./...
 GOOS=windows golangci-lint run ./...
 GOOS=darwin CGO_ENABLED=0 golangci-lint run ./...
-sh packaging/test-install.sh                 # if you touched packaging/
+go vet ./... && GOOS=windows go vet ./... && GOOS=darwin CGO_ENABLED=0 go vet ./...
+go vet -tags e2e ./cmd/burntout/
+govulncheck ./...
+
+# fuzz: one target, for a short run (CI runs each listed fuzz target)
+go test ./internal/wire/ -run='^$' -fuzz=FuzzDecode -fuzztime=30s
 ```
+
+If you touched `packaging/`, also run `sh packaging/test-install.sh` and
+`shellcheck -x packaging/*.sh packaging/*/*.sh`; CI's packaging job runs
+them, plus `goreleaser check`.
 
 The suite includes privacy **canary tests**: they plant marker strings
 (window titles, command arguments, paths) and fail if any reaches the

@@ -1342,6 +1342,7 @@ burntout/
 │   │   ├── classify/laya/       # sidecar client
 │   │   ├── calendar/ics/
 │   │   ├── integrations/{shell,claude}/
+│   │   ├── portal/              # XDG desktop portal: opens the dashboard on Linux
 │   │   ├── api/                 # query API + dashboard server
 │   │   └── ui/                  # tray + embedded SPA
 │   └── config/                  # TOML schema, defaults, validation
@@ -1366,14 +1367,14 @@ burntout/
 | **3: Integrations** | More agent adapters; WSL bridge; OS calendars; editor plugins | — |
 | **4: Research** | Research export behind the privacy gate; population priors; survival model; optional peer-to-peer E2E sync | Ethics review and dataset policy in place before any data is published |
 
-**Status (2026-10-28).**
+**Status (2026-10-27).**
 - **Phase 0** is built. Its exit check, one developer's 2-monitor day
   within 10% of a hand-annotated timeline, hasn't been recorded yet.
 - **Phase 1** scope is built and on `main`, along with the fixes from the
-  Phase 1 review and the rename to BurntOut. The first BurntOut release
-  (`v0.1.0-alpha.4`) starts the alpha; `v0.1.0-alpha.3`, published under the
-  old name, can't update itself to it. The exit criteria are the alpha
-  itself, so they are open.
+  Phase 1 review and the rename to BurntOut. The alpha starts with the first
+  BurntOut release, `v0.1.0-alpha.4`, which isn't cut yet; the published
+  `v0.1.0-alpha.3`, from under the old name, can't update itself to it. The
+  exit criteria are the alpha itself, so they are open.
 - **Known gaps** going into the alpha:
   - the GNOME Shell extension has only been tested in a container, not in
     a real GNOME Shell;

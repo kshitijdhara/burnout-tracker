@@ -1,4 +1,8 @@
-# Changes here need the maintainer's review (privacy & security §9.4).
+# Owners are asked to review changes to these paths (privacy & security
+# §9.4). The specific paths repeat the catch-all on purpose: they mark the
+# sensitive areas, and keep their owner if the catch-all changes. Reviews
+# aren't required by the ruleset yet: a sole maintainer can't approve their
+# own pull requests.
 *                              @kshitijdhara
 /packaging/                    @kshitijdhara
 /.github/                      @kshitijdhara

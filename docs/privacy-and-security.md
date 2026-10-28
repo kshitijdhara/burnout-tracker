@@ -526,8 +526,11 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burntout dashboard`):
   an owner-only `dashboard-launch-*.html` file in the data folder, a
   script-free meta refresh, and open that file. On Linux they hand it to
   the desktop portal (`OpenURI.OpenFile`) as an open file, so snap and
-  flatpak browsers, which can't read `~/.local/share`, can open it; without
-  a portal they fall back to `xdg-open`. The file is removed once
+  flatpak browsers, which can't read `~/.local/share`, can open it, and wait
+  for the portal's answer. Only when there is no portal do they run
+  `xdg-open` themselves; if the portal fails or the user cancels its app
+  chooser, `burntout dashboard` prints the link instead, so the file is
+  never opened twice. The file is removed once
   the token has expired, or by the next launch if BurntOut stopped first.
   `--no-open` prints the URL in the terminal instead.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and

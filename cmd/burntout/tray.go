@@ -170,6 +170,18 @@ type trayDashboard struct {
 
 // open opens the dashboard at view ("" for the default one).
 func (t *trayDashboard) open(view string) error {
+	link, err := t.launchLink(view)
+	if err != nil {
+		return err
+	}
+	// Outside the lock: opening can wait for the desktop portal's answer,
+	// and close (at quit) mustn't wait behind it.
+	return openLaunch(t.dataDir, link)
+}
+
+// launchLink starts the dashboard if it isn't running and returns a new
+// one-time link to view.
+func (t *trayDashboard) launchLink(view string) (string, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.srv != nil {
@@ -184,13 +196,13 @@ func (t *trayDashboard) open(view string) error {
 		store, err := sqlite.OpenReadOnly(ctx, t.dataDir)
 		if err != nil {
 			cancel()
-			return err
+			return "", err
 		}
 		srv, err := dashboard.Listen(dashSource{store: store, dataDir: t.dataDir}, dashControl{dataDir: t.dataDir}, t.log)
 		if err != nil {
 			cancel()
 			_ = store.Close()
-			return err
+			return "", err
 		}
 		done := make(chan struct{})
 		go func() {
@@ -201,7 +213,7 @@ func (t *trayDashboard) open(view string) error {
 		}()
 		t.srv, t.store, t.cancel, t.done = srv, store, cancel, done
 	}
-	return openLaunch(t.dataDir, t.srv.LaunchURLTo(view))
+	return t.srv.LaunchURLTo(view), nil
 }
 
 // close stops the dashboard, if it was opened.

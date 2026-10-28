@@ -61,6 +61,10 @@ func runDashboard(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Serve first: opening the browser can wait for the desktop portal's
+	// answer, and the browser's first request must not wait behind it.
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ctx) }()
 	link := srv.LaunchURL()
 	opened := false
 	if !*noOpen {
@@ -72,7 +76,7 @@ func runDashboard(ctx context.Context, args []string) error {
 		fmt.Printf("Open this one-time link within %d seconds:\n  %s\n", int(dashboard.TokenTTL.Seconds()), link)
 	}
 	fmt.Println("It shows data from this device only and stops when you press Ctrl-C.")
-	return srv.Serve(ctx)
+	return <-served
 }
 
 // openLaunch opens a dashboard launch link in the default browser without
@@ -86,28 +90,41 @@ func openLaunch(dataDir, link string) error {
 	if err != nil {
 		return err
 	}
-	if err := openFile(path); err != nil {
-		_ = os.Remove(path)
+	err = openFile(path)
+	if err != nil && !errors.Is(err, portal.ErrNoAnswer) {
+		_ = os.Remove(path) // nothing will read it
 		return err
 	}
+	// Opened, or the portal may still open it: keep it until the token
+	// expires.
 	time.AfterFunc(dashboard.LaunchFileTTL, func() { _ = os.Remove(path) })
-	return nil
+	return err
 }
 
 // openFile opens a launch file; tests replace it.
 var openFile = openLaunchFile
 
-// openLaunchFile opens a launch file in the browser. On Linux it asks the
-// desktop portal first: a snap or flatpak browser (Ubuntu's Firefox is a
-// snap) can't read files under ~/.local/share, but can read one the portal
-// hands it. Without a portal, or if it refuses, xdg-open opens the path.
+// portalOpen and browserOpen are the two ways openLaunchFile opens a file;
+// tests replace them.
+var (
+	portalOpen  = portal.OpenFile
+	browserOpen = openBrowser
+)
+
+// openLaunchFile opens a launch file in the browser. It asks the desktop
+// portal first (Linux only; elsewhere it reports ErrUnavailable): a snap or
+// flatpak browser (Ubuntu's Firefox is a snap) can't read files under
+// ~/.local/share, but can read one the portal hands it. Only when there is
+// no portal does it open the path itself; any other outcome is the
+// portal's (it opened the file, the user cancelled, it failed, or it may
+// still open it), so opening it again would make a second tab with a spent
+// token.
 func openLaunchFile(path string) error {
-	if runtime.GOOS == "linux" {
-		if err := portal.OpenFile(context.Background(), path); err == nil {
-			return nil
-		}
+	err := portalOpen(context.Background(), path)
+	if errors.Is(err, portal.ErrUnavailable) {
+		return browserOpen(path)
 	}
-	return openBrowser(path)
+	return err
 }
 
 // openBrowser opens target, a URL or a file, in the default browser or
