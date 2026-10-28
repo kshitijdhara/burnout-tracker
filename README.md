@@ -1,4 +1,44 @@
-# BurntOut
+<p align="center">
+  <img src="assets/icon/app/icon-1024.png" alt="BurntOut icon: a slice of burnt toast" width="128" height="128">
+</p>
+
+<h1 align="center">BurntOut</h1>
+
+<p align="center">
+  <strong>Spot the early signs of burnout in your own work patterns, privately, on your own device.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/kshitijdhara/burntout/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/kshitijdhara/burntout?include_prereleases&sort=semver&label=release"></a>
+  <a href="https://github.com/kshitijdhara/burntout/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kshitijdhara/burntout/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/kshitijdhara/burntout"></a>
+  <img alt="Platforms: macOS, Windows, Linux" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey">
+  <a href="docs/privacy-and-security.md"><img alt="Local-first: no server, no telemetry" src="https://img.shields.io/badge/data-stays%20on%20your%20device-success"></a>
+</p>
+
+<p align="center">
+  <a href="#install-a-release">Install</a> ·
+  <a href="docs/privacy-and-security.md">Privacy &amp; Security</a> ·
+  <a href="docs/system-design.md">Design</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="SECURITY.md">Security policy</a>
+</p>
+
+## What it does
+
+- **Attention, not just focus.** Knows which window you're actually
+  looking at across several monitors, including reading and calls.
+- **Terminal and AI-agent sessions.** Shell commands (zsh, bash, fish) and
+  Claude Code sessions: time spent waiting on the agent vs. reading its work.
+- **Your own baseline.** A daily strain score compared with your usual
+  weeks and with absolute limits, a weekly review, boundaries you set, and
+  gentle nudges.
+- **Private by design.** Everything stays on your device: no server, no
+  telemetry, window titles and command arguments never stored, and a
+  visible tray icon whenever anything is recorded.
+
+## About
 
 A local-first desktop agent that helps you spot early warning signs in your
 work patterns. It measures attention (multi-monitor aware), terminal
@@ -506,5 +546,11 @@ is built, and the alpha is under way. Design docs:
 
 ## Licence
 
-[Apache-2.0](LICENSE). The GNOME Shell extension (when added) is
-GPL-2.0-or-later, as GNOME requires, and carries its own licence file.
+[Apache-2.0](LICENSE). The GNOME Shell extension in
+[`extensions/gnome-shell`](extensions/gnome-shell) is GPL-2.0-or-later, as
+GNOME requires, and carries its own licence file
+([`COPYING`](extensions/gnome-shell/COPYING)).
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[code of conduct](CODE_OF_CONDUCT.md). Report security issues privately, as
+[SECURITY.md](SECURITY.md) describes.

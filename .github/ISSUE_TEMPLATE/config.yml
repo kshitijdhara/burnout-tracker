@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/kshitijdhara/burntout/security/advisories/new
+    about: Please report security and privacy vulnerabilities privately, never in a public issue.
+  - name: What BurntOut collects
+    url: https://github.com/kshitijdhara/burntout/blob/main/docs/privacy-and-security.md
+    about: The full list of what is and isn't collected, and why.

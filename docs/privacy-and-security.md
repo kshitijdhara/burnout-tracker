@@ -524,7 +524,13 @@ Phase 1 implementation (`internal/adapters/dashboard`, `burntout dashboard`):
   valid for 60 s. It never goes on a command line, which other local users
   can read (T1): `burntout dashboard` and the tray write the launch URL into
   an owner-only `dashboard-launch-*.html` file in the data folder, a
-  script-free meta refresh, and open that file. The file is removed once
+  script-free meta refresh, and open that file. On Linux they hand it to
+  the desktop portal (`OpenURI.OpenFile`) as an open file, so snap and
+  flatpak browsers, which can't read `~/.local/share`, can open it, and wait
+  for the portal's answer. Only when there is no portal do they run
+  `xdg-open` themselves; if the portal fails or the user cancels its app
+  chooser, `burntout dashboard` prints the link instead, so the file is
+  never opened twice. The file is removed once
   the token has expired, or by the next launch if BurntOut stopped first.
   `--no-open` prints the URL in the terminal instead.
 - **Session cookie:** 256 bits; `HttpOnly`, `SameSite=Strict`, `Path=/`, and
@@ -781,6 +787,6 @@ The privacy guarantees above are only as good as their tests. CI MUST run:
 ### Vulnerability disclosure
 
 Security issues are reported privately through **GitHub private
-vulnerability reporting** on this repository. Action item: add `SECURITY.md`
-with the policy, supported versions and expected response times before the
-first public release.
+vulnerability reporting** on this repository. [`SECURITY.md`](../SECURITY.md)
+gives the policy, the supported versions (the latest release only, during
+the alpha), the expected response times and what is in scope.

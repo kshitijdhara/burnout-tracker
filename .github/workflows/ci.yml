@@ -66,7 +66,7 @@ jobs:
           go-version-file: go.mod
       - name: Install shells for hook tests, and X for the X11 collector
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y zsh fish xvfb openbox x11-utils
+        run: sudo apt-get update && sudo apt-get install -y zsh fish xvfb openbox x11-utils dbus
       # The X11 collector's live tests need a display and an EWMH window
       # manager. Wait until openbox advertises itself on the root window.
       - name: Start Xvfb and openbox
