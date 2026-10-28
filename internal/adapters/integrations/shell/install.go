@@ -9,12 +9,17 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
 )
 
 const (
-	blockBegin = "# >>> burnout >>>\n"
-	blockEnd   = "# <<< burnout <<<\n"
+	blockBegin = "# >>> burntout >>>\n"
+	blockEnd   = "# <<< burntout <<<\n"
+	// The block and script name from before the rename to BurntOut, which
+	// Install and Uninstall remove.
+	legacyBegin  = "# >>> burnout >>>\n"
+	legacyEnd    = "# <<< burnout <<<\n"
+	legacyScript = "burnout."
 	// preexecName is the bash-preexec copy written next to the bash hook.
 	preexecName = "bash-preexec.sh"
 )
@@ -36,7 +41,7 @@ type InstallOptions struct {
 	// it may be a symlink. Empty for fish, which loads its conf.d by itself.
 	RCPath    string
 	ScriptDir string // where the rendered script goes: <config dir>/hooks, or fish's conf.d
-	BinPath   string // absolute path of the burnout binary
+	BinPath   string // absolute path of the BurntOut binary
 	BackupDir string // where the pre-edit copy of the rc file goes (the app's private data dir)
 	Now       func() time.Time
 }
@@ -50,7 +55,20 @@ func (o InstallOptions) kind() Kind {
 
 // ScriptPath is where Install writes the rendered hook script.
 func (o InstallOptions) ScriptPath() string {
-	return filepath.Join(o.ScriptDir, "burnout."+string(o.kind()))
+	return filepath.Join(o.ScriptDir, "burntout."+string(o.kind()))
+}
+
+// removeLegacyScript deletes the hook script from before the rename, if
+// any: for fish its conf.d file, which fish would otherwise still load.
+func (o InstallOptions) removeLegacyScript() error {
+	if o.ScriptDir == "" {
+		return nil
+	}
+	path := filepath.Join(o.ScriptDir, legacyScript+string(o.kind()))
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("shell: remove the old hook script: %w", err)
+	}
+	return nil
 }
 
 // scripts returns every file Install writes, with its content.
@@ -85,11 +103,14 @@ func Install(o InstallOptions) error {
 			return fmt.Errorf("shell: write hook script: %w", err)
 		}
 	}
+	if err := o.removeLegacyScript(); err != nil {
+		return err
+	}
 	if o.RCPath == "" {
 		return nil
 	}
 	return editRC(o.RCPath, o.BackupDir, o.Now(), func(content []byte) []byte {
-		return withBlock(content, block(o.kind(), o.ScriptPath()))
+		return withBlock(withoutLegacyBlock(content), block(o.kind(), o.ScriptPath()))
 	})
 }
 
@@ -100,9 +121,13 @@ func Uninstall(o InstallOptions) error {
 		return errors.New("shell: incomplete install options")
 	}
 	if o.RCPath != "" {
-		if err := editRC(o.RCPath, o.BackupDir, o.Now(), withoutBlock); err != nil {
+		edit := func(content []byte) []byte { return withoutBlock(withoutLegacyBlock(content)) }
+		if err := editRC(o.RCPath, o.BackupDir, o.Now(), edit); err != nil {
 			return err
 		}
+	}
+	if err := o.removeLegacyScript(); err != nil {
+		return err
 	}
 	if o.ScriptDir == "" {
 		return nil
@@ -157,15 +182,20 @@ func block(k Kind, scriptPath string) []byte {
 // findBlock returns the byte range of our block, including a missing final
 // newline, or -1 if there is none. Markers only count at the start of a line.
 func findBlock(content []byte) (start, end int) {
-	start = indexAtLineStart(content, []byte(blockBegin))
+	return findMarked(content, blockBegin, blockEnd)
+}
+
+// findMarked is findBlock for the block between begin and end.
+func findMarked(content []byte, begin, finish string) (start, end int) {
+	start = indexAtLineStart(content, []byte(begin))
 	if start < 0 {
 		return -1, -1
 	}
-	rel := indexAtLineStart(content[start:], []byte(blockEnd[:len(blockEnd)-1]))
+	rel := indexAtLineStart(content[start:], []byte(finish[:len(finish)-1]))
 	if rel < 0 {
 		return -1, -1
 	}
-	end = start + rel + len(blockEnd) - 1
+	end = start + rel + len(finish) - 1
 	if end < len(content) && content[end] == '\n' {
 		end++
 	}
@@ -203,7 +233,16 @@ func withBlock(content, blk []byte) []byte {
 
 // withoutBlock removes our block and the separating blank line before it.
 func withoutBlock(content []byte) []byte {
-	start, end := findBlock(content)
+	return withoutMarked(content, blockBegin, blockEnd)
+}
+
+// withoutLegacyBlock removes the block from before the rename to BurntOut.
+func withoutLegacyBlock(content []byte) []byte {
+	return withoutMarked(content, legacyBegin, legacyEnd)
+}
+
+func withoutMarked(content []byte, begin, finish string) []byte {
+	start, end := findMarked(content, begin, finish)
 	if start < 0 {
 		return content
 	}

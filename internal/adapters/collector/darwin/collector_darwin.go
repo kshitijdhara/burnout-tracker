@@ -215,7 +215,7 @@ static void *bt_begin_activity(void) {
 	@autoreleasepool {
 		id a = [[NSProcessInfo processInfo]
 			beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep
-			                  reason:@"burnout: sample desktop activity"];
+			                  reason:@"burntout: sample desktop activity"];
 		return (void *)CFBridgingRetain(a);
 	}
 }
@@ -337,8 +337,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // Buffer sizes for one tick. Windows beyond maxWindows (far past the

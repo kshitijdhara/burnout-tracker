@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // recordingHasher hashes for real and remembers every title key it made,

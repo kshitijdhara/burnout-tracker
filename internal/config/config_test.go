@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/nudge"
 )
 
 func TestMissingFileIsDefaults(t *testing.T) {

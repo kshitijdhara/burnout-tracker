@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // DomainPrefix marks a domain in exclusions and overrides

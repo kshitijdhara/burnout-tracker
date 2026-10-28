@@ -8,22 +8,22 @@ How releases are built, signed and installed (ADR-0005).
 | `../.github/workflows/release.yml` | Runs GoReleaser on a `v*` tag, signs `checksums.txt` with the pinned key in the protected `release` environment, attests provenance, publishes |
 | `install.sh`, `install.ps1` | User-prefix installers that verify the pinned-key signature, then the checksum |
 | `test-install.sh`, `test-install.ps1` | CI tests for the installers' verifiers, against `testdata/` (signed by a throwaway key) |
-| `macos/build-dmg.sh` | Wraps the universal binary in `Burnout.app` inside a `.dmg` (GoReleaser's own dmg support is Pro-only) |
+| `macos/build-dmg.sh` | Wraps the universal binary in `BurntOut.app` inside a `.dmg` (GoReleaser's own dmg support is Pro-only) |
 | `nfpm/postinstall.sh` | `.deb`/`.rpm` post-install: prints next steps only |
-| `../internal/release/keys.go` | The same pinned keys, for `burnout update`; a test keeps all three copies identical |
+| `../internal/release/keys.go` | The same pinned keys, for `burntout update`; a test keeps all three copies identical |
 
 **Nothing here starts collection.** No package script, installer or
-`.app` runs `burnout setup` or `burnout service install`, and none has an
+`.app` runs `burntout setup` or `burntout service install`, and none has an
 option to. They print those steps for the user (privacy & security §5.2,
 AC-2).
 
 ## Release assets
 
 ```
-burnout_<ver>_darwin_all.tar.gz      universal CLI
-burnout_<ver>_darwin_all.dmg         Burnout.app (ad-hoc signed, not notarized)
-burnout_<ver>_linux_{amd64,arm64}.{tar.gz,deb,rpm}
-burnout_<ver>_windows_{amd64,arm64}.zip
+burntout_<ver>_darwin_all.tar.gz      universal CLI
+burntout_<ver>_darwin_all.dmg         BurntOut.app (ad-hoc signed, not notarized)
+burntout_<ver>_linux_{amd64,arm64}.{tar.gz,deb,rpm}
+burntout_<ver>_windows_{amd64,arm64}.zip
 *.sbom.json                          SBOM per archive (syft, SPDX)
 checksums.txt                        SHA-256 of every asset above
 checksums.txt.sig                    pinned-key signature of checksums.txt
@@ -50,20 +50,20 @@ P-256 signature over SHA-256 of the file. A release is valid if the
 Read the script first, then run it:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/kshitijdhara/burnout-tracker/main/packaging/install.sh
+curl -fsSLO https://raw.githubusercontent.com/kshitijdhara/burntout/main/packaging/install.sh
 less install.sh
 sh install.sh
 ```
 
 ```powershell
-Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kshitijdhara/burnout-tracker/main/packaging/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/kshitijdhara/burntout/main/packaging/install.ps1 -OutFile install.ps1
 notepad install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Both take a version (`--version v0.1.0`, `-Version v0.1.0`) and an install
 directory (`--dir`, `-Dir`); the default is the latest release into
-`~/.local/bin` or `%LOCALAPPDATA%\Programs\burnout`.
+`~/.local/bin` or `%LOCALAPPDATA%\Programs\burntout`.
 
 ### Verifying by hand
 
@@ -86,9 +86,9 @@ shasum -a 256 -c --ignore-missing checksums.txt
 
 ```bash
 cosign verify-blob --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github.com/kshitijdhara/burnout-tracker/' \
+  --certificate-identity-regexp '^https://github.com/kshitijdhara/burntout/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
-gh attestation verify burnout_<ver>_linux_amd64.tar.gz --repo kshitijdhara/burnout-tracker
+gh attestation verify burntout_<ver>_linux_amd64.tar.gz --repo kshitijdhara/burntout
 ```
 
 ## Key ceremony
@@ -133,7 +133,7 @@ When the current key is retired (routinely, or because it may have leaked):
 1. Generate a new *next* key.
 2. In all three files: the old *next* becomes *current*, the new key
    becomes *next*. Release that change normally while the old current key
-   still signs, so installed copies of `burnout update` learn the new keys.
+   still signs, so installed copies of `burntout update` learn the new keys.
 3. Put the old *next* private key into `RELEASE_SIGNING_KEY`.
 
 Installers and binaries released before the rotation already trust the old

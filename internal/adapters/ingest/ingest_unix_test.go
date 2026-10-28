@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 // shortSocketPath keeps the path under the ~104-byte sun_path limit on macOS,

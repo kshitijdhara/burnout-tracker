@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/timeline"
+	"github.com/kshitijdhara/burntout/internal/domain/attention"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/timeline"
 )
 
 // sessionWindows maps agent sessions to the terminal windows they run in, by

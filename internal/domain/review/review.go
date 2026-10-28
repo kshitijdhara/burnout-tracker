@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/strain"
 )
 
 // Week is the review of one week.

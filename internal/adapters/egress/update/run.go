@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-// Options is one `burnout update`.
+// Options is one `burntout update`.
 type Options struct {
 	Current        string  // the running version ("dev" when built without one)
 	Channel        Channel // used when To is empty

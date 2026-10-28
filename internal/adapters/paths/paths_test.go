@@ -90,3 +90,39 @@ func TestExcludeFromBackupsNoopOffDarwin(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Overrides under the pre-rename names still apply, and are reported.
+func TestLegacyEnvFallback(t *testing.T) {
+	t.Setenv(EnvDataDir, "")
+	t.Setenv("BURNOUT_DATA_DIR", "/custom/burnout")
+	if d, _ := DataDir(); d != "/custom/burnout" {
+		t.Fatalf("DataDir = %q, want the old override", d)
+	}
+	if got := DeprecatedEnv(EnvDataDir, EnvConfigDir); len(got) != 1 || got[0] != "BURNOUT_DATA_DIR → BURNTOUT_DATA_DIR" {
+		t.Fatalf("DeprecatedEnv = %q", got)
+	}
+	t.Setenv(EnvDataDir, "/new")
+	if d, _ := DataDir(); d != "/new" || len(DeprecatedEnv(EnvDataDir)) != 0 {
+		t.Fatalf("the new name doesn't win: %q", d)
+	}
+}
+
+// The background service pins its folders to the new defaults; the old
+// default must still be found then, or its daemon never migrates. Any
+// other override keeps its folder, so nothing moves.
+func TestLegacyDirsWhenPinned(t *testing.T) {
+	t.Setenv("BURNOUT_DATA_DIR", "")
+	t.Setenv("BURNOUT_CONFIG_DIR", "")
+	newDefault, err := dataDirNamed(AppName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvDataDir, newDefault)
+	if data, _, _ := LegacyDirs(); data == "" || filepath.Base(data) != LegacyAppName {
+		t.Fatalf("pinned to the new default: legacy data %q", data)
+	}
+	t.Setenv(EnvDataDir, t.TempDir())
+	if data, _, _ := LegacyDirs(); data != "" {
+		t.Fatalf("a custom override still moves the old default: %q", data)
+	}
+}

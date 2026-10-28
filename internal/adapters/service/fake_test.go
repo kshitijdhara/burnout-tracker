@@ -34,8 +34,8 @@ var testArgs = []string{"daemon", "--service"}
 func manager(t *testing.T, goos string, r *fakeRunner) Manager {
 	home := t.TempDir()
 	return Manager{
-		GOOS: goos, Bin: "/Users/me/.local/bin/burnout", Args: testArgs,
-		Env:  map[string]string{"BURNOUT_DATA_DIR": "/Users/me/data"},
+		GOOS: goos, Bin: "/Users/me/.local/bin/burntout", Args: testArgs,
+		Env:  map[string]string{"BURNTOUT_DATA_DIR": "/Users/me/data"},
 		Home: home, Config: filepath.Join(home, ".config"), LogDir: filepath.Join(home, "data", "logs"),
 		UID: 501, Run: r, Sleep: func(time.Duration) {},
 	}

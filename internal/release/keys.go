@@ -4,7 +4,7 @@
 // The release workflow signs checksums.txt with an ECDSA P-256 key:
 // checksums.txt.sig is the output of `openssl dgst -sha256 -sign`, an
 // ASN.1 DER signature over the SHA-256 of the file. install.sh, install.ps1
-// and `burnout update` each embed the same two public keys, current and
+// and `burntout update` each embed the same two public keys, current and
 // next, so the key can be rotated without breaking existing installs. A
 // test keeps the copies in step.
 //

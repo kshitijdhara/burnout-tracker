@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // UnattributedLabel labels minutes where no window clearly held attention.

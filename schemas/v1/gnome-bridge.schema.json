@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/gnome-bridge.schema.json",
+  "$id": "https://github.com/kshitijdhara/burntout/schemas/v1/gnome-bridge.schema.json",
   "title": "GNOME Shell bridge message, protocol version 1",
-  "description": "One line of newline-delimited JSON on the owner-only socket $XDG_RUNTIME_DIR/burnout/gnome-bridge.sock (ADR-0010). The agent sends requests ($defs/request); the extension answers each with one reply ($defs/reply). The first request is a hello carrying the token from gnome-bridge.token. Each side writes its own protocol version in v; the agent reads replies of its version and the one before. A line, without its newline, is at most 1048576 bytes; the extension empties titles, then leaves out the lowest windows, to keep a snapshot within it. Unknown fields are ignored. Kept in step with internal/adapters/collector/wayland and extensions/gnome-shell by TestSchemaMatchesCode.",
+  "description": "One line of newline-delimited JSON on the owner-only socket $XDG_RUNTIME_DIR/burntout/gnome-bridge.sock (ADR-0010). The agent sends requests ($defs/request); the extension answers each with one reply ($defs/reply). The first request is a hello carrying the token from gnome-bridge.token. Each side writes its own protocol version in v; the agent reads replies of its version and the one before. A line, without its newline, is at most 1048576 bytes; the extension empties titles, then leaves out the lowest windows, to keep a snapshot within it. Unknown fields are ignored. Kept in step with internal/adapters/collector/wayland and extensions/gnome-shell by TestSchemaMatchesCode.",
   "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/reply" }],
   "$defs": {
     "version": { "type": "integer", "minimum": 1, "maximum": 1 },

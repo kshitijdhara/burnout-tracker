@@ -13,7 +13,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
 )
 
 // ModelVersion names this scoring method in stored scores.

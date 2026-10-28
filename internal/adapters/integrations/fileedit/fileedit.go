@@ -95,7 +95,7 @@ func WriteAtomic(path string, content []byte, mode fs.FileMode) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".burnout-tmp-*")
+	tmp, err := os.CreateTemp(dir, ".burntout-tmp-*")
 	if err != nil {
 		return err
 	}

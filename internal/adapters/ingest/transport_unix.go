@@ -10,15 +10,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 )
 
-const socketName = "burnout.sock"
+const socketName = "burntout.sock"
 
 // errPeerRejected is returned by peer checks for connections from another user.
 var errPeerRejected = errors.New("ingest: peer is not the current user")
 
-// Address returns the daemon's socket path: <runtime dir>/burnout.sock.
+// Address returns the daemon's socket path: <runtime dir>/burntout.sock.
 func Address() (string, error) {
 	dir, err := paths.RuntimeDir()
 	if err != nil {

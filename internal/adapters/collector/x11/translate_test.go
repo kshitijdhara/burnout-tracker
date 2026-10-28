@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 func rect(x, y, w, h int) model.Rect { return model.Rect{X: x, Y: y, W: w, H: h} }

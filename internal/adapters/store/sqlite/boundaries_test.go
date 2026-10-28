@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/boundary"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 func mustParse(t *testing.T, kind, value, source string) boundary.Boundary {

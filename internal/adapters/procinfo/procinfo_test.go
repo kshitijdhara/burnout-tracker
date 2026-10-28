@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 var _ ports.ProcessInfo = Info{}

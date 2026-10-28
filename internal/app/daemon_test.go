@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/domain/attention"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/schedule"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 var t0 = time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)

@@ -31,7 +31,7 @@ The rules for that channel are in privacy & security §8.3 and threat T3
 and says hello with a token it wrote to an owner-only file. The protocol
 is newline-delimited JSON** (`schemas/v1/gnome-bridge.schema.json`).
 
-- **Rendezvous.** Both sides use `$XDG_RUNTIME_DIR/burnout/`, the agent's
+- **Rendezvous.** Both sides use `$XDG_RUNTIME_DIR/burntout/`, the agent's
   runtime directory (`paths.RuntimeDir`). Each side creates it with mode
   0700 if needed. The extension refuses to listen unless it is a real
   directory owned by the user with no group or other access. The agent
@@ -84,7 +84,7 @@ is newline-delimited JSON** (`schemas/v1/gnome-bridge.schema.json`).
 - **Packaging.** The `.deb` and `.rpm` install the extension in
   `/usr/share/gnome-shell/extensions/<uuid>/`. It stays disabled. The
   post-install message and `doctor` tell the user to log out and back in,
-  then run `gnome-extensions enable burnout-bridge@kshitijdhara.github.io`.
+  then run `gnome-extensions enable burntout-bridge@kshitijdhara.github.io`.
   Nothing enables it silently (AC-2).
 
 ## Options Considered
@@ -142,7 +142,7 @@ sandboxed apps included.
   packages are `Apache-2.0 AND GPL-2.0-or-later`.
 - Each supported GNOME release must be listed in `metadata.json`'s
   `shell-version`, or GNOME won't load the extension. A new GNOME release
-  needs a burnout release.
+  needs a BurntOut release.
 - KDE (a KWin script) and wlroots compositors (Sway or Hyprland IPC) still
   have no collector. They can reuse the protocol and translate step.
 - `install.sh` installs only the binary, so users who install with it have

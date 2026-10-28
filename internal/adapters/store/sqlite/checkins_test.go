@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
 )
 
 func TestCheckinsRoundTrip(t *testing.T) {

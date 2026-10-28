@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/geometry"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/adapters/collector/geometry"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // rawWindow is one entry of CGWindowListCopyWindowInfo, copied out of C.

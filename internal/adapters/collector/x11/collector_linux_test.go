@@ -11,7 +11,7 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // These tests run against the X server in DISPLAY: Xvfb with a window
@@ -81,7 +81,7 @@ func TestSnapshotInvariants(t *testing.T) {
 // desktop.
 func TestSnapshotSeesOwnWindow(t *testing.T) {
 	needDisplay(t)
-	const title = "burnout x11 test"
+	const title = "burntout x11 test"
 	id := mapTestWindow(t, title)
 
 	for _, titles := range []bool{false, true} {
@@ -92,8 +92,8 @@ func TestSnapshotSeesOwnWindow(t *testing.T) {
 		w := waitForWindow(t, c, id)
 		_ = c.Close()
 
-		if w.AppID != "BurnoutTest" || w.PID != os.Getpid() {
-			t.Errorf("AppID=%q PID=%d, want BurnoutTest and %d", w.AppID, w.PID, os.Getpid())
+		if w.AppID != "BurntoutTest" || w.PID != os.Getpid() {
+			t.Errorf("AppID=%q PID=%d, want BurntoutTest and %d", w.AppID, w.PID, os.Getpid())
 		}
 		if w.Bounds.W < 320 || w.Bounds.H < 240 {
 			t.Errorf("bounds %+v smaller than the 320x240 client", w.Bounds)
@@ -153,7 +153,7 @@ func mapTestWindow(t *testing.T, title string) uint32 {
 	}
 	pid := make([]byte, 4)
 	xgb.Put32(pid, uint32(os.Getpid())) //nolint:gosec // G115: pids fit in 32 bits
-	set(xproto.AtomWmClass, xproto.AtomString, 8, []byte("burnout-test\x00BurnoutTest\x00"))
+	set(xproto.AtomWmClass, xproto.AtomString, 8, []byte("burntout-test\x00BurntoutTest\x00"))
 	set(atom(t, conn, "_NET_WM_PID"), xproto.AtomCardinal, 32, pid)
 	set(atom(t, conn, "_NET_WM_NAME"), atom(t, conn, "UTF8_STRING"), 8, []byte(title))
 	if err := xproto.MapWindowChecked(conn, wid).Check(); err != nil {

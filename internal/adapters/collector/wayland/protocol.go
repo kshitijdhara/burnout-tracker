@@ -22,7 +22,7 @@ import (
 
 // UUID is the extension's uuid: its metadata.json, its install directory
 // and the name `gnome-extensions enable` takes.
-const UUID = "burnout-bridge@kshitijdhara.github.io"
+const UUID = "burntout-bridge@kshitijdhara.github.io"
 
 // Version is the protocol version this agent speaks. MinVersion is the
 // oldest extension it still reads: an upgraded extension doesn't load into
@@ -122,7 +122,7 @@ type VersionError struct{ Got int }
 
 func (e *VersionError) Error() string {
 	if e.Got > Version {
-		return fmt.Sprintf("gnome bridge: extension speaks protocol v%d, newer than this agent (v%d); update burnout", e.Got, Version)
+		return fmt.Sprintf("gnome bridge: extension speaks protocol v%d, newer than this agent (v%d); update burntout", e.Got, Version)
 	}
 	return fmt.Sprintf("gnome bridge: extension speaks protocol v%d, older than this agent reads (v%d–v%d); log out and back in to load the updated extension", e.Got, MinVersion, Version)
 }

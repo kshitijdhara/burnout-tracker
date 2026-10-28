@@ -1,6 +1,6 @@
 // Package config is the TOML settings file (system design §3.4): its
 // schema, defaults and validation. There is one file,
-// <config dir>/burnout/config.toml. It holds no secrets: those live in the
+// <config dir>/burntout/config.toml. It holds no secrets: those live in the
 // OS keystore. A missing file means every default; an invalid one is
 // never half-applied.
 package config
@@ -23,11 +23,11 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/nudge"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/nudge"
+	"github.com/kshitijdhara/burntout/internal/domain/schedule"
 )
 
 // FileName is the config file's name inside the config directory.
@@ -75,7 +75,7 @@ var nudgeKinds = []struct {
 }
 
 // Update is the opt-in update check (privacy & security §6). It only ever
-// tells the user about a new release; installing is `burnout update`.
+// tells the user about a new release; installing is `burntout update`.
 type Update struct {
 	// Check is "off" (the default) or "weekly".
 	Check string `toml:"check"`
@@ -571,9 +571,9 @@ func Save(path string, c Config) error {
 // Render writes c as a commented TOML file.
 func Render(c Config) []byte {
 	var b bytes.Buffer
-	b.WriteString(`# burnout settings. Change them with ` + "`burnout config set KEY VALUE`" + `, or edit this
+	b.WriteString(`# BurntOut settings. Change them with ` + "`burntout config set KEY VALUE`" + `, or edit this
 # file: the daemon picks up changes within a few seconds. Check an edited
-# file with ` + "`burnout config validate`" + `. Secrets never go in this file.
+# file with ` + "`burntout config validate`" + `. Secrets never go in this file.
 
 [profile]
 # What your work looks like, so the strain score weighs the right things:
@@ -595,7 +595,7 @@ func Render(c Config) []byte {
 	fmt.Fprintf(&b, "private_hours = %s\n", list(c.Privacy.PrivateHours))
 	b.WriteString(`
 # Apps recorded as private: their time counts, their names aren't kept.
-# Use the names ` + "`burnout status`" + ` and ` + "`burnout timeline`" + ` show (macOS bundle
+# Use the names ` + "`burntout status`" + ` and ` + "`burntout timeline`" + ` show (macOS bundle
 # ids, Windows exe names); case doesn't matter.
 # Password managers and other sensitive apps are always private.
 `)
@@ -640,15 +640,15 @@ func Render(c Config) []byte {
 	}
 	b.WriteString(`
 [calendar.ics]
-# Fetch the calendar feed added with ` + "`burnout calendar add`" + ` (its URL is kept in
+# Fetch the calendar feed added with ` + "`burntout calendar add`" + ` (its URL is kept in
 # your OS keystore, not here). false stops fetching and keeps the feed.
 `)
 	fmt.Fprintf(&b, "enabled = %t\n", c.Calendar.ICS.Enabled)
 	b.WriteString(`
 [update]
 # "weekly" asks GitHub once a week whether a newer release exists and shows
-# it in the tray and ` + "`burnout doctor`" + `; it never installs anything (run
-# ` + "`burnout update`" + `). "off" makes no update checks at all.
+# it in the tray and ` + "`burntout doctor`" + `; it never installs anything (run
+# ` + "`burntout update`" + `). "off" makes no update checks at all.
 `)
 	fmt.Fprintf(&b, "check = %s\n", quote(c.Update.Check))
 	b.WriteString(`
@@ -714,7 +714,7 @@ func Keys() []string {
 	return out
 }
 
-// key is one setting reachable by `burnout config get|set`.
+// key is one setting reachable by `burntout config get|set`.
 type key struct {
 	name string
 	list func(*Config) *[]string

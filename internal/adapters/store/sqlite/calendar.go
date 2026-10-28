@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // metaForgotAt is the meta key holding when forget last ran, in Unix

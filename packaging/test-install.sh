@@ -26,7 +26,7 @@ expect_fail() {
 }
 
 run() {
-	export BURNOUT_INSTALL_LIB=1
+	export BURNTOUT_INSTALL_LIB=1
 	# shellcheck source-path=SCRIPTDIR source=install.sh
 	. "$here/install.sh"
 	printf '# %s\n' "$(openssl version)"
@@ -37,7 +37,7 @@ run() {
 	expect_pass "fixture key, fixture signature" verify_with_key "$fixture" "$td/checksums.txt" "$td/checksums.txt.sig"
 	{ cat "$td/checksums.txt"; echo; } >"$tmp/tampered.txt"
 	expect_fail "tampered checksums.txt" verify_with_key "$fixture" "$tmp/tampered.txt" "$td/checksums.txt.sig"
-	expect_fail "wrong key" verify_with_key "$BURNOUT_KEY_CURRENT" "$td/checksums.txt" "$td/checksums.txt.sig"
+	expect_fail "wrong key" verify_with_key "$BURNTOUT_KEY_CURRENT" "$td/checksums.txt" "$td/checksums.txt.sig"
 	# The fixture key is not pinned, so the real check must refuse it.
 	expect_fail "unpinned key" verify_signature "$td/checksums.txt" "$td/checksums.txt.sig"
 
@@ -49,15 +49,15 @@ run() {
 	# End to end: main against testdata/release, a fixture release signed
 	# by the fixture key, with downloads served from disk.
 	fetch() { cp "$td/release/${1##*/}" "$2"; }
-	if (main --version v0.0.0 --dir "$tmp/pinned") >/dev/null 2>&1 || [ -e "$tmp/pinned/burnout" ]; then
+	if (main --version v0.0.0 --dir "$tmp/pinned") >/dev/null 2>&1 || [ -e "$tmp/pinned/burntout" ]; then
 		bad "install with the pinned keys (accepted)"
 	else
 		ok "install with the pinned keys (rejected, nothing installed)"
 	fi
-	BURNOUT_KEY_CURRENT=$fixture
+	BURNTOUT_KEY_CURRENT=$fixture
 	if out=$(main --version v0.0.0 --dir "$tmp/bin" 2>&1) &&
-		[ "$("$tmp/bin/burnout")" = "burnout fixture" ] &&
-		case $out in *"burnout setup"*"burnout service install"*) true ;; *) false ;; esac; then
+		[ "$("$tmp/bin/burntout")" = "burntout fixture" ] &&
+		case $out in *"burntout setup"*"burntout service install"*) true ;; *) false ;; esac; then
 		ok "install with the fixture key"
 	else
 		bad "install with the fixture key: $out"

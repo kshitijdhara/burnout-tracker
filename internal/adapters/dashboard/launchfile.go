@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Launch files carry the one-time link from burnout to the browser. A
+// Launch files carry the one-time link from BurntOut to the browser. A
 // command line is readable by every local user (ps, /proc/*/cmdline), and
 // whoever redeems the token first gets the session (privacy & security
 // §2, T1), so the link goes into an owner-only file in the data folder and
@@ -29,7 +29,7 @@ const launchPage = `<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="refresh" content="0;url=%s">
-<title>burnout</title>
+<title>BurntOut</title>
 <p><a href="%s">Open the dashboard</a></p>
 `
 

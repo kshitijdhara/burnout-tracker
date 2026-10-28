@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
 )
 
 // ToolSubcommands is the allowlist of subcommands recorded per tool, owned
@@ -30,12 +30,12 @@ func zshSubcommandTable() string {
 
 // bashSubcommandFuncs renders ToolSubcommands as two bash functions that
 // work on bash 3.2, which has no associative arrays:
-// __burnout_has_subcmds TOOL and __burnout_allowed TOOL WORD.
+// __burntout_has_subcmds TOOL and __burntout_allowed TOOL WORD.
 func bashSubcommandFuncs() string {
 	tools := slices.Sorted(maps.Keys(ToolSubcommands))
 	var b strings.Builder
-	b.WriteString("__burnout_has_subcmds() {\n  case $1 in\n    " + strings.Join(tools, "|") + ") return 0 ;;\n  esac\n  return 1\n}\n")
-	b.WriteString("__burnout_allowed() {\n  case $1 in\n")
+	b.WriteString("__burntout_has_subcmds() {\n  case $1 in\n    " + strings.Join(tools, "|") + ") return 0 ;;\n  esac\n  return 1\n}\n")
+	b.WriteString("__burntout_allowed() {\n  case $1 in\n")
 	for _, tool := range tools {
 		b.WriteString("    " + tool + ") case $2 in " + strings.Join(ToolSubcommands[tool], "|") + ") return 0 ;; esac ;;\n")
 	}
@@ -48,9 +48,9 @@ func bashSubcommandFuncs() string {
 func fishSubcommandFuncs() string {
 	tools := slices.Sorted(maps.Keys(ToolSubcommands))
 	var b strings.Builder
-	b.WriteString("    function __burnout_has_subcmds\n        switch $argv[1]\n            case " + strings.Join(tools, " ") +
+	b.WriteString("    function __burntout_has_subcmds\n        switch $argv[1]\n            case " + strings.Join(tools, " ") +
 		"\n                return 0\n        end\n        return 1\n    end\n")
-	b.WriteString("    function __burnout_allowed\n        switch $argv[1]\n")
+	b.WriteString("    function __burntout_allowed\n        switch $argv[1]\n")
 	for _, tool := range tools {
 		b.WriteString("            case " + tool + "\n                contains -- $argv[2] " + strings.Join(ToolSubcommands[tool], " ") + "; and return 0\n")
 	}

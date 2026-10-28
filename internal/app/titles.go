@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // titleRules classifies browser windows by title (privacy & security §4.1,

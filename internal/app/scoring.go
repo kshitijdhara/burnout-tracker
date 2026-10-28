@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/strain"
 )
 
 // ScoreStore is where scoring reads its inputs.

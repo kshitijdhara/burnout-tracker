@@ -19,7 +19,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
 )
 
 // File names in the data folder.
@@ -147,7 +147,7 @@ type Nudges struct {
 	Kind    string `json:"kind,omitempty"`
 	Snoozed bool   `json:"snoozed,omitempty"` // until the next day
 	// Off are kinds the tray of v0.1.0-alpha.1 turned off for good. The
-	// tray now turns a kind off in the config file, where `burnout config`
+	// tray now turns a kind off in the config file, where `burntout config`
 	// turns it back on; NudgeOn clears a kind from here too.
 	Off []string `json:"off,omitempty"`
 }

@@ -17,7 +17,7 @@ const (
 	// noteFor is how long an action's outcome replaces the first line.
 	noteFor = 6 * time.Second
 	// tooltip names the icon.
-	tooltip = "Burnout tracker"
+	tooltip = "BurntOut"
 	// reviewTitle sits beside the icon while the reminder is due, where the
 	// platform shows titles (the macOS menu bar; most Linux panels don't).
 	reviewTitle = "Review"
@@ -121,11 +121,11 @@ func show(ctx context.Context, m Menu, ic icons) {
 	first := systray.AddMenuItem("", "")
 	first.Disable()
 	add := func(key, title, tip string) item { return item{key, systray.AddMenuItem(title, tip)} }
-	review := add("review", "Review what's collected…", "Your monthly look at what burnout records, with pause, settings and uninstall")
+	review := add("review", "Review what's collected…", "Your monthly look at what BurntOut records, with pause, settings and uninstall")
 	nudge := add("nudge", "", "")
 	nudgeItems := []item{
 		{"nudge-snooze", nudge.mi.AddSubMenuItem("Snooze until tomorrow", "")},
-		{"nudge-off", nudge.mi.AddSubMenuItem("Don't show this kind again", "You can turn it back on with `burnout config`")},
+		{"nudge-off", nudge.mi.AddSubMenuItem("Don't show this kind again", "You can turn it back on with `burntout config`")},
 	}
 	systray.AddSeparator()
 	pauses := []item{

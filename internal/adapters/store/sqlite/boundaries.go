@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
+	"github.com/kshitijdhara/burntout/internal/domain/boundary"
 )
 
 // SetBoundary makes b the active rule of its kind from the day after today

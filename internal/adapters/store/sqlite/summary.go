@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 const topN = 5
@@ -23,7 +23,7 @@ type NamedCount struct {
 	Count int
 }
 
-// DaySummary is what `burnout status` shows for one logical day.
+// DaySummary is what `burntout status` shows for one logical day.
 type DaySummary struct {
 	LogicalDay string
 

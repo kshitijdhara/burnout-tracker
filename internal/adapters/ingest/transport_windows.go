@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Address returns the daemon's named pipe: \\.\pipe\burnout-<user SID>.
+// Address returns the daemon's named pipe: \\.\pipe\burntout-<user SID>.
 // Named pipes share one machine-wide namespace; the SID makes the name
 // unique per user (usernames can collide after sanitising) and the client
 // still verifies the server's identity before writing anything.
@@ -22,7 +22,7 @@ func Address() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return `\\.\pipe\burnout-` + sid, nil
+	return `\\.\pipe\burntout-` + sid, nil
 }
 
 // checkAddress has nothing to check on Windows: the client verifies the

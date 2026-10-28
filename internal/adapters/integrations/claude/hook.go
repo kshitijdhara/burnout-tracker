@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/procinfo"
+	"github.com/kshitijdhara/burntout/internal/adapters/procinfo"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 // AgentName identifies Claude Code in wire messages.

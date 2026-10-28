@@ -33,7 +33,7 @@ encryption of the database.**
    BitLocker or Device Encryption on Windows, and LUKS on Linux.
    - Onboarding checks FDE status. If it's off, onboarding explains the risk
      and links the OS instructions.
-   - `burnout doctor` and the dashboard show a **persistent warning** while
+   - `burntout doctor` and the dashboard show a **persistent warning** while
      FDE is off.
    - We don't block install. Users on machines without FDE (for example
      managed machines they can't change) can still use the tool knowingly.
@@ -47,10 +47,10 @@ encryption of the database.**
      or by default File History.
    - **Linux:** `$XDG_DATA_HOME` is documented as a path to exclude from
      unencrypted backup tools.
-4. **Portable backups are encrypted.** `burnout backup` writes a single
+4. **Portable backups are encrypted.** `burntout backup` writes a single
    archive encrypted with a user passphrase (Argon2id key derivation +
    AES-256-GCM, Go standard library and `x/crypto`), because the archive is
-   meant to leave the machine (F17). `burnout restore` reverses it. This
+   meant to leave the machine (F17). `burntout restore` reverses it. This
    protects a file in transit. It isn't encryption of the live database.
 
 **What we claim:** "Your data stays on your device, readable only by your
@@ -64,16 +64,16 @@ identities non-reversible.
   Manager, or Linux Secret Service.
 - Linux without Secret Service (i3, sway, headless) falls back to a `0600`
   key file in the data directory, with a note in `doctor`.
-- `burnout keys rotate` creates a new HMAC key. History no longer links to
+- `burntout keys rotate` creates a new HMAC key. History no longer links to
   new data, and the command says so before running.
 
 **Data directories:**
 
 | OS | Path | Note |
 |----|------|------|
-| macOS | `~/Library/Application Support/burnout` | Not iCloud-synced; excluded from Time Machine (sticky exclusion) |
-| Windows | `%LOCALAPPDATA%\burnout` | Never Documents, which OneDrive Known Folder Move syncs |
-| Linux | `$XDG_DATA_HOME/burnout` (default `~/.local/share/burnout`) | Document exclusion from unencrypted backup tools |
+| macOS | `~/Library/Application Support/burntout` | Not iCloud-synced; excluded from Time Machine (sticky exclusion) |
+| Windows | `%LOCALAPPDATA%\burntout` | Never Documents, which OneDrive Known Folder Move syncs |
+| Linux | `$XDG_DATA_HOME/burntout` (default `~/.local/share/burntout`) | Document exclusion from unencrypted backup tools |
 
 **Retention and real deletion:**
 
@@ -98,8 +98,8 @@ the data directory, with the same permissions, retention and deletion rules
 as the database. They exist for corruption recovery (system design §11.2),
 not for moving data between machines.
 
-**Purge scope:** `burnout forget`, "delete last hour / today" and
-`burnout uninstall --purge` remove matching data from:
+**Purge scope:** `burntout forget`, "delete last hour / today" and
+`burntout uninstall --purge` remove matching data from:
 - the database and WAL;
 - local recovery copies;
 - ingest spools;
@@ -107,7 +107,7 @@ not for moving data between machines.
 - the in-memory classification cache;
 - exports the app wrote into its own directories.
 
-`uninstall --purge` also deletes the keystore entry. Exports and `burnout
+`uninstall --purge` also deletes the keystore entry. Exports and `burntout
 backup` archives saved elsewhere are listed, not deleted.
 
 ## Options Considered
@@ -161,7 +161,7 @@ fits behind the existing `Store` port.
 - Easier: simpler store adapter, no data-key lifecycle, no
   unrecoverable-data failure mode, an honest claim users can verify.
 - Harder: the FDE warning has to be clear without nagging. The Time Machine
-  exclusion means users rely on `burnout backup` for portability, so
+  exclusion means users rely on `burntout backup` for portability, so
   onboarding and the docs have to say so.
 - Revisit: Option B if users without FDE turn out to be common, or if a
   security review requires app-level encryption.
@@ -170,9 +170,9 @@ fits behind the existing `Store` port.
 1. [ ] FDE detection on macOS (`fdesetup status`), Windows (BitLocker / Device Encryption status) and Linux (LUKS/dm-crypt on the data dir's backing device). Onboarding explanation, persistent `doctor` and dashboard warning.
 2. [ ] Data directories with `0700`/`0600` (owner-only ACL on Windows), created at first run and checked by `doctor`.
 3. [ ] macOS sticky Time Machine exclusion for the data directory; documentation for Linux backup tools.
-4. [ ] `KeyStore` port for the HMAC key (macOS Keychain, Windows DPAPI/Credential Manager, Linux Secret Service, `0600` key-file fallback); `burnout keys rotate`.
+4. [ ] `KeyStore` port for the HMAC key (macOS Keychain, Windows DPAPI/Credential Manager, Linux Secret Service, `0600` key-file fallback); `burntout keys rotate`.
 5. [ ] `secure_delete`, incremental auto-vacuum, WAL checkpointing; a test that a deleted canary is absent from the file and WAL bytes.
 6. [ ] Retention jobs with the defaults above, all configurable.
 7. [ ] Nightly `VACUUM INTO` recovery copies (3 generations) and the restore path.
-8. [ ] `burnout backup`/`restore`: a passphrase-encrypted archive (Argon2id + AES-256-GCM); round-trip and wrong-passphrase tests.
+8. [ ] `burntout backup`/`restore`: a passphrase-encrypted archive (Argon2id + AES-256-GCM); round-trip and wrong-passphrase tests.
 9. [ ] Purge scope implemented and covered by the canary test across DB, WAL, recovery copies, spools, logs and app-written exports.

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Kind is how this copy of burnout was installed, which decides what an
+// Kind is how this copy of BurntOut was installed, which decides what an
 // update may do to it (ADR-0005, "What update does").
 type Kind int
 
@@ -20,14 +20,14 @@ type Kind int
 const (
 	// UserPrefix is a binary in a folder the user can write that no
 	// package manager owns (install.sh's ~/.local/bin, install.ps1's
-	// %LOCALAPPDATA%\Programs\burnout, an unpacked archive). Update swaps
+	// %LOCALAPPDATA%\Programs\burntout, an unpacked archive). Update swaps
 	// it in place.
 	UserPrefix Kind = iota
 	// Package is a .deb or .rpm (or anything in a system folder the user
 	// can't write). Update downloads and verifies the new package, and the
 	// user installs it.
 	Package
-	// App is the binary inside Burnout.app on macOS. Re-signing needs the
+	// App is the binary inside BurntOut.app on macOS. Re-signing needs the
 	// user, so update downloads and verifies the .dmg and the user
 	// installs it.
 	App
@@ -59,8 +59,8 @@ type Install struct {
 
 // Detect classifies the binary at exe (os.Executable). The rule, in order:
 //
-//  1. Symlinks are resolved first: a ~/.local/bin/burnout link into
-//     Burnout.app is the app, not a user install.
+//  1. Symlinks are resolved first: a ~/.local/bin/burntout link into
+//     BurntOut.app is the app, not a user install.
 //  2. On macOS, a path inside "*.app/Contents/MacOS/" is App.
 //  3. On Linux, a path under /usr (except /usr/local), /bin or /sbin is
 //     Package: that is where .deb and .rpm put it (/usr/bin).
@@ -110,7 +110,7 @@ func managedPath(path, goos string) Kind {
 
 // writable reports whether this user can create files in dir.
 func writable(dir string) bool {
-	f, err := os.CreateTemp(dir, ".burnout-write-test-*")
+	f, err := os.CreateTemp(dir, ".burntout-write-test-*")
 	if err != nil {
 		return false
 	}
@@ -121,7 +121,7 @@ func writable(dir string) bool {
 
 // Asset is the release file this install needs for version v.
 func (in Install) Asset(v Version) (string, error) {
-	base := "burnout_" + v.String() + "_" + in.GOOS + "_"
+	base := "burntout_" + v.String() + "_" + in.GOOS + "_"
 	arch := in.Arch
 	if in.GOOS == "darwin" {
 		arch = "all" // one universal binary
@@ -145,9 +145,9 @@ func (in Install) Asset(v Version) (string, error) {
 // binaryName is the binary's name inside an archive.
 func (in Install) binaryName() string {
 	if in.GOOS == "windows" {
-		return "burnout.exe"
+		return "burntout.exe"
 	}
-	return "burnout"
+	return "burntout"
 }
 
 // Previous is where Swap keeps the binary it replaced.

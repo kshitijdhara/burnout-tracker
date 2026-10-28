@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/app"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+	"github.com/kshitijdhara/burntout/internal/app"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/strain"
 )
 
 func TestDayInput(t *testing.T) {
@@ -296,8 +296,8 @@ func TestForget(t *testing.T) {
 	if err := s.Backup(ctx, base); err != nil {
 		t.Fatal(err)
 	}
-	old := filepath.Join(s.dir, backupDir, "burnout-20261020.db")
-	if err := os.Rename(filepath.Join(s.dir, backupDir, "burnout-20261021.db"), old); err != nil {
+	old := filepath.Join(s.dir, backupDir, "burntout-20261020.db")
+	if err := os.Rename(filepath.Join(s.dir, backupDir, "burntout-20261021.db"), old); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(old, at(-60), at(-60)); err != nil {
@@ -306,7 +306,7 @@ func TestForget(t *testing.T) {
 	if err := s.Backup(ctx, base); err != nil {
 		t.Fatal(err)
 	}
-	newer := filepath.Join(s.dir, backupDir, "burnout-20261021.db")
+	newer := filepath.Join(s.dir, backupDir, "burntout-20261021.db")
 	if err := os.Chtimes(newer, at(30), at(30)); err != nil {
 		t.Fatal(err)
 	}

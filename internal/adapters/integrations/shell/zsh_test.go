@@ -40,14 +40,14 @@ func runZsh(t *testing.T, interactive bool, commands []string, wantRecords int) 
 	// and renames it into place when complete, so concurrent background
 	// emitters don't interleave and the test never reads a half-written
 	// record (mktemp creates the file before its contents exist).
-	emitter := filepath.Join(dir, "fake-burnout")
+	emitter := filepath.Join(dir, "fake-burntout")
 	script := "#!/bin/sh\nf=$(mktemp " + out + "/tmp.XXXXXX)\n" +
 		"{ printf 'ARGS=%s\\n' \"$*\"; env; } > \"$f\"\n" +
 		"mv \"$f\" \"$f.rec\"\n"
 	if err := os.WriteFile(emitter, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	hook := filepath.Join(dir, "burnout.zsh")
+	hook := filepath.Join(dir, "burntout.zsh")
 	if err := os.WriteFile(hook, []byte(RenderZsh(emitter)), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestZshHookNeverLeaksCommandLine(t *testing.T) {
 			t.Fatalf("emitter argv = %q, want exactly %q", r.args, "emit shell")
 		}
 		if strings.Contains(r.raw, "CANARY") {
-			t.Fatalf("canary reached the emitter: args=%q env=%v", r.args, burnoutEnv(r))
+			t.Fatalf("canary reached the emitter: args=%q env=%v", r.args, burntoutEnv(r))
 		}
 		if r.env[EnvStart] == "" || r.env[EnvEnd] == "" || r.env[EnvExit] == "" {
 			t.Fatalf("missing timing/exit env: %v", r.env)
@@ -172,10 +172,10 @@ func TestZshHookNeverLeaksCommandLine(t *testing.T) {
 	}
 }
 
-func burnoutEnv(r record) map[string]string {
+func burntoutEnv(r record) map[string]string {
 	out := map[string]string{}
 	for k, v := range r.env {
-		if strings.HasPrefix(k, "BURNOUT_") {
+		if strings.HasPrefix(k, "BURNTOUT_") {
 			out[k] = v
 		}
 	}
@@ -218,7 +218,7 @@ func TestZshHookResolvesLikeZsh(t *testing.T) {
 		"env -u HOME git status >/dev/null 2>&1",
 	}
 	recs, out := runZsh(t, true, commands, len(commands))
-	if strings.Contains(out, "__burnout_preexec:") || strings.Contains(out, "__burnout_precmd:") {
+	if strings.Contains(out, "__burntout_preexec:") || strings.Contains(out, "__burntout_precmd:") {
 		t.Fatalf("hook printed an error: %s", out)
 	}
 	got := byArgv0(recs)
@@ -236,12 +236,12 @@ func TestZshHookResolvesLikeZsh(t *testing.T) {
 	}
 	for _, r := range gits {
 		if r.env[EnvSubcmd] != "status" {
-			t.Errorf("prefixed git lost its subcommand: %v", burnoutEnv(r))
+			t.Errorf("prefixed git lost its subcommand: %v", burntoutEnv(r))
 		}
 	}
 	for _, r := range recs {
 		if strings.Contains(r.raw, "CANARY") {
-			t.Fatalf("typed text reached the emitter: %v", burnoutEnv(r))
+			t.Fatalf("typed text reached the emitter: %v", burntoutEnv(r))
 		}
 	}
 }

@@ -18,14 +18,22 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/integrations/fileedit"
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/integrations/fileedit"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 )
 
 // Names of the service in each system.
 const (
-	Label    = "io.github.kshitijdhara.burnout-tracker" // launchd
-	UnitName = "burnout.service"                        // systemd
+	Label    = "io.github.kshitijdhara.burntout" // launchd
+	UnitName = "burntout.service"                // systemd
+)
+
+// The names the service had before the app was renamed to BurntOut, which
+// a Legacy manager removes.
+const (
+	LegacyLabel    = "io.github.kshitijdhara.burnout-tracker"
+	LegacyUnitName = "burnout.service"
+	legacyTaskName = "burnout-tracker-"
 )
 
 // ErrUnsupported is returned on platforms without a service (the BSDs).
@@ -71,7 +79,7 @@ func systemRoot() string {
 // Manager installs, removes and inspects the service for one user.
 type Manager struct {
 	GOOS string
-	Bin  string   // absolute path of the burnout binary
+	Bin  string   // absolute path of the BurntOut binary
 	Args []string // the daemon's arguments, e.g. daemon --service
 	// Env pins the daemon's locations to the ones the installing shell
 	// resolved, so the service and the CLI always agree.
@@ -84,6 +92,43 @@ type Manager struct {
 	Run    Runner
 	// Sleep waits between retries; nil means time.Sleep. Tests stub it.
 	Sleep func(time.Duration)
+	// legacy points the manager at the pre-rename service; see Legacy.
+	legacy bool
+}
+
+// Legacy returns m pointed at the service as it was named before the
+// rename (burnout-tracker), so Status and Uninstall find and remove it.
+func (m Manager) Legacy() Manager {
+	m.legacy = true
+	return m
+}
+
+func (m Manager) label() string {
+	if m.legacy {
+		return LegacyLabel
+	}
+	return Label
+}
+
+func (m Manager) unit() string {
+	if m.legacy {
+		return LegacyUnitName
+	}
+	return UnitName
+}
+
+func (m Manager) appDir() string {
+	if m.legacy {
+		return paths.LegacyAppName
+	}
+	return paths.AppName
+}
+
+func (m Manager) taskName() string {
+	if m.legacy {
+		return legacyTaskName + m.SID
+	}
+	return TaskName(m.SID)
 }
 
 // Status is what the system reports about the service.
@@ -254,7 +299,7 @@ func notLoaded(out string) bool {
 type launchd struct{}
 
 func (launchd) path(m Manager) string {
-	return filepath.Join(m.Home, "Library", "LaunchAgents", Label+".plist")
+	return filepath.Join(m.Home, "Library", "LaunchAgents", m.label()+".plist")
 }
 
 func (launchd) render(m Manager) ([]byte, error) { return RenderPlist(m.Bin, m.Args, m.Env, m.LogDir) }
@@ -327,13 +372,13 @@ func (l launchd) status(m Manager, st Status) (Status, error) {
 func (launchd) logHint(m Manager) string { return filepath.Join(m.LogDir, paths.CrashLogFile) }
 
 func (launchd) domain(m Manager) string   { return fmt.Sprintf("gui/%d", m.UID) }
-func (l launchd) target(m Manager) string { return l.domain(m) + "/" + Label }
+func (l launchd) target(m Manager) string { return l.domain(m) + "/" + m.label() }
 
 // systemd is the Linux backend: a unit in the user's systemd instance.
 type systemd struct{}
 
 func (systemd) path(m Manager) string {
-	return filepath.Join(m.Config, "systemd", "user", UnitName)
+	return filepath.Join(m.Config, "systemd", "user", m.unit())
 }
 
 func (systemd) render(m Manager) ([]byte, error) { return RenderUnit(m.Bin, m.Args, m.Env) }
@@ -343,19 +388,19 @@ func (systemd) prepare(Manager) error { return nil } // output goes to the journ
 func (systemd) start(m Manager, _ string) error {
 	for _, args := range [][]string{
 		{"--user", "daemon-reload"},
-		{"--user", "enable", UnitName},
+		{"--user", "enable", m.unit()},
 	} {
 		if err := m.run("systemctl", args...); err != nil {
 			return err
 		}
 	}
 	// A unit that hit its start limit refuses manual starts until reset.
-	_, _ = m.Run.Run("systemctl", "--user", "reset-failed", UnitName)
-	return m.run("systemctl", "--user", "restart", UnitName)
+	_, _ = m.Run.Run("systemctl", "--user", "reset-failed", m.unit())
+	return m.run("systemctl", "--user", "restart", m.unit())
 }
 
 func (systemd) stop(m Manager) error {
-	args := []string{"--user", "disable", "--now", UnitName}
+	args := []string{"--user", "disable", "--now", m.unit()}
 	out, err := m.Run.Run("systemctl", args...)
 	if err == nil || notLoaded(out) {
 		return nil
@@ -370,7 +415,7 @@ func (systemd) afterRemove(m Manager) { _, _ = m.Run.Run("systemctl", "--user", 
 var unitStates = []string{"active", "reloading", "inactive", "failed", "activating", "deactivating", "unknown"}
 
 func (systemd) status(m Manager, st Status) (Status, error) {
-	args := []string{"--user", "is-active", UnitName}
+	args := []string{"--user", "is-active", m.unit()}
 	out, err := m.Run.Run("systemctl", args...)
 	state := strings.TrimSpace(out)
 	if !slices.Contains(unitStates, state) {
@@ -383,7 +428,7 @@ func (systemd) status(m Manager, st Status) (Status, error) {
 	return st, nil
 }
 
-func (systemd) logHint(Manager) string { return "journalctl --user -u " + UnitName }
+func (systemd) logHint(m Manager) string { return "journalctl --user -u " + m.unit() }
 
 // taskScheduler is the Windows backend: a logon task for the current user,
 // which needs no admin rights. The XML it was imported from stays next to
@@ -392,14 +437,14 @@ func (systemd) logHint(Manager) string { return "journalctl --user -u " + UnitNa
 type taskScheduler struct{}
 
 func (taskScheduler) path(m Manager) string {
-	return filepath.Join(m.Config, paths.AppName, "service-task.xml")
+	return filepath.Join(m.Config, m.appDir(), "service-task.xml")
 }
 
 // render refuses folder overrides: a task's action has no environment, so
 // the daemon would use the default folders while the CLI uses others.
 func (taskScheduler) render(m Manager) ([]byte, error) {
 	if len(m.Env) > 0 {
-		return nil, fmt.Errorf("service: the logon task can't carry %s; unset it, or run `burnout daemon` in a terminal instead",
+		return nil, fmt.Errorf("service: the logon task can't carry %s; unset it, or run `burntout daemon` in a terminal instead",
 			strings.Join(sortedKeys(m.Env), ", "))
 	}
 	return RenderTask(m.Bin, m.Args, m.SID)
@@ -410,7 +455,7 @@ func (taskScheduler) render(m Manager) ([]byte, error) {
 func (taskScheduler) prepare(m Manager) error { return launchd{}.prepare(m) }
 
 func (taskScheduler) start(m Manager, path string) error {
-	name := TaskName(m.SID)
+	name := m.taskName()
 	if err := m.run("schtasks", "/Create", "/XML", path, "/TN", name, "/F"); err != nil {
 		return err
 	}
@@ -421,7 +466,7 @@ func (taskScheduler) start(m Manager, path string) error {
 }
 
 func (t taskScheduler) stop(m Manager) error {
-	name := TaskName(m.SID)
+	name := m.taskName()
 	if !t.exists(m) {
 		return nil
 	}
@@ -432,7 +477,7 @@ func (t taskScheduler) stop(m Manager) error {
 func (taskScheduler) afterRemove(Manager) {}
 
 func (taskScheduler) exists(m Manager) bool {
-	_, err := m.Run.Run("schtasks", "/Query", "/TN", TaskName(m.SID))
+	_, err := m.Run.Run("schtasks", "/Query", "/TN", m.taskName())
 	return err == nil
 }
 
@@ -450,7 +495,7 @@ func (t taskScheduler) status(m Manager, st Status) (Status, error) {
 	if st.Installed = t.exists(m); !st.Installed {
 		return st, nil
 	}
-	args := []string{"-NoProfile", "-NonInteractive", "-Command", fmt.Sprintf(taskStateScript, TaskName(m.SID))}
+	args := []string{"-NoProfile", "-NonInteractive", "-Command", fmt.Sprintf(taskStateScript, m.taskName())}
 	out, err := m.Run.Run("powershell", args...)
 	state := strings.TrimSpace(out)
 	if err != nil || !slices.Contains(taskStates, state) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 func TestDomainFromTitle(t *testing.T) {

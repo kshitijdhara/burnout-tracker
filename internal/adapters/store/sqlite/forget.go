@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
 )
 
 // Forget deletes everything recorded at or after since (privacy & security

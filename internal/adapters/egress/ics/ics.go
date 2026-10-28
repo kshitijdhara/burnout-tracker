@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Limits on one fetch.
@@ -27,7 +27,7 @@ const (
 	MaxBytes     = 20 << 20 // a busy calendar's feed is a few MB
 	Timeout      = 60 * time.Second
 	maxRedirects = 5
-	userAgent    = "burnout-tracker"
+	userAgent    = "burntout"
 )
 
 // ErrTooLarge means the feed is bigger than MaxBytes.

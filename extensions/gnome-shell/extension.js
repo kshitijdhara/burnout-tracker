@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// burnout bridge: serves window stacking, geometry, focus, monitor layout
-// and the pointer position to the local burnout agent on GNOME Wayland,
+// BurntOut bridge: serves window stacking, geometry, focus, monitor layout
+// and the pointer position to the local BurntOut agent on GNOME Wayland,
 // where no other process can read them (docs/adr/0010-gnome-wayland-bridge.md).
 //
 // The contract is schemas/v1/gnome-bridge.schema.json: newline-delimited
-// JSON over an owner-only Unix socket at $XDG_RUNTIME_DIR/burnout/
+// JSON over an owner-only Unix socket at $XDG_RUNTIME_DIR/burntout/
 // gnome-bridge.sock. Privacy & security §8.3 rules apply:
 //   - no session-bus name or exported object, ever;
 //   - a caller must run as this user (SO_PEERCRED) and present the token
-//     the agent wrote to $XDG_RUNTIME_DIR/burnout/gnome-bridge.token;
+//     the agent wrote to $XDG_RUNTIME_DIR/burntout/gnome-bridge.token;
 //   - replies carry only geometry, stacking, focus and the pointer, plus
 //     titles when the agent's hello asks for them (title classification
 //     on). Nothing is logged except errors, and never a title.
@@ -285,7 +285,7 @@ class Client {
             try {
                 reply = snapshot(this._titles);
             } catch (e) {
-                console.warn(`burnout-bridge: snapshot failed: ${e.message}`);
+                console.warn(`burntout-bridge: snapshot failed: ${e.message}`);
                 reply = {v: VERSION, op: 'error', error: 'snapshot failed'};
             }
             this._send(reply, false);
@@ -344,19 +344,19 @@ class Client {
     }
 }
 
-export default class BurnoutBridge extends Extension {
+export default class BurntoutBridge extends Extension {
     enable() {
         this.uid = new Gio.Credentials().get_unix_user();
         this.version = String(this.metadata.version ?? '');
         this.shellVersion = Config.PACKAGE_VERSION;
-        const dir = GLib.build_filenamev([GLib.get_user_runtime_dir(), 'burnout']);
+        const dir = GLib.build_filenamev([GLib.get_user_runtime_dir(), 'burntout']);
         this.tokenPath = GLib.build_filenamev([dir, TOKEN_NAME]);
         this._socketPath = GLib.build_filenamev([dir, SOCKET_NAME]);
         this._clients = new Set();
 
         GLib.mkdir_with_parents(dir, 0o700);
         if (!ownedPrivateDir(dir, this.uid)) {
-            console.warn(`burnout-bridge: ${dir} is not an owner-only directory; not listening`);
+            console.warn(`burntout-bridge: ${dir} is not an owner-only directory; not listening`);
             return;
         }
         this._removeStaleSocket();
@@ -380,7 +380,7 @@ export default class BurnoutBridge extends Extension {
             });
             this._service.start();
         } catch (e) {
-            console.warn(`burnout-bridge: cannot listen: ${e.message}`);
+            console.warn(`burntout-bridge: cannot listen: ${e.message}`);
             this._service?.close();
             this._service = null;
         }

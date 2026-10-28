@@ -1,4 +1,4 @@
-module github.com/kshitijdhara/burnout-tracker
+module github.com/kshitijdhara/burntout
 
 go 1.26.10
 

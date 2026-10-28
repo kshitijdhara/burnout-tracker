@@ -99,7 +99,7 @@ func TestDecodeAcceptsAtLimits(t *testing.T) {
 }
 
 func TestVersionErrorAdvice(t *testing.T) {
-	if msg := (&VersionError{Got: Version + 1}).Error(); !strings.Contains(msg, "update burnout") {
+	if msg := (&VersionError{Got: Version + 1}).Error(); !strings.Contains(msg, "update burntout") {
 		t.Errorf("newer extension: %q", msg)
 	}
 	if msg := (&VersionError{Got: MinVersion - 1}).Error(); !strings.Contains(msg, "log out") {

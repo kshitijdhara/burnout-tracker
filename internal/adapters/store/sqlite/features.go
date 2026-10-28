@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/strain"
 )
 
 // DataDays returns the logical days in [from, to] with anything recorded,

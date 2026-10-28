@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Identity is what persistence knows about a window: a keyed hash, the app

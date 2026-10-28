@@ -28,13 +28,13 @@ func (e Extension) Describe(answering bool) (ok bool, detail string) {
 	case answering:
 		return true, "enabled and answering"
 	case !e.Installed:
-		return false, "the extension is not installed; it ships in the burnout .deb and .rpm (log out and back in after installing, then run `" + EnableCommand + "`)"
+		return false, "the extension is not installed; it ships in the BurntOut .deb and .rpm (log out and back in after installing, then run `" + EnableCommand + "`)"
 	case e.State == stateError:
 		return false, "the extension failed to load: " + strings.TrimSpace(e.Error)
 	case e.State == stateOutOfDate:
-		return false, "the extension does not support this GNOME Shell version; update burnout"
+		return false, "the extension does not support this GNOME Shell version; update burntout"
 	case e.State == stateActive:
-		return false, "the extension is enabled but not answering; check `journalctl --user -b -g burnout-bridge`"
+		return false, "the extension is enabled but not answering; check `journalctl --user -b -g burntout-bridge`"
 	default:
 		return false, "the extension is installed but not enabled; run `" + EnableCommand + "`"
 	}

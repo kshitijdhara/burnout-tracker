@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
 )
 
 // SaveCheckins stores completed check-ins together: a weekly check-in is

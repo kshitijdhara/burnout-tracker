@@ -27,13 +27,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
 // FileName is the database file inside the data directory.
-const FileName = "burnout.db"
+const FileName = "burntout.db"
 
 // ErrSchemaTooNew means the database was written by a newer version of the
 // app. Opening it could lose data, so the store refuses.
@@ -104,7 +104,7 @@ func Open(ctx context.Context, dir string) (*Store, error) {
 
 // OpenReadOnly opens an existing database for reading only. It never
 // creates files, never migrates and never sets pragmas that write, so it is
-// safe to run while the daemon writes (for example from `burnout status`
+// safe to run while the daemon writes (for example from `burntout status`
 // after a binary upgrade). It returns ErrNoDatabase if there is no database
 // and ErrSchemaMismatch if the schema version differs from this build's.
 func OpenReadOnly(ctx context.Context, dir string) (*Store, error) {
@@ -291,7 +291,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	if hasData {
-		backup := filepath.Join(s.dir, backupDir, fmt.Sprintf("burnout-premigrate-v%d-%s.db", current, time.Now().UTC().Format("20060102T150405")))
+		backup := filepath.Join(s.dir, backupDir, fmt.Sprintf("burntout-premigrate-v%d-%s.db", current, time.Now().UTC().Format("20060102T150405")))
 		if err := s.vacuumInto(ctx, backup); err != nil {
 			return fmt.Errorf("sqlite: pre-migration backup: %w", err)
 		}

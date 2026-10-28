@@ -21,12 +21,30 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Service is the keyring service name.
-const Service = "burnout"
+const Service = "burntout"
+
+// LegacyService is the keyring service name from before the rename to
+// BurntOut.
+const LegacyService = "burnout"
+
+// DeleteLegacy removes the named secrets from LegacyService in the OS
+// keyring, for `uninstall --purge`. Missing secrets, or no OS keyring, are
+// not errors.
+func DeleteLegacy(names ...string) error {
+	var errs []error
+	for _, name := range names {
+		err := keyring.Delete(LegacyService, name)
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) && probeKeyring(probeTimeout) {
+			errs = append(errs, fmt.Errorf("keystore: delete old %s: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
 
 // SecretSize is the size of generated secrets in bytes.
 const SecretSize = 32
@@ -252,11 +270,31 @@ type osKeyring struct{}
 func (osKeyring) get(name string) (string, error) {
 	v, err := keyring.Get(Service, name)
 	if errors.Is(err, keyring.ErrNotFound) {
-		return "", errNotFound
+		return adoptLegacy(name)
 	}
 	if err != nil {
 		return "", fmt.Errorf("keystore: get %s: %w", name, err)
 	}
+	return v, nil
+}
+
+// adoptLegacy moves name from LegacyService on first use after the rename
+// to BurntOut, so a key is never made anew while the old one exists (a new
+// HMAC key would change every stored identity). It copies first and
+// deletes the old entry only once the copy is stored; a leftover old entry
+// is harmless and `uninstall --purge` removes it.
+func adoptLegacy(name string) (string, error) {
+	v, err := keyring.Get(LegacyService, name)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", errNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("keystore: get %s from before the rename: %w", name, err)
+	}
+	if err := keyring.Set(Service, name, v); err != nil {
+		return "", fmt.Errorf("keystore: move %s from before the rename: %w", name, err)
+	}
+	_ = keyring.Delete(LegacyService, name)
 	return v, nil
 }
 

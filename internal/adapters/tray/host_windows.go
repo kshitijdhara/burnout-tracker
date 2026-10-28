@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/assets"
+	"github.com/kshitijdhara/burntout/assets"
 )
 
 // noHost: every Windows desktop has a notification area. Whether the icon

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/features"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/strain"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/features"
+	"github.com/kshitijdhara/burntout/internal/domain/strain"
 )
 
 const today = "2026-10-26" // reviews 19–25 Oct, against 12–18 Oct

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs burnout for the current user on macOS or Linux (ADR-0005).
+# Installs BurntOut for the current user on macOS or Linux (ADR-0005).
 #
 # Please read this script before you run it. It:
 #   1. picks the release asset for this OS and CPU;
@@ -10,25 +10,25 @@
 #   4. installs the binary to ~/.local/bin (or --dir).
 #
 # It records nothing and starts nothing. Collection starts only once you
-# have run `burnout setup` (consent) and `burnout service install`
+# have run `burntout setup` (consent) and `burntout service install`
 # yourself; this script just prints those steps. There is no option to
 # skip either (privacy & security §5.2).
 #
 # usage: install.sh [--version vX.Y.Z] [--dir DIR]
-#   BURNOUT_VERSION and BURNOUT_INSTALL_DIR set the same things.
+#   BURNTOUT_VERSION and BURNTOUT_INSTALL_DIR set the same things.
 #
 # To verify a download by hand instead, see packaging/README.md.
 set -eu
 
-REPO=kshitijdhara/burnout-tracker
+REPO=kshitijdhara/burntout
 
 # Pinned release keys. Keep in step with install.ps1 and
 # internal/release/keys.go (a test checks).
-BURNOUT_KEY_CURRENT='-----BEGIN PUBLIC KEY-----
+BURNTOUT_KEY_CURRENT='-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtWf8TGinleBqdY/75gHXSfsVXUuK
 PuYDXdvc3bdwWiTeyPyeL2NDltsJmDXSb1gMESB8mpfKXWEn/dJEyn1LKQ==
 -----END PUBLIC KEY-----'
-BURNOUT_KEY_NEXT='-----BEGIN PUBLIC KEY-----
+BURNTOUT_KEY_NEXT='-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWo5NAi/5+LFyDfLNDJgXviM2feAz
 ovmH7aazyDKIhfdZqXAWi1tg88tGXgFk7tbfwAwZ/PKUUYi4RPP8Pfrgow==
 -----END PUBLIC KEY-----'
@@ -99,7 +99,7 @@ verify_with_key() {
 # verify_signature DATA SIG succeeds if a pinned key signed DATA.
 verify_signature() {
 	need openssl
-	for key in "$BURNOUT_KEY_CURRENT" "$BURNOUT_KEY_NEXT"; do
+	for key in "$BURNTOUT_KEY_CURRENT" "$BURNTOUT_KEY_NEXT"; do
 		if verify_with_key "$key" "$1" "$2"; then
 			return 0
 		fi
@@ -139,8 +139,8 @@ verify_checksum() {
 }
 
 main() {
-	version=${BURNOUT_VERSION:-}
-	dir=${BURNOUT_INSTALL_DIR:-$HOME/.local/bin}
+	version=${BURNTOUT_VERSION:-}
+	dir=${BURNTOUT_INSTALL_DIR:-$HOME/.local/bin}
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--version)
@@ -168,13 +168,13 @@ main() {
 
 	[ -n "$version" ] || version=$(latest_version)
 	case $version in v*) ;; *) version=v$version ;; esac
-	asset="burnout_${version#v}_$(target).tar.gz"
+	asset="burntout_${version#v}_$(target).tar.gz"
 	base="https://github.com/$REPO/releases/download/$version"
 
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 
-	say "Downloading burnout $version"
+	say "Downloading BurntOut $version"
 	fetch "$base/checksums.txt" "$tmp/checksums.txt"
 	fetch "$base/checksums.txt.sig" "$tmp/checksums.txt.sig"
 	verify_signature "$tmp/checksums.txt" "$tmp/checksums.txt.sig" || exit 1
@@ -187,19 +187,19 @@ main() {
 	say "Checksum OK ($asset)"
 
 	mkdir -p "$tmp/x"
-	tar -xzf "$tmp/$asset" -C "$tmp/x" burnout
+	tar -xzf "$tmp/$asset" -C "$tmp/x" burntout
 	mkdir -p "$dir"
-	# Copy next to the target, then rename: a running burnout keeps its
+	# Copy next to the target, then rename: a running BurntOut keeps its
 	# old file, and a half-copied binary is never on the PATH.
-	cp "$tmp/x/burnout" "$dir/.burnout.new"
-	chmod 0755 "$dir/.burnout.new"
-	mv -f "$dir/.burnout.new" "$dir/burnout"
-	say "Installed $dir/burnout"
+	cp "$tmp/x/burntout" "$dir/.burntout.new"
+	chmod 0755 "$dir/.burntout.new"
+	mv -f "$dir/.burntout.new" "$dir/burntout"
+	say "Installed $dir/burntout"
 
 	case ":$PATH:" in
-	*":$dir:"*) cmd=burnout ;;
+	*":$dir:"*) cmd=burntout ;;
 	*)
-		cmd="$dir/burnout"
+		cmd="$dir/burntout"
 		say ""
 		say "$dir is not on your PATH. Add it to your shell's startup file, for example:"
 		say "  export PATH=\"$dir:\$PATH\""
@@ -212,8 +212,8 @@ main() {
 	say "  $cmd service install   run in the background from login"
 }
 
-# CI sources this file with BURNOUT_INSTALL_LIB=1 to test the verifiers
+# CI sources this file with BURNTOUT_INSTALL_LIB=1 to test the verifiers
 # (packaging/test-install.sh, the release workflow).
-if [ "${BURNOUT_INSTALL_LIB:-}" != 1 ]; then
+if [ "${BURNTOUT_INSTALL_LIB:-}" != 1 ]; then
 	main "$@"
 fi

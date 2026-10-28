@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 var base = time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
@@ -246,7 +246,7 @@ func TestBackupRotationKeepsThree(t *testing.T) {
 		}
 	}
 	// Same day again is a no-op: restarts never re-copy the database.
-	today := filepath.Join(s.dir, backupDir, "burnout-20261025.db")
+	today := filepath.Join(s.dir, backupDir, "burntout-20261025.db")
 	before, err := os.Stat(today)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func TestBackupRotationKeepsThree(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	want := []string{"burnout-20261023.db", "burnout-20261024.db", "burnout-20261025.db"}
+	want := []string{"burntout-20261023.db", "burntout-20261024.db", "burntout-20261025.db"}
 	if len(names) != len(want) {
 		t.Fatalf("backups = %v, want %v", names, want)
 	}
@@ -351,8 +351,8 @@ func TestPremigrateCopiesExpire(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	old := "burnout-premigrate-v1-20261001T120000.db"
-	recent := "burnout-premigrate-v1-20261020T120000.db"
+	old := "burntout-premigrate-v1-20261001T120000.db"
+	recent := "burntout-premigrate-v1-20261020T120000.db"
 	for _, n := range []string{old, recent} {
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)

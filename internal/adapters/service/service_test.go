@@ -59,8 +59,8 @@ func TestLaunchdInstallUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, s := range []string{
-		"<string>/Users/me/.local/bin/burnout</string>\n\t\t<string>daemon</string>\n\t\t<string>--service</string>",
-		"<key>BURNOUT_DATA_DIR</key>\n\t\t<string>/Users/me/data</string>",
+		"<string>/Users/me/.local/bin/burntout</string>\n\t\t<string>daemon</string>\n\t\t<string>--service</string>",
+		"<key>BURNTOUT_DATA_DIR</key>\n\t\t<string>/Users/me/data</string>",
 	} {
 		if !strings.Contains(string(def), s) {
 			t.Fatalf("plist lacks %q:\n%s", s, def)
@@ -227,8 +227,8 @@ func TestSystemdInstallUninstall(t *testing.T) {
 	path, _ := m.Path()
 	def, _ := os.ReadFile(path) //nolint:gosec // test file
 	for _, s := range []string{
-		`ExecStart="/Users/me/.local/bin/burnout" daemon --service`,
-		`Environment="BURNOUT_DATA_DIR=/Users/me/data"`,
+		`ExecStart="/Users/me/.local/bin/burntout" daemon --service`,
+		`Environment="BURNTOUT_DATA_DIR=/Users/me/data"`,
 		"StartLimitIntervalSec=0", "Restart=on-failure", "RestartSec=30",
 		"Type=notify", "WatchdogSec=60",
 	} {
@@ -248,7 +248,7 @@ func TestSystemdInstallUninstall(t *testing.T) {
 func TestSystemdUninstallWhenNotInstalled(t *testing.T) {
 	r := &fakeRunner{
 		fail: map[string]bool{scDisable: true},
-		out:  map[string]string{scDisable: "Failed to disable unit: Unit file burnout.service does not exist."},
+		out:  map[string]string{scDisable: "Failed to disable unit: Unit file burntout.service does not exist."},
 	}
 	if err := manager(t, "linux", r).Uninstall(); err != nil {
 		t.Fatal(err)
@@ -285,8 +285,8 @@ func TestLogHint(t *testing.T) {
 }
 
 func TestPlistIsValidAndEscaped(t *testing.T) {
-	def, err := RenderPlist("/Applications/R&D <tools>/burnout", testArgs,
-		map[string]string{"BURNOUT_DATA_DIR": "/Users/me/A&B"}, "/Users/me/Library/Application Support/burnout/logs")
+	def, err := RenderPlist("/Applications/R&D <tools>/burntout", testArgs,
+		map[string]string{"BURNTOUT_DATA_DIR": "/Users/me/A&B"}, "/Users/me/Library/Application Support/burntout/logs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,11 +296,11 @@ func TestPlistIsValidAndEscaped(t *testing.T) {
 	}
 	s := string(def)
 	for _, want := range []string{
-		"<string>/Applications/R&amp;D &lt;tools&gt;/burnout</string>",
+		"<string>/Applications/R&amp;D &lt;tools&gt;/burntout</string>",
 		"<string>/Users/me/A&amp;B</string>",
 		"<key>KeepAlive</key>", "<key>SuccessfulExit</key>", "<false/>",
 		"<string>Aqua</string>",
-		"<string>/Users/me/Library/Application Support/burnout/logs/stderr.log</string>",
+		"<string>/Users/me/Library/Application Support/burntout/logs/stderr.log</string>",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("plist lacks %q", want)
@@ -326,14 +326,14 @@ func TestUnitVerifies(t *testing.T) {
 		t.Skip("no systemd-analyze")
 	}
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "My Tools", "burnout")
+	bin := filepath.Join(dir, "My Tools", "burntout")
 	if err := os.MkdirAll(filepath.Dir(bin), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o700); err != nil { //nolint:gosec // a test executable
 		t.Fatal(err)
 	}
-	def, err := RenderUnit(bin, testArgs, map[string]string{"BURNOUT_DATA_DIR": "/home/me/my data"})
+	def, err := RenderUnit(bin, testArgs, map[string]string{"BURNTOUT_DATA_DIR": "/home/me/my data"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,26 +347,29 @@ func TestUnitVerifies(t *testing.T) {
 }
 
 func TestRejectsUnsafeValues(t *testing.T) {
-	env := func(v string) map[string]string { return map[string]string{"BURNOUT_DATA_DIR": v} }
+	env := func(v string) map[string]string { return map[string]string{"BURNTOUT_DATA_DIR": v} }
 	for name, f := range map[string]func() error{
-		"plist relative bin":   func() error { _, err := RenderPlist("relative/burnout", testArgs, nil, "/tmp/logs"); return err },
-		"plist newline in bin": func() error { _, err := RenderPlist("/tmp/a\nb/burnout", testArgs, nil, "/tmp/logs"); return err },
-		"plist relative logs":  func() error { _, err := RenderPlist("/opt/burnout", testArgs, nil, "logs"); return err },
-		"plist control in env": func() error { _, err := RenderPlist("/opt/burnout", testArgs, env("/a\x00b"), "/tmp/logs"); return err },
-		"unit space in arg":    func() error { _, err := RenderUnit("/opt/burnout", []string{"daemon", "a b"}, nil); return err },
-		"unit $ in env":        func() error { _, err := RenderUnit("/opt/burnout", testArgs, env("/home/$USER")); return err },
-		"unit newline in env":  func() error { _, err := RenderUnit("/opt/burnout", testArgs, env("/a\nExecStart=/x")); return err },
+		"plist relative bin":   func() error { _, err := RenderPlist("relative/burntout", testArgs, nil, "/tmp/logs"); return err },
+		"plist newline in bin": func() error { _, err := RenderPlist("/tmp/a\nb/burntout", testArgs, nil, "/tmp/logs"); return err },
+		"plist relative logs":  func() error { _, err := RenderPlist("/opt/burntout", testArgs, nil, "logs"); return err },
+		"plist control in env": func() error {
+			_, err := RenderPlist("/opt/burntout", testArgs, env("/a\x00b"), "/tmp/logs")
+			return err
+		},
+		"unit space in arg":   func() error { _, err := RenderUnit("/opt/burntout", []string{"daemon", "a b"}, nil); return err },
+		"unit $ in env":       func() error { _, err := RenderUnit("/opt/burntout", testArgs, env("/home/$USER")); return err },
+		"unit newline in env": func() error { _, err := RenderUnit("/opt/burntout", testArgs, env("/a\nExecStart=/x")); return err },
 	} {
 		if f() == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	for _, bin := range []string{`/opt/a"b/burnout`, "/opt/100%/burnout", "/opt/$HOME/burnout", `/opt/a\b/burnout`, "/opt/it's/burnout", "/opt/a`b`/burnout"} {
+	for _, bin := range []string{`/opt/a"b/burntout`, "/opt/100%/burntout", "/opt/$HOME/burntout", `/opt/a\b/burntout`, "/opt/it's/burntout", "/opt/a`b`/burntout"} {
 		if _, err := RenderUnit(bin, testArgs, nil); err == nil {
 			t.Errorf("unit accepted %q", bin)
 		}
 	}
-	if _, err := RenderUnit("/home/me/My Tools/burnout", testArgs, env("/home/me/my data")); err != nil {
+	if _, err := RenderUnit("/home/me/My Tools/burntout", testArgs, env("/home/me/my data")); err != nil {
 		t.Errorf("unit rejected a path with a space: %v", err)
 	}
 }

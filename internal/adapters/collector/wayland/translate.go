@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/collector/geometry"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/adapters/collector/geometry"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
 )
 
 // Options configures the collector. Titles default to off, matching the
@@ -122,7 +122,7 @@ func capabilities(opts Options, idle bool) ports.Capabilities {
 		Idle:    idle,
 		Titles:  opts.Titles,
 		Limitations: []string{
-			"windows are read by the burnout GNOME Shell extension, which GNOME pauses while the screen is locked",
+			"windows are read by the BurntOut GNOME Shell extension, which GNOME pauses while the screen is locked",
 			"video and call detection not implemented (presence relies on idle time)",
 			"input counts not implemented on Linux (idle-time deltas stand in)",
 		},

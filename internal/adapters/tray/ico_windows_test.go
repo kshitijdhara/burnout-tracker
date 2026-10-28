@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/kshitijdhara/burnout-tracker/assets"
+	"github.com/kshitijdhara/burntout/assets"
 )
 
 func TestICO(t *testing.T) {

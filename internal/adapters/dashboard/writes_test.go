@@ -11,9 +11,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/annotation"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/boundary"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/checkin"
+	"github.com/kshitijdhara/burntout/internal/domain/annotation"
+	"github.com/kshitijdhara/burntout/internal/domain/boundary"
+	"github.com/kshitijdhara/burntout/internal/domain/checkin"
 )
 
 // memControl is a Control in memory, for tests and the preview.

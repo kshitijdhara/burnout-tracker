@@ -1,5 +1,5 @@
-// Package update finds, verifies and installs burnout releases (ADR-0005,
-// "burnout update"). Checking for one is one of the three opt-in network
+// Package update finds, verifies and installs BurntOut releases (ADR-0005,
+// "burntout update"). Checking for one is one of the three opt-in network
 // calls (privacy & security §6): HTTPS GETs of this repository's GitHub
 // Releases API and of release assets, with certificate checks, no cookies,
 // no token and a generic User-Agent. Every request, redirects included,
@@ -30,11 +30,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/release"
+	"github.com/kshitijdhara/burntout/internal/release"
 )
 
 // Repo is the GitHub repository releases come from.
-const Repo = "kshitijdhara/burnout-tracker"
+const Repo = "kshitijdhara/burntout"
 
 // hosts are the only hosts the updater connects to. github.com redirects
 // asset downloads to a githubusercontent.com CDN host: objects… was used
@@ -58,7 +58,7 @@ const (
 	maxSigBytes   = 4 << 10
 	MaxAssetBytes = 256 << 20 // the binary is ~20 MB; the dmg a little more
 	maxRedirects  = 5
-	userAgent     = "burnout-tracker"
+	userAgent     = "burntout"
 	betaPageSize  = 30
 )
 
@@ -278,7 +278,7 @@ func (u *Updater) Download(ctx context.Context, r Release, sums Sums, name, dir 
 		return "", err
 	}
 	defer func() { _ = body.Close() }()
-	f, err := os.CreateTemp(dir, ".burnout-download-*")
+	f, err := os.CreateTemp(dir, ".burntout-download-*")
 	if err != nil {
 		return "", err
 	}

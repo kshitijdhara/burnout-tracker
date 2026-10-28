@@ -6,7 +6,7 @@ package geometry
 import (
 	"slices"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // VisibleFractions returns, for each window, the fraction of its area that

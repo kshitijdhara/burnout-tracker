@@ -1,6 +1,6 @@
 package attention
 
-import "github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+import "github.com/kshitijdhara/burntout/internal/domain/model"
 
 // Held is a tick result with the caller's data for that tick, released by a
 // Resolver once the tick's presence is final.

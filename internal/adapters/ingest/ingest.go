@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/wire"
+	"github.com/kshitijdhara/burntout/internal/wire"
 )
 
 // ErrAlreadyRunning means another daemon is already listening on the address.

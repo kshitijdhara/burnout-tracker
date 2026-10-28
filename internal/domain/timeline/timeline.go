@@ -7,8 +7,8 @@ package timeline
 import (
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/attention"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Agent states.

@@ -3,7 +3,7 @@
 # Windows PowerShell 5.1 (.NET Framework) and PowerShell 7.
 $ErrorActionPreference = 'Stop'
 
-$env:BURNOUT_INSTALL_LIB = '1'
+$env:BURNTOUT_INSTALL_LIB = '1'
 . (Join-Path $PSScriptRoot 'install.ps1')
 Set-StrictMode -Off # install.ps1 sets it; the checks below don't need it
 
@@ -22,15 +22,15 @@ function Expect([string]$Label, [bool]$Want, [scriptblock]$Check) {
 
 Write-Host "# PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
 
-$tampered = Join-Path ([IO.Path]::GetTempPath()) ("burnout-tampered-" + [Guid]::NewGuid())
+$tampered = Join-Path ([IO.Path]::GetTempPath()) ("burntout-tampered-" + [Guid]::NewGuid())
 [IO.File]::WriteAllBytes($tampered, [IO.File]::ReadAllBytes($sums) + [byte]0x0A)
 try {
     Expect 'fixture key, fixture signature' $true { Test-SignatureWithKey $fixture $sums $sig }
     Expect 'tampered checksums.txt' $false { Test-SignatureWithKey $fixture $tampered $sig }
-    Expect 'wrong key' $false { Test-SignatureWithKey $BurnoutKeys[0] $sums $sig }
+    Expect 'wrong key' $false { Test-SignatureWithKey $BurntoutKeys[0] $sums $sig }
     Expect 'unpinned key' $false { Test-ReleaseSignature $sums $sig }
     Expect 'pinned keys parse' $true {
-        foreach ($k in $BurnoutKeys) { [void](ConvertTo-EccPublicBlob $k) }; $true
+        foreach ($k in $BurntoutKeys) { [void](ConvertTo-EccPublicBlob $k) }; $true
     }
 
     Expect 'matching hash' $true { Test-AssetChecksum $sums $asset 'asset.bin' }
@@ -53,24 +53,24 @@ Expect 'DER r too long' $false {
     ConvertFrom-DerSignature ([byte[]](@(0x30, 39, 0x02, 35) + @(1) * 35 + @(0x02, 0)))
 }
 
-# End to end: Install-Burnout against testdata/release, a fixture release
+# End to end: Install-Burntout against testdata/release, a fixture release
 # signed by the fixture key, with downloads served from disk. CI only,
 # because it adds the install folder to the user PATH.
 if ($env:CI) {
     function Invoke-Download([string]$Url, [string]$OutFile) {
         Copy-Item -LiteralPath (Join-Path $td "release\$(Split-Path -Leaf $Url)") -Destination $OutFile
     }
-    $root = Join-Path ([IO.Path]::GetTempPath()) ("burnout-e2e-" + [Guid]::NewGuid())
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("burntout-e2e-" + [Guid]::NewGuid())
     try {
         $pinned = Join-Path $root 'pinned'
-        Expect 'install with the pinned keys' $false { Install-Burnout 'v0.0.0' $pinned; $true }
-        Expect 'nothing installed after a rejected signature' $false { Test-Path (Join-Path $pinned 'burnout.exe') }
+        Expect 'install with the pinned keys' $false { Install-Burntout 'v0.0.0' $pinned; $true }
+        Expect 'nothing installed after a rejected signature' $false { Test-Path (Join-Path $pinned 'burntout.exe') }
 
-        $BurnoutKeys = @($fixture)
+        $BurntoutKeys = @($fixture)
         $dir = Join-Path $root 'bin'
-        Expect 'install with the fixture key' $true { Install-Burnout 'v0.0.0' $dir; $true }
-        Expect 'burnout.exe installed' $true { Test-Path (Join-Path $dir 'burnout.exe') }
-        Expect 'reinstall over an existing burnout.exe' $true { Install-Burnout 'v0.0.0' $dir; $true }
+        Expect 'install with the fixture key' $true { Install-Burntout 'v0.0.0' $dir; $true }
+        Expect 'burntout.exe installed' $true { Test-Path (Join-Path $dir 'burntout.exe') }
+        Expect 'reinstall over an existing burntout.exe' $true { Install-Burntout 'v0.0.0' $dir; $true }
     } finally {
         Remove-Item -Recurse -Force -LiteralPath $root -ErrorAction SilentlyContinue
     }

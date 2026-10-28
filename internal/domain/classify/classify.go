@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Rules classifies app identifiers. The zero value is not usable; call New.

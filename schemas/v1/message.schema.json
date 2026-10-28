@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/kshitijdhara/burnout-tracker/schemas/v1/message.schema.json",
+  "$id": "https://github.com/kshitijdhara/burntout/schemas/v1/message.schema.json",
   "title": "Hook-to-daemon message, version 1",
   "description": "One message per connection on the daemon's socket or pipe, at most 4096 bytes. Unknown fields are ignored. Kept in step with internal/wire by TestSchemaMatchesValidation.",
   "type": "object",

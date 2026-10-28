@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/adapters/paths"
+	"github.com/kshitijdhara/burntout/internal/adapters/paths"
 )
 
 // systemdReserved are the characters systemd's unit quoting, specifiers and
@@ -107,7 +107,7 @@ func RenderUnit(bin string, args []string, env map[string]string) ([]byte, error
 		envLines.WriteString(`Environment="` + k + "=" + env[k] + "\"\n")
 	}
 	return []byte(`[Unit]
-Description=burnout-tracker daemon (local only; nothing leaves this device)
+Description=BurntOut daemon (local only; nothing leaves this device)
 StartLimitIntervalSec=0
 
 [Service]
@@ -157,7 +157,7 @@ func RenderTask(bin string, args []string, user string) ([]byte, error) {
 	def := `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>burnout-tracker daemon (local only; nothing leaves this device)</Description>
+    <Description>BurntOut daemon (local only; nothing leaves this device)</Description>
     <URI>\` + TaskName(user) + `</URI>
   </RegistrationInfo>
   <Triggers>
@@ -216,7 +216,7 @@ func RenderTask(bin string, args []string, user string) ([]byte, error) {
 
 // TaskName is the scheduled task's name for the user with this SID. Task
 // names are machine-wide, so each user gets their own.
-func TaskName(sid string) string { return "burnout-tracker-" + sid }
+func TaskName(sid string) string { return "burntout-" + sid }
 
 // winAbs reports a Windows absolute path, C:\… or \\server\share\…, on any
 // OS, so the renderer is tested everywhere.

@@ -16,12 +16,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/attention"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/classify"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/ports"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/timeline"
+	"github.com/kshitijdhara/burntout/internal/domain/attention"
+	"github.com/kshitijdhara/burntout/internal/domain/classify"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/ports"
+	"github.com/kshitijdhara/burntout/internal/domain/schedule"
+	"github.com/kshitijdhara/burntout/internal/domain/timeline"
 )
 
 // Sink persists what the daemon produces. The SQLite store implements it.

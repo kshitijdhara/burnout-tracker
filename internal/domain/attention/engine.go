@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/model"
+	"github.com/kshitijdhara/burntout/internal/domain/model"
 )
 
 // Presence reasons, recorded on presence intervals.

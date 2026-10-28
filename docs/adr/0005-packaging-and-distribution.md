@@ -4,7 +4,7 @@
 **Date:** 2026-10-20
 **Deciders:** Project maintainers
 
-> **Update 2026-10-22 (Phase 0):** `burnout service install|uninstall|status`
+> **Update 2026-10-22 (Phase 0):** `burntout service install|uninstall|status`
 > exists for macOS (launchd) and Linux (systemd `--user`). The binary
 > renders the definitions itself, so there are no templates in `packaging/`.
 > The service is per user and pins the folders the installing shell
@@ -21,20 +21,20 @@
 > after the protected job has signed; the installers print the service
 > step instead of running it; the MSI is not built yet.
 
-> **Update 2026-10-27 (Windows service):** `burnout service
+> **Update 2026-10-27 (Windows service):** `burntout service
 > install|uninstall|status` registers a per-user logon task with
 > `schtasks /Create /XML`, which needs no admin rights; the binary renders
 > the XML. Only the user runs it, never an installer (AC-2), so the "MSI
 > registers the logon task" note in the table below no longer holds. A
 > task's action has no environment, so install refuses while a folder
-> override such as `BURNOUT_DATA_DIR` is set, rather than pin it. Task
+> override such as `BURNTOUT_DATA_DIR` is set, rather than pin it. Task
 > Scheduler keeps no output: the daemon sends Go's crash output to
 > `stderr.log` itself and closes the console window it is given at logon.
 
-> **Update 2026-10-27 (`burnout update`):** `internal/adapters/egress/update`
-> and `cmd/burnout/update.go` implement item 5. Decisions:
+> **Update 2026-10-27 (`burntout update`):** `internal/adapters/egress/update`
+> and `cmd/burntout/update.go` implement item 5. Decisions:
 > - **Install-type detection**, after resolving symlinks (a
->   `~/.local/bin/burnout` link into `Burnout.app` is the app): a path inside
+>   `~/.local/bin/burntout` link into `BurntOut.app` is the app): a path inside
 >   `*.app/Contents/MacOS/` is the macOS app; on Linux a path under `/usr`
 >   (not `/usr/local`), `/bin` or `/sbin` is a package; on Windows a path
 >   under Program Files is a package. Anything else is a user-prefix install
@@ -44,10 +44,10 @@
 >   needs elevation itself. A Linux package download is the `.deb`, unless
 >   the system has `rpm` and no `dpkg`; Program Files gets the `.zip`.
 > - **Windows** swaps immediately rather than staging a replace for the
->   next start: the running `burnout.exe` is renamed to `burnout.exe.old`
+>   next start: the running `burntout.exe` is renamed to `burntout.exe.old`
 >   and the new one moved in (renamed back on failure), as `install.ps1`
 >   does. On Unix the new binary is renamed over the old one after the old
->   one is hard-linked (or copied) to `burnout.old`.
+>   one is hard-linked (or copied) to `burntout.old`.
 > - **Development builds** (version `dev`) can't be compared, so `update`
 >   refuses them without `--allow-downgrade`. `--to` an older version also
 >   needs `--allow-downgrade`.
@@ -88,7 +88,7 @@ and publishes it to **GitHub Releases**. No external package registries.
 | Linux | `.deb`, `.rpm` (nfpm), `.tar.gz` (amd64/arm64) | Packages include the systemd user unit and install the GNOME Shell extension + KWin script |
 | Windows | `.msi` (WiX) and `.zip` (amd64/arm64) | Unsigned by default; SignPath's free OSS signing if accepted. MSI registers the logon task |
 | All | `checksums.txt` + `checksums.txt.sig` (pinned release key), cosign keyless signature, GitHub artifact attestations (SLSA provenance), SBOM | See "Release signing" |
-| Optional | `burnout-classify` sidecar per OS (ONNX Runtime bundled) | Separate asset; see ADR-0006 |
+| Optional | `burntout-classify` sidecar per OS (ONNX Runtime bundled) | Separate asset; see ADR-0006 |
 
 **Supported platforms:**
 - **Windows 11.** Windows 10 is best-effort; it has been out of support since
@@ -114,7 +114,7 @@ keyless signing, and GitHub artifact attestations.
 `checksums.txt` is signed with a **pinned ECDSA P-256 release key**.
 
 - **Pinned public key.** It is embedded in `install.sh`, `install.ps1` and
-  the `burnout` binary. Two keys are embedded, *current* and *next*, so the
+  the `burntout` binary. Two keys are embedded, *current* and *next*, so the
   key can be rotated without breaking existing installs.
 - **Verification uses tools users already have.** macOS and Linux use
   `openssl dgst -sha256 -verify` (works with OpenSSL and the LibreSSL that
@@ -134,8 +134,8 @@ keyless signing, and GitHub artifact attestations.
   2. downloads the matching asset plus `checksums.txt` and its signature;
   3. **verifies the signature against the pinned key**, then the checksum;
   4. installs to a **user-owned prefix** (`~/.local/bin`,
-     `%LOCALAPPDATA%\Programs\burnout`);
-  5. prints `burnout setup` and `burnout service install` as next steps.
+     `%LOCALAPPDATA%\Programs\burntout`);
+  5. prints `burntout setup` and `burntout service install` as next steps.
      It runs neither: collection needs the user's interactive consent
      (privacy & security §5.2), and there is no flag to skip it.
 
@@ -146,18 +146,18 @@ keyless signing, and GitHub artifact attestations.
 
 ### What the app does instead of a package manager
 
-- **`burnout service install|uninstall`** sets up the launchd LaunchAgent,
+- **`burntout service install|uninstall`** sets up the launchd LaunchAgent,
   the systemd `--user` unit or the Windows logon task. It's idempotent and
   per user, so the user runs it after installing a package (see the
   update at the top).
-- **`burnout install-hooks`** installs the shell and Claude Code hooks
+- **`burntout install-hooks`** installs the shell and Claude Code hooks
   (ADR-0003).
-- **`burnout update`** is manual, or an opt-in weekly check (local-first: no
+- **`burntout update`** is manual, or an opt-in weekly check (local-first: no
   network calls unless asked). It:
   - verifies the pinned-key signature and checksum before touching anything;
   - **rejects versions ≤ the current one** unless `--allow-downgrade` is
     given, so it can't be rolled back to a vulnerable release;
-  - **keeps the previous binary**, so `burnout update --to vX` can roll back;
+  - **keeps the previous binary**, so `burntout update --to vX` can roll back;
   - offers a **beta channel** of GitHub pre-releases
     (`--channel beta`).
 
@@ -167,9 +167,9 @@ keyless signing, and GitHub artifact attestations.
   |--------------|--------------------|
   | Script/tarball (user prefix) | downloads, verifies, swaps the binary atomically (rename on Unix; rename the running exe aside and move the new one in on Windows) |
   | `.deb` / `.rpm` / `.msi` (root-owned paths) | downloads and verifies the new package, then asks the user to install it (or prompts for elevation). It never writes to system paths itself |
-  | macOS `.app` | automatic updates **only notify**. Re-signing needs the user present (see below), so the update applies when they run `burnout update` |
+  | macOS `.app` | automatic updates **only notify**. Re-signing needs the user present (see below), so the update applies when they run `burntout update` |
 
-- **`burnout uninstall`** removes the service, hooks and extension
+- **`burntout uninstall`** removes the service, hooks and extension
   manifests. With `--purge` it also removes all data (ADR-0007).
 
 ### Release policy
@@ -185,7 +185,7 @@ keyless signing, and GitHub artifact attestations.
 
 Laya weights (ADR-0006) are mirrored as assets on a dedicated `models-*`
 release in this repo, with LICENSE/NOTICE included. Apache-2.0 permits
-redistribution. `burnout model pull laya` fetches them pinned by SHA-256,
+redistribution. `burntout model pull laya` fetches them pinned by SHA-256,
 and the hashes ship inside the signed binary. Files must stay under
 GitHub's 2 GiB per-asset limit, which the ONNX builds do.
 
@@ -203,7 +203,7 @@ GitHub's 2 GiB per-asset limit, which the ONNX builds do.
 | Dimension | Assessment |
 |-----------|------------|
 | Discoverability | Lower: users come via the repo |
-| Updates | We own them (`burnout update`) |
+| Updates | We own them (`burntout update`) |
 | Maintenance | Low: one pipeline, one place |
 | Policy exposure | None beyond OS code-signing rules |
 | Trust | Good: pinned-key signatures verifiable with built-in tools; provenance next to the source |
@@ -237,7 +237,7 @@ authenticity. The OS-level gates are handled like this:
      downloads with `curl`, which doesn't set the quarantine flag. For the
      `.dmg`, document System Settings → Privacy & Security → "Open Anyway".
   2. *TCC permissions reset on every update*, because an ad-hoc signature's
-     identity is the binary hash. Fix: `burnout setup-signing` creates a
+     identity is the binary hash. Fix: `burntout setup-signing` creates a
      **self-signed code-signing certificate in the user's own login
      keychain**, and the `.app` is re-signed with it on install and update.
      The signing identity stays stable, so permissions survive updates. This
@@ -283,9 +283,9 @@ authenticity. The OS-level gates are handled like this:
 2. [x] Release workflow on `v*` tags: pinned-key signing in a protected environment with required reviewers, `actions/attest-build-provenance`, Actions pinned by SHA, least-privilege `permissions:`.
 3. [ ] Generate the ECDSA P-256 *current* and *next* keys (key ceremony, `packaging/README.md`). [x] Embed both public keys (placeholders until then); document rotation.
 4. [x] `install.sh` / `install.ps1`: pinned-key verification with `openssl` / .NET, user-prefix install, manual-steps docs.
-5. [x] `burnout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only; opt-in weekly check.
-6. [x] `burnout service install|uninstall|status` for launchd, systemd `--user` and a Windows logon task, definitions rendered by the binary.
-7. [ ] `burnout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
+5. [x] `burntout update`: install-type detection, downgrade protection, previous-binary retention, `--to`, `--channel beta`, macOS notify-only; opt-in weekly check.
+6. [x] `burntout service install|uninstall|status` for launchd, systemd `--user` and a Windows logon task, definitions rendered by the binary.
+7. [ ] `burntout setup-signing`: self-signed cert, key ACL restricted to `codesign` with per-use confirmation, re-sign only on user-initiated install/update.
 8. [ ] Apply to SignPath Foundation for Windows.
 9. [ ] CI matrix for the supported platforms (ADR-0001 compatibility matrix).
 10. [ ] `models-laya-<ver>` release with mirrored weights + LICENSE/NOTICE; SHA-256s compiled into the binary.

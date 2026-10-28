@@ -7,7 +7,7 @@ import (
 	_ "time/tzdata" // the clock-change zones, on Windows too
 	"unicode"
 
-	"github.com/kshitijdhara/burnout-tracker/internal/domain/schedule"
+	"github.com/kshitijdhara/burntout/internal/domain/schedule"
 )
 
 const (

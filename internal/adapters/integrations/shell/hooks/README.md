@@ -1,6 +1,6 @@
 # Shell hook scripts
 
-`burnout install-hooks` renders these with the binary's path and the
+`burntout install-hooks` renders these with the binary's path and the
 subcommand allowlist, and installs them. See
 docs/system-design.md §4.2 and docs/privacy-and-security.md §4.2.
 
